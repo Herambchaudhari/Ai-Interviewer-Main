@@ -35,14 +35,37 @@ _COMPANY_TOPICS: dict[str, list[str]] = {
 }
 
 _ROLE_TOPICS: dict[str, list[str]] = {
-    "backend engineer":   ["REST API Design", "Database Optimization", "Caching", "Concurrency"],
-    "frontend engineer":  ["React Performance", "Browser Rendering", "State Management", "Web Security"],
-    "full stack":         ["API Integration", "Database Design", "React/Vue", "Deployment"],
-    "ml engineer":        ["Model Deployment", "Feature Engineering", "MLOps", "Math Intuition"],
-    "data engineer":      ["ETL Pipelines", "Data Warehousing", "Spark/Hadoop", "SQL Optimization"],
-    "devops engineer":    ["CI/CD", "Container Orchestration", "Cloud Infrastructure", "Monitoring"],
-    "software engineer":  ["OOP Principles", "Data Structures", "System Design", "Clean Code"],
+    "backend":           ["REST API Design", "Database Optimization", "Caching", "Concurrency"],
+    "frontend":          ["React Performance", "Browser Rendering", "State Management", "Web Security"],
+    "full stack":        ["API Integration", "Database Design", "React/Vue", "Deployment"],
+    "ml":                ["Model Deployment", "Feature Engineering", "MLOps", "Math Intuition"],
+    "data":              ["ETL Pipelines", "Data Warehousing", "Spark/Hadoop", "SQL Optimization"],
+    "devops":            ["CI/CD", "Container Orchestration", "Cloud Infrastructure", "Monitoring"],
+    "mobile":            ["App Architecture", "Performance", "Offline Sync", "Device Constraints"],
+    "software engineer": ["OOP Principles", "Data Structures", "System Design", "Clean Code"],
 }
+
+
+def _normalize_role_key(job_role: str) -> str:
+    role_lower = (job_role or "").lower()
+
+    if any(term in role_lower for term in ("frontend", "front end", "ui engineer", "ui developer", "web developer", "web engineer")):
+        return "frontend"
+    if any(term in role_lower for term in ("backend", "back end", "api engineer", "api developer", "server engineer", "server developer")):
+        return "backend"
+    if any(term in role_lower for term in ("full stack", "full-stack")):
+        return "full stack"
+    if any(term in role_lower for term in ("ml engineer", "machine learning", "ai engineer", "ai developer")):
+        return "ml"
+    if any(term in role_lower for term in ("data engineer", "analytics engineer", "data platform", "data developer")):
+        return "data"
+    if any(term in role_lower for term in ("devops", "platform engineer", "site reliability", "sre", "cloud engineer")):
+        return "devops"
+    if any(term in role_lower for term in ("mobile", "android", "ios", "flutter", "react native")):
+        return "mobile"
+    if "software engineer" in role_lower or "software developer" in role_lower:
+        return "software engineer"
+    return ""
 
 
 def _get_company_critical_topics(target_company: str, job_role: str, round_type: str) -> list[str]:
@@ -55,12 +78,7 @@ def _get_company_critical_topics(target_company: str, job_role: str, round_type:
             break
     company_topics = _COMPANY_TOPICS.get(company_key, _COMPANY_TOPICS["default"])
 
-    role_key = ""
-    role_lower = (job_role or "").lower()
-    for key in _ROLE_TOPICS:
-        if key in role_lower:
-            role_key = key
-            break
+    role_key = _normalize_role_key(job_role)
     role_topics = _ROLE_TOPICS.get(role_key, [])
 
     # DSA/HR rounds don't need the full company topic injection
@@ -282,6 +300,7 @@ def _finalize(q: dict) -> dict:
     q.setdefault("id", "q_" + str(uuid.uuid4())[:6])
     q.setdefault("type", "speech")
     q.setdefault("topic", q.get("topic", "General"))
+    q.setdefault("category", q.get("topic", "General"))
     q.setdefault("question_text", q.get("text", ""))
     q.setdefault("text", q.get("question_text", ""))
     q.setdefault("expected_concepts", [])

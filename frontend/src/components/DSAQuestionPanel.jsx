@@ -66,17 +66,12 @@ export default function DSAQuestionPanel({ question = {}, timeElapsed = 0, diffi
       {/* ── Examples ───────────────────────────────────────────────────── */}
       {examples.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-muted uppercase tracking-wider">Examples</p>
+          <p className="text-xs font-semibold text-muted uppercase tracking-wider">Sample Test Cases</p>
           {examples.map((ex, i) => (
             <div key={i} className="rounded-xl p-3 text-xs font-mono"
               style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid var(--color-border)' }}>
-              <p><span className="text-cyan-400 font-semibold">Input:</span>  {ex.input}</p>
-              <p><span className="text-green-400 font-semibold">Output:</span> {ex.output}</p>
-              {ex.explanation && (
-                <p className="mt-1 not-italic" style={{ color: 'var(--color-muted)' }}>
-                  <span className="text-purple-400 font-semibold">Explanation:</span> {ex.explanation}
-                </p>
-              )}
+              <p><span className="text-cyan-400 font-semibold">Sample Input:</span> {ex.input}</p>
+              <p className="mt-1"><span className="text-green-400 font-semibold">Sample Output:</span> {ex.output}</p>
             </div>
           ))}
         </div>

@@ -86,7 +86,7 @@ const DEMO_LEVEL_COL = {
   'Not Demonstrated': '#ef4444',
   'Not Tested':       '#6b7280',
 }
-const ROUND_LABELS = { technical: 'Technical', hr: 'HR / Behavioural', dsa: 'DSA / Coding', system_design: 'System Design' }
+const ROUND_LABELS = { technical: 'Technical', hr: 'HR / Behavioural', dsa: 'DSA / Coding', mcq_practice: 'MCQ Practice', system_design: 'Legacy System Design' }
 
 function scoreColor(s) {
   if (s >= 80) return '#10b981'

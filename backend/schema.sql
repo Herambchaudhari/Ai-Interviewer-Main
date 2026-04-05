@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     id                     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id                TEXT NOT NULL,
     profile_id             UUID REFERENCES profiles(id),
-    round_type             TEXT NOT NULL CHECK (round_type IN ('technical','hr','dsa','system_design')),
+    round_type             TEXT NOT NULL CHECK (round_type IN ('technical','hr','dsa','mcq_practice')),
     difficulty             TEXT NOT NULL CHECK (difficulty IN ('easy','medium','hard')),
     num_questions          INT DEFAULT 5,
     timer_minutes          INT DEFAULT 30,

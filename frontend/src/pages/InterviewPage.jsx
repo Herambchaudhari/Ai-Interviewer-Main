@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { getReportRoute } from '../lib/routes'
 
-const ROUND_LABELS = { technical: 'Technical', hr: 'HR Round', dsa: 'DSA', system_design: 'System Design' }
+const ROUND_LABELS = { technical: 'Technical', hr: 'HR Round', dsa: 'DSA', mcq_practice: 'MCQ Practice', system_design: 'Legacy System Design' }
 const DIFF_COLORS  = { easy: 'badge-green', medium: 'badge-yellow', hard: 'badge-red' }
 
 export default function InterviewPage() {

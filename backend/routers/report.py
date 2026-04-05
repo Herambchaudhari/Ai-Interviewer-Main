@@ -36,7 +36,8 @@ _ROUND_AGENT_LABELS = {
     "technical":    "Technical",
     "hr":           "HR",
     "dsa":          "DSA",
-    "system_design": "System Design",
+    "mcq_practice": "MCQ Practice",
+    "system_design": "Legacy System Design",
 }
 
 
@@ -51,15 +52,130 @@ def _err(error: str, status: int = 400):
     )
 
 
+async def _empty_async_dict() -> dict:
+    return {}
+
+
+def _is_complete_report(report: dict) -> bool:
+    required_keys = {
+        "question_scores",
+        "per_question_analysis",
+        "category_breakdown",
+        "cv_audit",
+        "study_roadmap",
+        "communication_breakdown",
+        "what_went_wrong",
+        "thirty_day_plan",
+        "follow_up_questions",
+    }
+    return isinstance(report, dict) and all(key in report for key in required_keys)
+
+
+def _merge_per_question_analysis(question_scores: list, per_question_analysis: list) -> list:
+    merged = []
+    source = per_question_analysis or question_scores
+
+    for idx, item in enumerate(source):
+        fallback = question_scores[idx] if idx < len(question_scores) else {}
+        payload = {**fallback, **(item or {})}
+        payload.setdefault("question_id", fallback.get("question_id", f"Q{idx + 1}"))
+        payload.setdefault("question_text", fallback.get("question_text", ""))
+        payload.setdefault("score", fallback.get("score", 0))
+        payload.setdefault("verdict", fallback.get("verdict", ""))
+        payload.setdefault("answer_summary", fallback.get("answer_summary", ""))
+        payload.setdefault("category", fallback.get("category", "General"))
+        payload.setdefault("strengths", fallback.get("strengths", []))
+        payload.setdefault("improvements", fallback.get("improvements", []))
+        merged.append(payload)
+
+    return merged
+
+
+def _build_session_label(round_type: str, target_company: str = "", job_role: str = "") -> str:
+    round_label = _ROUND_AGENT_LABELS.get(round_type or "technical", "Interview")
+    role = (job_role or "").strip()
+    company = (target_company or "").strip()
+
+    if role and company:
+        return f"{round_label} - {role} @ {company}"
+    if role:
+        return f"{round_label} - {role}"
+    if company:
+        return f"{round_label} - {company}"
+    return f"{round_label} Interview"
+
+
+def _build_interview_integrity(proctoring_summary: dict | None) -> dict | None:
+    if not isinstance(proctoring_summary, dict) or not proctoring_summary:
+        return None
+
+    counts = proctoring_summary.get("counts") or {}
+    score = int(round(float(proctoring_summary.get("integrity_score", 100) or 100)))
+    total_incidents = int(proctoring_summary.get("total_incidents") or sum(
+        int(counts.get(key, 0) or 0)
+        for key in ("camera_blocked", "multiple_faces", "looking_away", "poor_posture", "phone_detected")
+    ))
+
+    blocked = int(counts.get("camera_blocked", 0) or 0)
+    multiple = int(counts.get("multiple_faces", 0) or 0)
+    gaze = int(counts.get("looking_away", 0) or 0)
+    posture = int(counts.get("poor_posture", 0) or 0)
+    phone = int(counts.get("phone_detected", 0) or 0)
+
+    if phone or blocked >= 3 or multiple >= 2 or score < 60:
+        status = "High Risk"
+    elif total_incidents >= 4 or score < 80:
+        status = "Review Recommended"
+    elif total_incidents > 0:
+        status = "Minor Concerns"
+    else:
+        status = "Clear"
+
+    highlights = []
+    if blocked:
+        highlights.append(f"Camera obstruction or face loss detected {blocked} time(s).")
+    if multiple:
+        highlights.append(f"Multiple faces were detected {multiple} time(s).")
+    if phone:
+        highlights.append(f"A phone-like device was detected {phone} time(s).")
+    if gaze:
+        highlights.append(f"Attention drift was flagged {gaze} time(s).")
+    if posture:
+        highlights.append(f"Posture drift was flagged {posture} time(s).")
+    if not highlights:
+        highlights.append("No major camera or attention concerns were detected during the session.")
+
+    uptime = proctoring_summary.get("camera_uptime_ratio")
+    uptime_text = None
+    if isinstance(uptime, (int, float)):
+        uptime_text = f"{round(uptime * 100, 1)}%"
+
+    summary = (
+        f"Integrity status: {status}. "
+        f"Integrity score: {score}/100 across {total_incidents} flagged event(s)."
+    )
+    if uptime_text:
+        summary += f" Camera visibility uptime was {uptime_text}."
+
+    return {
+        "status": status,
+        "score": score,
+        "summary": summary,
+        "highlights": highlights,
+        "total_incidents": total_incidents,
+    }
+
+
 def _mock_report(session_id: str, round_type: str = "technical") -> dict:
     return {
         "session_id":    session_id,
         "overall_score": 72,
         "round_type":    round_type,
         "interview_agent": _ROUND_AGENT_LABELS.get(round_type, "Technical"),
+        "session_label": f"{_ROUND_AGENT_LABELS.get(round_type, 'Interview')} Interview",
         "grade": "B+",
         "hire_recommendation": "Yes",
-        "summary": "Solid overall performance. Focus on system design to level up.",
+        "summary": "Solid overall performance. Focus on faster, more accurate screening decisions to level up.",
         "radar_scores": {
             "OOP & Design Patterns": 70, "Data Structures & Algorithms": 65,
             "DBMS & SQL": 72, "OS & CN Concepts": 55,
@@ -76,19 +192,19 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
             "Relevance": 80, "Example Quality": 60,
         },
         "strong_areas": [{"area": "Communication", "evidence": "Explained concepts clearly.", "score": 80}],
-        "weak_areas":   [{"area": "System design depth", "what_was_missed": "Scalability trade-offs", "how_to_improve": "Study ByteByteGo.", "score": 45}],
-        "what_went_wrong": "Candidate struggled with depth in system design and distributed systems concepts.",
+        "weak_areas":   [{"area": "Screening accuracy", "what_was_missed": "Missed a few core fundamentals under time pressure", "how_to_improve": "Review explanations and practice timed company-style MCQs.", "score": 45}],
+        "what_went_wrong": "Candidate lost points on accuracy and concept recall under screening-style time pressure.",
         "swot": {
             "strengths":     ["Clear communication", "Good OOP knowledge"],
-            "weaknesses":    ["System design depth", "Distributed systems"],
+            "weaknesses":    ["Screening accuracy", "Timed concept recall"],
             "opportunities": ["Strong communication can shine in HR rounds"],
-            "threats":       ["Weak system design will block FAANG-level interviews"],
+            "threats":       ["Weak screening accuracy can block early-round shortlisting"],
         },
         "per_question_analysis": [],
-        "study_recommendations": [{"topic": "System Design", "priority": "High", "resources": ["ByteByteGo"], "reason": "Biggest gap."}],
+        "study_recommendations": [{"topic": "Company-Specific Screening Prep", "priority": "High", "resources": ["LeetCode Discuss", "GeeksForGeeks"], "reason": "Biggest gap."}],
         "thirty_day_plan": {"week_1": [], "week_2": [], "week_3": [], "week_4": []},
         "follow_up_questions": [],
-        "skills_to_work_on": [{"skill": "System Design", "priority": "High", "reason": "Scored lowest", "resources": ["ByteByteGo"]}],
+        "skills_to_work_on": [{"skill": "MCQ Decision Accuracy", "priority": "High", "reason": "Scored lowest", "resources": ["LeetCode Discuss", "GeeksForGeeks"]}],
         "hire_signal": {
             "technical_depth":  {"score": 6, "rationale": "Solid basics, gaps in depth."},
             "communication":    {"score": 8, "rationale": "Articulate and structured."},
@@ -112,6 +228,8 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
         "auto_resources": [],
         "improvement_vs_last": None,
         "confidence_score": 70,
+        "proctoring_summary": None,
+        "interview_integrity": None,
         "is_mock": True,
     }
 
@@ -235,23 +353,41 @@ async def _generate_report_sse(session_id: str, user_id: str):
                         sm = {}
                 student_meta = sm
                 companies = student_meta.get("target_companies") or []
-                target_company = session.get("target_company") or (companies[0] if companies else "")
+                target_company = session.get("target_company") or profile_parsed.get("target_company") or (companies[0] if companies else "")
     except Exception as e:
         print(f"[report/sse] Profile fetch failed: {e}")
 
     round_type = session.get("round_type", "technical")
     difficulty = session.get("difficulty", "medium")
-    job_role = session.get("job_role") or "Software Engineer"
+    context_bundle = dict(session.get("context_bundle") or {})
+    job_role = session.get("target_role") or session.get("job_role") or context_bundle.get("job_role") or profile_parsed.get("job_role") or "Software Engineer"
     candidate_year = student_meta.get("year", "")
+    session_label = (
+        context_bundle.get("session_label")
+        or _build_session_label(
+            round_type=round_type,
+            target_company=target_company,
+            job_role=job_role,
+        )
+    )
+    proctoring_summary = context_bundle.get("proctoring_summary") if isinstance(context_bundle, dict) else None
+    interview_integrity = _build_interview_integrity(proctoring_summary)
 
     # ── Build question_scores from transcript ─────────────────────────────────
     transcript: list = session.get("transcript") or []
     question_scores = []
     for entry in transcript:
+        answer_text = entry.get("answer", "")
+        if entry.get("question_type") == "mcq":
+            selected = entry.get("selected_option") or answer_text or "No option selected"
+            correct = entry.get("correct_option") or ""
+            answer_text = f"Selected: {selected}"
+            if correct:
+                answer_text += f" | Correct: {correct}"
         question_scores.append({
             "question_id":        entry.get("question_id", ""),
             "question_text":      entry.get("question", ""),
-            "answer_text":        entry.get("answer", ""),
+            "answer_text":        answer_text,
             "score":              entry.get("score") or 0,
             "feedback":           entry.get("feedback", ""),
             "strengths":          entry.get("strengths", []),
@@ -261,6 +397,7 @@ async def _generate_report_sse(session_id: str, user_id: str):
             "answer_summary":     entry.get("answer_summary", ""),
             "category":           entry.get("category", round_type),
             "red_flag_detected":  entry.get("red_flag_detected", ""),
+            "question_type":      entry.get("question_type", "speech"),
         })
 
     valid_scores = [q["score"] for q in question_scores if q["score"]]
@@ -308,7 +445,7 @@ async def _generate_report_sse(session_id: str, user_id: str):
         strong_areas=[],
         target_company=target_company,
         job_role=job_role,
-    ) if target_company else asyncio.coroutine(lambda: {})()
+    ) if target_company else _empty_async_dict()
 
     yield _sse({"stage": "core_analysis", "progress": 25, "label": "Analyzing performance depth..."})
 
@@ -324,6 +461,11 @@ async def _generate_report_sse(session_id: str, user_id: str):
         cv_result = {}
     if isinstance(company_fit_prelim, Exception):
         company_fit_prelim = {}
+
+    per_question_analysis = _merge_per_question_analysis(
+        question_scores,
+        core_result.get("per_question_analysis", question_scores),
+    )
 
     # Now rerun company_fit with actual radar scores from core
     radar_scores = core_result.get("radar_scores", {})
@@ -417,6 +559,7 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "round_type":           round_type,
         "difficulty":           difficulty,
         "interview_agent":      _ROUND_AGENT_LABELS.get(round_type, "Technical"),
+        "session_label":        session_label,
         "target_company":       target_company,
         "candidate_name":       profile_parsed.get("name") or "Candidate",
         "timer_mins":           session.get("timer_mins", session.get("timer_minutes", 30)),
@@ -444,7 +587,7 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "failure_patterns":     core_result.get("failure_patterns", []),
 
         # Per-question
-        "per_question_analysis": core_result.get("per_question_analysis", question_scores),
+        "per_question_analysis": per_question_analysis,
         "question_scores":      question_scores,
         "skill_ratings":        [{"skill": k, "score": v} for k, v in radar_scores.items()],
 
@@ -476,6 +619,8 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "filler_heatmap":         filler_heatmap,
         "transcript_annotated":   transcript_annotated,
         "audio_clips_index":      None,  # populated separately if audio stored
+        "proctoring_summary":     proctoring_summary,
+        "interview_integrity":    interview_integrity,
 
         # ── NEW: Company Fit Calibration (Phase 3) ──
         "company_fit":            company_fit or None,
@@ -522,7 +667,7 @@ async def get_or_generate_report(
     # Check cache first
     try:
         cached = get_report(session_id)
-        if cached:
+        if cached and _is_complete_report(cached):
             return _ok(data=cached)
     except RuntimeError:
         return _ok(data=_mock_report(session_id))
@@ -561,8 +706,8 @@ async def get_cached_report(
     """Return cached report only. Returns 404 if not yet generated."""
     try:
         cached = get_report(session_id)
-        if not cached:
-            return _err("Report not yet generated.", status=404)
+        if not cached or not _is_complete_report(cached):
+            return _err("Full report not yet generated.", status=404)
         if cached.get("session_id"):
             session = get_session(session_id)
             if session and session.get("user_id") != user["user_id"]:

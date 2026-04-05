@@ -268,6 +268,147 @@ async def search_company_trends(company_name: str) -> str:
     return "\n".join(snippets)
 
 
+# ── Public API: Company-Specific CS Fundamental Questions ──────────────────────
+_CS_FUNDAMENTALS_STATIC_FALLBACK = """
+- OOP: Explain polymorphism vs inheritance. What is SOLID? When would you violate the Open/Closed Principle?
+- DBMS: Explain ACID properties. Difference between clustered and non-clustered indexes. What is database normalization (1NF, 2NF, 3NF)?
+- OS: Explain process vs. thread. What is a deadlock? How does virtual memory and paging work?
+- CN: Explain TCP vs. UDP. What happens when you type a URL into a browser? How does DNS resolution work?
+- DSA: Time complexity of common sorting algorithms. BFS vs DFS. When to use a hash map vs a balanced BST?
+- System Design: Explain CAP theorem. How does load balancing work? What is horizontal vs vertical scaling?
+- Algorithms: Explain dynamic programming vs. greedy. What is amortized analysis? Explain Big-O, Big-Theta, Big-Omega.
+"""
+
+
+async def search_company_interview_questions(company_name: str, job_role: str) -> str:
+    """
+    Fetch live CS fundamental and technical interview question patterns
+    for a specific company and job role via the 3-tier search pipeline.
+
+    Returns a formatted text string for injection into the interviewer prompt.
+    Degrades gracefully to a static CS fundamentals list if all providers fail.
+    """
+    if not company_name:
+        return _CS_FUNDAMENTALS_STATIC_FALLBACK.strip()
+
+    queries = [
+        f"{company_name} {job_role} technical interview questions CS fundamentals OOP DBMS OS 2025",
+        f"{company_name} software engineer interview frequently asked questions data structures algorithms",
+        f"{company_name} coding interview round questions operating systems networking database",
+    ]
+
+    all_snippets = []
+    for query in queries:
+        try:
+            results = await _fetch_with_fallback(query)
+            for r in results[:2]:
+                body = r.get("body", "")
+                title = r.get("title", "")
+                if body and len(body) > 30:
+                    all_snippets.append(f"- [{title}]: {body[:350]}")
+        except Exception:
+            pass
+        if len(all_snippets) >= 5:
+            break
+
+    if not all_snippets:
+        print(f"[web_researcher] No live interview questions found for '{company_name}' — using static CS fundamentals")
+        return _CS_FUNDAMENTALS_STATIC_FALLBACK.strip()
+
+    header = f"Live Technical Interview Intelligence for {company_name} ({job_role}):"
+    return header + "\n" + "\n".join(all_snippets[:6])
+
+
+_CODING_OA_STATIC_FALLBACK = """
+- Arrays / hashing: two-sum style lookups, frequency counting, sliding window.
+- Strings: substring scans, anagram grouping, character replacement, stack-based parsing.
+- Trees / graphs: BFS, DFS, shortest path basics, topological ordering.
+- Binary search: search on answer, lower/upper bound, rotated sorted arrays.
+- Dynamic programming: knapsack variants, LIS, grid path counting, memoized recursion.
+- OA expectations: clean helper functions, edge-case handling, and clear complexity explanation.
+"""
+
+
+async def search_company_coding_questions(company_name: str, job_role: str) -> str:
+    """
+    Fetch recent OA / coding-round patterns for a specific company and role.
+    Uses Tavily first via the shared fallback chain and degrades to a static OA guide.
+    """
+    if not company_name:
+        return _CODING_OA_STATIC_FALLBACK.strip()
+
+    queries = [
+        f"{company_name} {job_role} online assessment coding questions 2025",
+        f"{company_name} software engineer OA recent coding questions arrays graphs dynamic programming",
+        f"{company_name} coding round asked questions leetcode style 2025",
+    ]
+
+    all_snippets = []
+    for query in queries:
+        try:
+            results = await _fetch_with_fallback(query)
+            for r in results[:2]:
+                body = r.get("body", "")
+                title = r.get("title", "")
+                if body and len(body) > 30:
+                    all_snippets.append(f"- [{title}]: {body[:320]}")
+        except Exception:
+            pass
+        if len(all_snippets) >= 5:
+            break
+
+    if not all_snippets:
+        print(f"[web_researcher] No live coding intelligence found for '{company_name}' - using static OA fallback")
+        return _CODING_OA_STATIC_FALLBACK.strip()
+
+    header = f"Live Coding / OA Intelligence for {company_name} ({job_role}):"
+    return header + "\n" + "\n".join(all_snippets[:6])
+
+
+_MCQ_PRACTICE_STATIC_FALLBACK = """
+- Company screening patterns: role-focused CS fundamentals, debugging scenarios, resume-project architecture questions, and short applied knowledge checks.
+- Core CS: OOP principles, DBMS queries and normalization, OS concurrency basics, networking fundamentals, API behavior, caching, and security basics.
+- Resume grounding: ask about actual project stack, ownership, design decisions, testing, deployment, and production issues from the candidate profile.
+- Assessment style: 4-option MCQs with one correct answer, concise scenario framing, and explanations that teach the concept after submission.
+"""
+
+
+async def search_company_mcq_topics(company_name: str, job_role: str) -> str:
+    """
+    Fetch recent company-specific MCQ / screening / technical-assessment signals.
+    Used to bias the MCQ practice round toward realistic company patterns.
+    """
+    if not company_name:
+        return _MCQ_PRACTICE_STATIC_FALLBACK.strip()
+
+    queries = [
+        f"{company_name} {job_role} online assessment MCQ technical screening questions 2025",
+        f"{company_name} software engineer screening test MCQ topics OOP DBMS OS networking 2025",
+        f"{company_name} interview assessment asked topics resume based technical questions 2025",
+    ]
+
+    all_snippets = []
+    for query in queries:
+        try:
+            results = await _fetch_with_fallback(query)
+            for r in results[:2]:
+                body = r.get("body", "")
+                title = r.get("title", "")
+                if body and len(body) > 30:
+                    all_snippets.append(f"- [{title}]: {body[:320]}")
+        except Exception:
+            pass
+        if len(all_snippets) >= 5:
+            break
+
+    if not all_snippets:
+        print(f"[web_researcher] No live MCQ intelligence found for '{company_name}' - using static screening fallback")
+        return _MCQ_PRACTICE_STATIC_FALLBACK.strip()
+
+    header = f"Live MCQ / Screening Intelligence for {company_name} ({job_role}):"
+    return header + "\n" + "\n".join(all_snippets[:6])
+
+
 # ── URL Scraper (Jina Reader) ──────────────────────────────────────────────────
 async def scrape_links(links_dict: Dict[str, str]) -> Dict[str, str]:
     """

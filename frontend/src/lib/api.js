@@ -1,7 +1,11 @@
 import axios from 'axios'
 import { supabase } from './supabase'
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// BASE_URL: empty string = use Vite proxy (relative URLs); fallback only if env is completely absent
+const BASE_URL = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== '')
+  ? import.meta.env.VITE_API_URL
+  : ''
+
 
 // ── Axios Instance ─────────────────────────────────────────────────────────
 const api = axios.create({ baseURL: `${BASE_URL}/api/v1` })
@@ -159,12 +163,12 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
   const url = `${BASE_URL}/api/v1/report/${sessionId}`
   let response
   try {
-    response = await fetch(url, {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : '',
-        Accept: 'text/event-stream, application/json',
-      },
-    })
+    const headers = { Accept: 'text/event-stream, application/json' }
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+
+    response = await fetch(url, { headers })
   } catch (e) {
     onError(e.message || 'Network error')
     return

@@ -158,8 +158,8 @@ Return ONLY valid JSON. No markdown, no text outside the JSON:
     }}
   ],
 
-  "next_interview_blueprint": {{
-    "round_type":    "<technical|dsa|hr|system_design>",
+    "next_interview_blueprint": {{
+    "round_type":    "<technical|dsa|hr|mcq_practice>",
     "difficulty":    "<easy|medium|hard>",
     "focus_topics":  ["<specific topic 1>", "<specific topic 2>"],
     "reason":        "<1-2 sentences on why this config is the best next step for their growth>",
