@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Frontend (Vite)",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["-c", "export PATH=/opt/homebrew/bin:$PATH && cd frontend && npm run dev"],
+      "port": 5173
+    },
+    {
+      "name": "Backend (FastAPI)",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["-c", "cd backend && python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --loop asyncio"],
+      "port": 8000
+    }
+  ]
+}

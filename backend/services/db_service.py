@@ -1,0 +1,1137 @@
+"""
+DB service — all Supabase CRUD operations for the AI Interviewer app.
+Single global Supabase client initialised lazily.
+"""
+import os
+import uuid
+import json
+from datetime import datetime, timezone
+from typing import Optional
+from supabase import create_client, Client
+
+_client: Optional[Client] = None
+
+
+# ── Init ──────────────────────────────────────────────────────────────────────
+def init_supabase() -> Client:
+    """
+    Initialise (or return cached) Supabase client using env vars:
+        SUPABASE_URL, SUPABASE_KEY (service-role key for server-side ops)
+    """
+    global _client
+    if _client is None:
+        url = os.environ.get("SUPABASE_URL", "")
+        key = os.environ.get("SUPABASE_KEY", os.environ.get("SUPABASE_SERVICE_ROLE_KEY", ""))
+        if not url or not key:
+            raise RuntimeError(
+                "SUPABASE_URL and SUPABASE_KEY must be set in the environment."
+            )
+        _client = create_client(url, key)
+    return _client
+
+
+def _db() -> Client:
+    """Shorthand — returns initialised client."""
+    return init_supabase()
+
+
+# ── Profiles ──────────────────────────────────────────────────────────────────
+def save_profile(user_id: str, raw_text: str, parsed_data: dict) -> str:
+    """
+    Insert a new row into the 'profiles' table.
+    Returns the generated profile_id (UUID string).
+    """
+    profile_id = str(uuid.uuid4())
+    _db().table("profiles").insert({
+        "id": profile_id,
+        "user_id": user_id,
+        "raw_text": raw_text,
+        "parsed_data": parsed_data,          # supabase-py serialises dict → jsonb
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }).execute()
+    return profile_id
+
+
+def get_profile(profile_id: str) -> Optional[dict]:
+    """
+    Fetch a profile row by its UUID.
+    Returns the row dict or None if not found.
+    """
+    res = _db().table("profiles").select("*").eq("id", profile_id).limit(1).execute()
+    if res.data:
+        return res.data[0]
+    return None
+
+
+# ── Sessions ──────────────────────────────────────────────────────────────────
+def save_session(session_data: dict) -> str:
+    """
+    Insert a new interview session row.
+    Expects session_data to include: user_id, profile_id, round_type, difficulty,
+    num_questions, timer_minutes, questions (list).
+    Returns the generated session_id.
+    """
+    session_id = str(uuid.uuid4())
+    
+    # Map timer_mins => timer_minutes correctly for DB schema
+    if "timer_mins" in session_data and "timer_minutes" not in session_data:
+        session_data["timer_minutes"] = session_data.pop("timer_mins")
+
+    # Phase 2: Filter payload to ONLY include columns that exist in the DB schema
+    ALLOWED_COLUMNS = {
+        "id", "user_id", "profile_id", "round_type", "difficulty", "num_questions", 
+        "timer_minutes", "status", "questions", "transcript", "scores", 
+        "current_question_index", "ended_at", "end_reason", "created_at"
+    }
+    
+    payload = {
+        "id": session_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "active",
+    }
+    for k, v in session_data.items():
+        if k in ALLOWED_COLUMNS:
+            payload[k] = v
+
+    # Serialise lists/dicts that need to go in jsonb columns
+    for key in ("questions", "answers", "transcript", "scores"):
+        if key in payload and not isinstance(payload[key], str):
+            payload[key] = payload[key]   # supabase-py handles dicts natively
+    try:
+        _db().table("sessions").insert(payload).execute()
+    except Exception as e:
+        print(f"Failed to save session to Supabase: {e}")
+        raise e
+    return session_id
+
+
+def get_session(session_id: str) -> Optional[dict]:
+    """Fetch a session by UUID."""
+    res = _db().table("sessions").select("*").eq("id", session_id).limit(1).execute()
+    if res.data:
+        return res.data[0]
+    return None
+
+
+def update_session(session_id: str, updates: dict) -> bool:
+    """
+    Partially update a session row.
+    Returns True if at least one row was updated.
+    """
+    res = _db().table("sessions").update(updates).eq("id", session_id).execute()
+    return bool(res.data)
+
+
+# ── Reports ───────────────────────────────────────────────────────────────────
+def save_report(session_id: str, report_data: dict) -> str:
+    """
+    Insert a report row linked to a session.
+    Returns the generated report_id.
+    """
+    report_id = str(uuid.uuid4())
+    _db().table("reports").insert({
+        "id": report_id,
+        "session_id": session_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        **report_data,
+    }).execute()
+    return report_id
+
+
+def get_report(session_id: str) -> Optional[dict]:
+    """Fetch the report for a given session_id."""
+    res = _db().table("reports").select("*").eq("session_id", session_id).limit(1).execute()
+    if res.data:
+        return res.data[0]
+    return None
+
+
+def get_user_reports(user_id: str) -> list:
+    """
+    Fetch all completed sessions for a user that have associated reports.
+    Returns merged list of session + report data for the dashboard history table.
+    """
+    try:
+        # Get all completed sessions for this user
+        sessions_res = (
+            _db()
+            .table("sessions")
+            .select("id, round_type, difficulty, num_questions, status, created_at, ended_at")
+            .eq("user_id", user_id)
+            .eq("status", "completed")
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        sessions = sessions_res.data or []
+        if not sessions:
+            return []
+
+        # Get reports for these sessions
+        session_ids = [s["id"] for s in sessions]
+        reports_res = (
+            _db()
+            .table("reports")
+            .select("session_id, overall_score, grade, created_at")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+        reports_map = {r["session_id"]: r for r in (reports_res.data or [])}
+
+        # Merge
+        merged = []
+        for s in sessions:
+            r = reports_map.get(s["id"], {})
+            merged.append({
+                "id":            r.get("session_id", s["id"]),
+                "session_id":    s["id"],
+                "round_type":    s.get("round_type", "technical"),
+                "difficulty":    s.get("difficulty", "medium"),
+                "num_questions": s.get("num_questions", 0),
+                "overall_score": r.get("overall_score"),
+                "grade":         r.get("grade"),
+                "created_at":    s.get("created_at"),
+                "status":        s.get("status"),
+            })
+        return merged
+    except Exception:
+        return []
+
+
+def get_user_sessions(user_id: str) -> list:
+    """Return all sessions (with or without reports) for a user."""
+    try:
+        res = (
+            _db()
+            .table("sessions")
+            .select("id, round_type, difficulty, num_questions, status, created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        return res.data or []
+    except Exception:
+        return []
+
+
+# ── Context Hub ───────────────────────────────────────────────────────────────
+
+def get_hub_reports(user_id: str, round_type: Optional[str] = None,
+                    difficulty: Optional[str] = None, sort_order: str = "desc") -> list:
+    """
+    Fetch all completed sessions + their report summaries for the hub spreadsheet.
+    Returns merged list with session + report fields.
+    """
+    try:
+        q = (
+            _db().table("sessions")
+            .select("id, round_type, difficulty, num_questions, created_at, ended_at")
+            .eq("user_id", user_id)
+            .eq("status", "completed")
+        )
+        if round_type:
+            q = q.eq("round_type", round_type)
+        if difficulty:
+            q = q.eq("difficulty", difficulty)
+        q = q.order("created_at", desc=(sort_order == "desc")).limit(100)
+        sessions = q.execute().data or []
+
+        if not sessions:
+            return []
+
+        session_ids = [s["id"] for s in sessions]
+        reports_res = (
+            _db().table("reports")
+            .select("session_id, id, overall_score, grade, weak_areas, summary, "
+                    "interviewer_name, weak_parts_summary, strong_areas, study_recommendations")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+        reports_map = {r["session_id"]: r for r in (reports_res.data or [])}
+
+        merged = []
+        for s in sessions:
+            r = reports_map.get(s["id"], {})
+            # Build weak_parts list from weak_areas JSONB
+            raw_weak = r.get("weak_areas") or []
+            if isinstance(raw_weak, str):
+                try:
+                    import json as _json
+                    raw_weak = _json.loads(raw_weak)
+                except Exception:
+                    raw_weak = []
+            weak_parts = [w.get("area", "") for w in raw_weak if isinstance(w, dict)]
+            what_went_wrong = "; ".join(
+                w.get("what_was_missed", "") for w in raw_weak
+                if isinstance(w, dict) and w.get("what_was_missed")
+            )
+            merged.append({
+                "session_id":       s["id"],
+                "report_id":        r.get("id"),
+                "session_date":     s.get("created_at"),
+                "round_type":       s.get("round_type"),
+                "difficulty":       s.get("difficulty"),
+                "num_questions":    s.get("num_questions"),
+                "overall_score":    r.get("overall_score"),
+                "grade":            r.get("grade"),
+                "weak_parts":       weak_parts,
+                "what_went_wrong":  what_went_wrong,
+                "interviewer_name": r.get("interviewer_name", "Groq / LLaMA-3.3"),
+                "summary":          r.get("summary", ""),
+            })
+        return merged
+    except Exception as e:
+        print(f"[get_hub_reports] error: {e}")
+        return []
+
+
+def get_analytics(user_id: str) -> dict:
+    """
+    Aggregate performance stats for the hub analytics section.
+    """
+    try:
+        rows = get_hub_reports(user_id, sort_order="asc")  # asc for trend chart
+        if not rows:
+            return {
+                "total_interviews": 0,
+                "average_score": 0,
+                "best_round_type": None,
+                "win_rate": 0,
+                "score_trend": [],
+                "by_round_type": {},
+                "by_difficulty": {},
+            }
+
+        total = len(rows)
+        scores = [r["overall_score"] for r in rows if r["overall_score"] is not None]
+        avg_score = round(sum(scores) / len(scores), 1) if scores else 0
+        wins = sum(1 for s in scores if s >= 70)
+        win_rate = round(wins / len(scores), 2) if scores else 0
+
+        # By round type
+        by_round: dict = {}
+        for r in rows:
+            rt = r["round_type"] or "technical"
+            if rt not in by_round:
+                by_round[rt] = {"count": 0, "scores": []}
+            by_round[rt]["count"] += 1
+            if r["overall_score"] is not None:
+                by_round[rt]["scores"].append(r["overall_score"])
+        by_round_summary = {
+            rt: {
+                "count": v["count"],
+                "avg_score": round(sum(v["scores"]) / len(v["scores"]), 1) if v["scores"] else 0,
+            }
+            for rt, v in by_round.items()
+        }
+        best_round = max(by_round_summary, key=lambda rt: by_round_summary[rt]["avg_score"]) \
+            if by_round_summary else None
+
+        # By difficulty
+        by_diff: dict = {}
+        for r in rows:
+            d = r["difficulty"] or "medium"
+            if d not in by_diff:
+                by_diff[d] = {"count": 0, "scores": []}
+            by_diff[d]["count"] += 1
+            if r["overall_score"] is not None:
+                by_diff[d]["scores"].append(r["overall_score"])
+        by_diff_summary = {
+            d: {
+                "count": v["count"],
+                "avg_score": round(sum(v["scores"]) / len(v["scores"]), 1) if v["scores"] else 0,
+            }
+            for d, v in by_diff.items()
+        }
+
+        # Score trend (chronological)
+        score_trend = [
+            {
+                "date": r["session_date"][:10] if r["session_date"] else "",
+                "score": r["overall_score"],
+                "round_type": r["round_type"],
+            }
+            for r in rows if r["overall_score"] is not None
+        ]
+
+        return {
+            "total_interviews": total,
+            "average_score": avg_score,
+            "best_round_type": best_round,
+            "win_rate": win_rate,
+            "score_trend": score_trend,
+            "by_round_type": by_round_summary,
+            "by_difficulty": by_diff_summary,
+        }
+    except Exception as e:
+        print(f"[get_analytics] error: {e}")
+        return {}
+
+
+def get_topics_mastery(user_id: str) -> dict:
+    """
+    Extract all topics from weak_areas + study_recommendations across reports.
+    Compute per-topic proficiency level.
+    """
+    try:
+        sessions_res = (
+            _db().table("sessions")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("status", "completed")
+            .execute()
+        )
+        session_ids = [s["id"] for s in (sessions_res.data or [])]
+        if not session_ids:
+            return {"topics": [], "ai_recommendations": []}
+
+        reports_res = (
+            _db().table("reports")
+            .select("session_id, overall_score, weak_areas, study_recommendations, created_at")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+        reports = reports_res.data or []
+
+        # Aggregate topic data
+        topic_map: dict = {}
+        rec_map: dict = {}
+
+        for rep in reports:
+            score = rep.get("overall_score") or 0
+            raw_weak = rep.get("weak_areas") or []
+            raw_recs = rep.get("study_recommendations") or []
+            session_date = (rep.get("created_at") or "")[:10]
+
+            if isinstance(raw_weak, str):
+                try:
+                    import json as _j
+                    raw_weak = _j.loads(raw_weak)
+                except Exception:
+                    raw_weak = []
+            if isinstance(raw_recs, str):
+                try:
+                    import json as _j
+                    raw_recs = _j.loads(raw_recs)
+                except Exception:
+                    raw_recs = []
+
+            for w in raw_weak:
+                if not isinstance(w, dict):
+                    continue
+                topic = (w.get("area") or "").strip()
+                if not topic:
+                    continue
+                key = topic.lower()
+                if key not in topic_map:
+                    topic_map[key] = {
+                        "topic": topic, "appearances": 0,
+                        "scores": [], "last_seen": session_date,
+                    }
+                topic_map[key]["appearances"] += 1
+                t_score = w.get("score") or score
+                topic_map[key]["scores"].append(t_score)
+                if session_date > topic_map[key]["last_seen"]:
+                    topic_map[key]["last_seen"] = session_date
+
+            for rec in raw_recs:
+                if not isinstance(rec, dict):
+                    continue
+                topic = (rec.get("topic") or "").strip()
+                if not topic:
+                    continue
+                key = topic.lower()
+                priority = rec.get("priority", "Medium")
+                resources = rec.get("resources", [])
+                reason = rec.get("reason", "")
+                # Keep highest priority recommendation per topic
+                priority_rank = {"High": 3, "Medium": 2, "Low": 1}
+                if key not in rec_map or priority_rank.get(priority, 0) > priority_rank.get(rec_map[key].get("priority"), 0):
+                    rec_map[key] = {"topic": topic, "priority": priority,
+                                    "resources": resources, "reason": reason}
+
+        def _proficiency(avg: float) -> str:
+            if avg >= 80: return "expert"
+            if avg >= 60: return "proficient"
+            if avg >= 40: return "developing"
+            return "beginner"
+
+        topics = []
+        for tm in topic_map.values():
+            avg = round(sum(tm["scores"]) / len(tm["scores"]), 1) if tm["scores"] else 0
+            topics.append({
+                "topic":       tm["topic"],
+                "appearances": tm["appearances"],
+                "avg_score":   avg,
+                "proficiency": _proficiency(avg),
+                "last_seen":   tm["last_seen"],
+            })
+        # Sort: weakest first
+        topics.sort(key=lambda t: t["avg_score"])
+
+        return {
+            "topics": topics,
+            "ai_recommendations": list(rec_map.values()),
+        }
+    except Exception as e:
+        print(f"[get_topics_mastery] error: {e}")
+        return {"topics": [], "ai_recommendations": []}
+
+
+def get_session_note(session_id: str, user_id: str) -> Optional[dict]:
+    """Fetch the note for a given session and user."""
+    try:
+        res = (
+            _db().table("session_notes")
+            .select("id, content, tags, updated_at")
+            .eq("session_id", session_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        return res.data[0] if res.data else None
+    except Exception as e:
+        print(f"[get_session_note] error: {e}")
+        return None
+
+
+def upsert_session_note(session_id: str, user_id: str, content: str, tags: list) -> str:
+    """
+    Create or update a session note.
+    Returns note_id.
+    """
+    try:
+        existing = get_session_note(session_id, user_id)
+        if existing:
+            _db().table("session_notes").update({
+                "content":    content,
+                "tags":       tags,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", existing["id"]).execute()
+            return existing["id"]
+        else:
+            note_id = str(uuid.uuid4())
+            _db().table("session_notes").insert({
+                "id":         note_id,
+                "session_id": session_id,
+                "user_id":    user_id,
+                "content":    content,
+                "tags":       tags,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+            return note_id
+    except Exception as e:
+        print(f"[upsert_session_note] error: {e}")
+        raise
+
+
+def get_applications(user_id: str, status: Optional[str] = None) -> list:
+    """List company applications for a user, optionally filtered by status."""
+    try:
+        q = (
+            _db().table("company_applications")
+            .select("*")
+            .eq("user_id", user_id)
+        )
+        if status:
+            q = q.eq("status", status)
+        res = q.order("created_at", desc=True).execute()
+        return res.data or []
+    except Exception as e:
+        print(f"[get_applications] error: {e}")
+        return []
+
+
+def create_application(user_id: str, data: dict) -> str:
+    """Insert a new company application. Returns app_id."""
+    try:
+        app_id = str(uuid.uuid4())
+        _db().table("company_applications").insert({
+            "id":              app_id,
+            "user_id":         user_id,
+            "company_name":    data["company_name"],
+            "role":            data["role"],
+            "date_applied":    data.get("date_applied"),
+            "status":          data.get("status", "applied"),
+            "outcome":         data.get("outcome"),
+            "notes":           data.get("notes", ""),
+            "linked_sessions": data.get("linked_sessions", []),
+            "created_at":      datetime.now(timezone.utc).isoformat(),
+            "updated_at":      datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        return app_id
+    except Exception as e:
+        print(f"[create_application] error: {e}")
+        raise
+
+
+def update_application(app_id: str, user_id: str, updates: dict) -> bool:
+    """Update fields on a company application. Returns True on success."""
+    try:
+        allowed = {"company_name", "role", "date_applied", "status",
+                   "outcome", "notes", "linked_sessions"}
+        payload = {k: v for k, v in updates.items() if k in allowed}
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        res = (
+            _db().table("company_applications")
+            .update(payload)
+            .eq("id", app_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as e:
+        print(f"[update_application] error: {e}")
+        return False
+
+
+def delete_application(app_id: str, user_id: str) -> bool:
+    """Hard-delete a company application."""
+    try:
+        res = (
+            _db().table("company_applications")
+            .delete()
+            .eq("id", app_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as e:
+        print(f"[delete_application] error: {e}")
+        return False
+
+
+def get_resume_versions(user_id: str) -> list:
+    """List all resume versions for a user, newest first."""
+    try:
+        res = (
+            _db().table("profiles")
+            .select("id, label, file_name, is_active, created_at, parsed_data")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        rows = res.data or []
+        result = []
+        for row in rows:
+            pd = row.get("parsed_data") or {}
+            if isinstance(pd, str):
+                try:
+                    import json as _j
+                    pd = _j.loads(pd)
+                except Exception:
+                    pd = {}
+            result.append({
+                "profile_id":       row["id"],
+                "label":            row.get("label") or f"Resume — {(row.get('created_at') or '')[:10]}",
+                "file_name":        row.get("file_name", ""),
+                "is_active":        row.get("is_active", False),
+                "created_at":       row.get("created_at"),
+                "parsed_summary": {
+                    "name":             pd.get("name", ""),
+                    "skills":           pd.get("skills", []),
+                    "skills_count":     len(pd.get("skills", [])),
+                    "experience_count": len(pd.get("experience", [])),
+                    "education_count":  len(pd.get("education", [])),
+                    "projects_count":   len(pd.get("projects", [])),
+                    "education":        pd.get("education", []),
+                    "experience":       pd.get("experience", []),
+                },
+            })
+        return result
+    except Exception as e:
+        print(f"[get_resume_versions] error: {e}")
+        return []
+
+
+def activate_resume(profile_id: str, user_id: str) -> bool:
+    """Set one resume as active, deactivating all others for this user."""
+    try:
+        # Deactivate all for user
+        _db().table("profiles").update({"is_active": False}).eq("user_id", user_id).execute()
+        # Activate the chosen one
+        res = (
+            _db().table("profiles")
+            .update({"is_active": True})
+            .eq("id", profile_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as e:
+        print(f"[activate_resume] error: {e}")
+        return False
+
+# ── Portfolio & Credentials ───────────────────────────────────────────────────
+
+def get_portfolio_files(user_id: str) -> list:
+    """Fetch all portfolio files for a given user."""
+    try:
+        res = (
+            _db().table("portfolio_files")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        print(f"[get_portfolio_files] error: {e}")
+        return []
+
+def add_portfolio_file(user_id: str, data: dict) -> str:
+    """Insert a new portfolio file."""
+    try:
+        file_id = str(uuid.uuid4())
+        _db().table("portfolio_files").insert({
+            "id": file_id,
+            "user_id": user_id,
+            "title": data.get("title", ""),
+            "file_category": data.get("file_category", "other"),
+            "semester_year": data.get("semester_year"),
+            "file_url": data.get("file_url", ""),
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }).execute()
+        return file_id
+    except Exception as e:
+        print(f"[add_portfolio_file] error: {e}")
+        raise
+
+def delete_portfolio_file(file_id: str, user_id: str) -> bool:
+    """Delete a portfolio file by id for standard verification."""
+    try:
+        res = (
+            _db().table("portfolio_files")
+            .delete()
+            .eq("id", file_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as e:
+        print(f"[delete_portfolio_file] error: {e}")
+        return False
+
+def get_past_reports_for_context(user_id: str, limit: int = 5) -> list:
+    """
+    Fetch last N completed sessions + their reports for context assembly.
+    Returns aggregated weak/strong areas and per-session summaries.
+    Used by context_assembler to build the known_weak_areas / known_strong_areas lists.
+    """
+    try:
+        sessions_res = (
+            _db().table("sessions")
+            .select("id, round_type, difficulty, created_at")
+            .eq("user_id", user_id)
+            .eq("status", "completed")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        sessions = sessions_res.data or []
+        if not sessions:
+            return []
+
+        session_ids = [s["id"] for s in sessions]
+        reports_res = (
+            _db().table("reports")
+            .select("session_id, overall_score, grade, weak_areas, strong_areas, created_at")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+        reports_map = {r["session_id"]: r for r in (reports_res.data or [])}
+
+        result = []
+        for s in sessions:
+            r = reports_map.get(s["id"], {})
+            raw_weak = r.get("weak_areas") or []
+            raw_strong = r.get("strong_areas") or []
+
+            def _extract_areas(raw):
+                if isinstance(raw, str):
+                    try:
+                        import json as _j
+                        raw = _j.loads(raw)
+                    except Exception:
+                        return []
+                if isinstance(raw, list):
+                    names = []
+                    for item in raw:
+                        if isinstance(item, dict):
+                            names.append(item.get("area", ""))
+                        elif isinstance(item, str):
+                            names.append(item)
+                    return [n for n in names if n]
+                return []
+
+            result.append({
+                "session_id":   s["id"],
+                "round_type":   s.get("round_type", "technical"),
+                "difficulty":   s.get("difficulty", "medium"),
+                "overall_score": r.get("overall_score"),
+                "grade":        r.get("grade"),
+                "weak_areas":   _extract_areas(raw_weak),
+                "strong_areas": _extract_areas(raw_strong),
+                "date":         (s.get("created_at") or "")[:10],
+            })
+        return result
+    except Exception as e:
+        print(f"[get_past_reports_for_context] error: {e}")
+        return []
+
+
+# ── Enhanced Hub Reports (Phase 1) ───────────────────────────────────────────
+
+def get_hub_reports_paginated(
+    user_id: str,
+    round_type: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    sort_by: str = "date",
+    sort_dir: str = "desc",
+    page: int = 1,
+    limit: int = 20,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    min_score: Optional[float] = None,
+    max_score: Optional[float] = None,
+) -> dict:
+    """
+    Paginated, filtered, sorted fetch of all reports for the Context Hub spreadsheet.
+    Returns {rows, total, page, limit}.
+    """
+    try:
+        q = (
+            _db().table("sessions")
+            .select("id, round_type, difficulty, num_questions, created_at, ended_at, target_company")
+            .eq("user_id", user_id)
+            .eq("status", "completed")
+        )
+        if round_type:
+            q = q.eq("round_type", round_type)
+        if difficulty:
+            q = q.eq("difficulty", difficulty)
+        if date_from:
+            q = q.gte("created_at", date_from)
+        if date_to:
+            q = q.lte("created_at", date_to)
+
+        q = q.order("created_at", desc=(sort_dir == "desc")).limit(200)
+        sessions = q.execute().data or []
+
+        if not sessions:
+            return {"rows": [], "total": 0, "page": page, "limit": limit}
+
+        session_ids = [s["id"] for s in sessions]
+        reports_res = (
+            _db().table("reports")
+            .select(
+                "session_id, id, overall_score, grade, hire_recommendation, "
+                "weak_areas, strong_areas, what_went_wrong, skills_to_work_on, "
+                "company_fit, delivery_consistency, improvement_vs_last, "
+                "repeated_offenders, six_axis_radar, swot, communication_breakdown, "
+                "pattern_groups, blind_spots, thirty_day_plan, follow_up_questions, "
+                "interview_agent, confidence_score"
+            )
+            .in_("session_id", session_ids)
+            .execute()
+        )
+        reports_map = {r["session_id"]: r for r in (reports_res.data or [])}
+
+        def _safe_json(val):
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except Exception:
+                    return []
+            return val or []
+
+        rows = []
+        for s in sessions:
+            r = reports_map.get(s["id"], {})
+            score = r.get("overall_score")
+
+            # Apply score filters (post-fetch since Supabase join is complex)
+            if min_score is not None and (score is None or score < min_score):
+                continue
+            if max_score is not None and (score is not None and score > max_score):
+                continue
+
+            raw_weak = _safe_json(r.get("weak_areas"))
+            raw_skills = _safe_json(r.get("skills_to_work_on"))
+            raw_repeated = _safe_json(r.get("repeated_offenders"))
+            company_fit = r.get("company_fit") or {}
+            delivery = r.get("delivery_consistency") or {}
+            improvement = r.get("improvement_vs_last") or {}
+            comm = r.get("communication_breakdown") or {}
+
+            rows.append({
+                "session_id":        s["id"],
+                "report_id":         r.get("id"),
+                "date":              s.get("created_at"),
+                "interview_agent":   r.get("interview_agent") or s.get("round_type", "technical").replace("_", " ").title(),
+                "round_type":        s.get("round_type"),
+                "difficulty":        s.get("difficulty"),
+                "num_questions":     s.get("num_questions"),
+                "target_company":    s.get("target_company") or "",
+                "overall_score":     score,
+                "grade":             r.get("grade"),
+                "hire_recommendation": r.get("hire_recommendation"),
+                "what_went_wrong":   r.get("what_went_wrong", ""),
+                "weak_areas":        raw_weak[:3],
+                "skills_to_work_on": raw_skills[:3],
+                "pass_probability":  company_fit.get("pass_probability"),
+                "delivery_verdict":  delivery.get("verdict"),
+                "comm_avg":          round(
+                    sum(v for v in comm.values() if isinstance(v, (int, float))) / max(len([v for v in comm.values() if isinstance(v, (int, float))]), 1),
+                    1
+                ) if comm else None,
+                "score_delta":       improvement.get("score_delta"),
+                "repeated_count":    len(raw_repeated),
+                "six_axis_radar":    r.get("six_axis_radar"),
+                "swot_preview":      {
+                    "strengths":    (_safe_json(r.get("swot") or {}).get("strengths", []) if isinstance(r.get("swot"), dict) else [])[:2],
+                    "weaknesses":   (_safe_json(r.get("swot") or {}).get("weaknesses", []) if isinstance(r.get("swot"), dict) else [])[:2],
+                } if r.get("swot") else None,
+            })
+
+        total = len(rows)
+
+        # Sort by score if requested (date sort was handled by Supabase query)
+        if sort_by == "score":
+            rows.sort(key=lambda x: (x["overall_score"] or 0), reverse=(sort_dir == "desc"))
+        elif sort_by == "grade":
+            grade_rank = {"A+": 7, "A": 6, "B+": 5, "B": 4, "C+": 3, "C": 2, "D": 1}
+            rows.sort(key=lambda x: grade_rank.get(x.get("grade", "D"), 0), reverse=(sort_dir == "desc"))
+
+        # Paginate
+        start = (page - 1) * limit
+        paginated = rows[start: start + limit]
+
+        return {"rows": paginated, "total": total, "page": page, "limit": limit}
+    except Exception as e:
+        print(f"[get_hub_reports_paginated] error: {e}")
+        return {"rows": [], "total": 0, "page": page, "limit": limit}
+
+
+def get_reports_summary(user_id: str) -> dict:
+    """
+    Aggregate banner-level stats for the Context Hub Reports section header.
+    Returns total sessions, avg score, best score, score trend (last 10),
+    skill_decay alerts, repeated_offenders, topics_mastery, growth_trajectory.
+    """
+    try:
+        sessions_res = (
+            _db().table("sessions")
+            .select("id, round_type, created_at")
+            .eq("user_id", user_id)
+            .eq("status", "completed")
+            .order("created_at", desc=False)
+            .execute()
+        )
+        sessions = sessions_res.data or []
+        if not sessions:
+            return {
+                "total_sessions": 0, "avg_score": 0, "best_score": 0,
+                "most_recent_grade": None, "score_trend": [],
+                "skill_decay_alerts": [], "repeated_offenders": [],
+                "growth_trajectory": None,
+            }
+
+        session_ids = [s["id"] for s in sessions]
+        reports_res = (
+            _db().table("reports")
+            .select(
+                "session_id, overall_score, grade, skill_decay, "
+                "repeated_offenders, growth_trajectory, created_at"
+            )
+            .in_("session_id", session_ids)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        reports = reports_res.data or []
+
+        scores = [r["overall_score"] for r in reports if r.get("overall_score") is not None]
+        score_trend = [
+            {"score": r["overall_score"], "date": (r.get("created_at") or "")[:10]}
+            for r in reports if r.get("overall_score") is not None
+        ][-10:]  # last 10
+
+        # Collect active skill_decay alerts from the most recent report
+        latest_report = reports[-1] if reports else {}
+        decay_raw = latest_report.get("skill_decay") or []
+        if isinstance(decay_raw, str):
+            try:
+                decay_raw = json.loads(decay_raw)
+            except Exception:
+                decay_raw = []
+        skill_decay_alerts = [d for d in decay_raw if isinstance(d, dict) and abs(d.get("delta", 0)) >= 10]
+
+        # Collect repeated_offenders from the most recent report
+        repeated_raw = latest_report.get("repeated_offenders") or []
+        if isinstance(repeated_raw, str):
+            try:
+                repeated_raw = json.loads(repeated_raw)
+            except Exception:
+                repeated_raw = []
+
+        return {
+            "total_sessions":    len(sessions),
+            "avg_score":         round(sum(scores) / len(scores), 1) if scores else 0,
+            "best_score":        max(scores) if scores else 0,
+            "most_recent_grade": latest_report.get("grade"),
+            "score_trend":       score_trend,
+            "skill_decay_alerts": skill_decay_alerts[:3],
+            "repeated_offenders": repeated_raw[:3],
+            "growth_trajectory": latest_report.get("growth_trajectory"),
+        }
+    except Exception as e:
+        print(f"[get_reports_summary] error: {e}")
+        return {
+            "total_sessions": 0, "avg_score": 0, "best_score": 0,
+            "most_recent_grade": None, "score_trend": [],
+            "skill_decay_alerts": [], "repeated_offenders": [],
+            "growth_trajectory": None,
+        }
+
+
+def compute_improvement_vs_last(user_id: str, session_id: str, round_type: str, current_score: float) -> Optional[dict]:
+    """
+    Compare current report to the most recent prior report of the same round_type.
+    Returns {score_delta, areas_improved, areas_regressed} or None if no prior report.
+    """
+    try:
+        prior_sessions_res = (
+            _db().table("sessions")
+            .select("id, created_at")
+            .eq("user_id", user_id)
+            .eq("round_type", round_type)
+            .eq("status", "completed")
+            .neq("id", session_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        prior_sessions = prior_sessions_res.data or []
+        if not prior_sessions:
+            return None
+
+        prior_report_res = (
+            _db().table("reports")
+            .select("overall_score, weak_areas, strong_areas")
+            .eq("session_id", prior_sessions[0]["id"])
+            .limit(1)
+            .execute()
+        )
+        if not prior_report_res.data:
+            return None
+
+        prior = prior_report_res.data[0]
+        prior_score = prior.get("overall_score") or 0
+        score_delta = round(current_score - prior_score, 1)
+
+        def _area_names(raw):
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    return []
+            if isinstance(raw, list):
+                return [item.get("area", "") for item in raw if isinstance(item, dict)]
+            return []
+
+        prior_weak = set(_area_names(prior.get("weak_areas")))
+        prior_strong = set(_area_names(prior.get("strong_areas")))
+
+        return {
+            "prior_session_id": prior_sessions[0]["id"],
+            "prior_score":      prior_score,
+            "current_score":    current_score,
+            "score_delta":      score_delta,
+            "areas_improved":   list(prior_weak),   # were weak before — may be better now
+            "areas_regressed":  list(prior_strong), # were strong before — watch for drop
+            "verdict": "improved" if score_delta > 3 else "declined" if score_delta < -3 else "stable",
+        }
+    except Exception as e:
+        print(f"[compute_improvement_vs_last] error: {e}")
+        return None
+
+
+def get_past_reports_for_analysis(user_id: str, exclude_session_id: str, limit: int = 10) -> list:
+    """
+    Fetch last N completed reports for cross-session analysis
+    (skill decay, repeated offenders, growth trajectory).
+    Returns list of {session_id, overall_score, weak_areas, grade, created_at}.
+    """
+    try:
+        sessions_res = (
+            _db().table("sessions")
+            .select("id, round_type, created_at")
+            .eq("user_id", user_id)
+            .eq("status", "completed")
+            .neq("id", exclude_session_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        sessions = sessions_res.data or []
+        if not sessions:
+            return []
+
+        session_ids = [s["id"] for s in sessions]
+        reports_res = (
+            _db().table("reports")
+            .select("session_id, overall_score, grade, weak_areas, strong_areas, radar_scores, created_at")
+            .in_("session_id", session_ids)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        return reports_res.data or []
+    except Exception as e:
+        print(f"[get_past_reports_for_analysis] error: {e}")
+        return []
+
+
+def get_external_links(user_id: str) -> Optional[dict]:
+    """Fetch external links for a user."""
+    try:
+        res = (
+            _db().table("external_links")
+            .select("*")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]
+        return None
+    except Exception as e:
+        print(f"[get_external_links] error: {e}")
+        return None
+
+def upsert_external_links(user_id: str, data: dict) -> bool:
+    """Insert or update external links for a user."""
+    try:
+        existing = get_external_links(user_id)
+        payload = {
+            "linkedin_url": data.get("linkedin_url", ""),
+            "github_url": data.get("github_url", ""),
+            "portfolio_url": data.get("portfolio_url", ""),
+            "other_links": data.get("other_links", []),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        if existing:
+            res = (
+                _db().table("external_links")
+                .update(payload)
+                .eq("id", existing["id"])
+                .execute()
+            )
+        else:
+            payload["user_id"] = user_id
+            res = _db().table("external_links").insert(payload).execute()
+        return bool(res.data)
+    except Exception as e:
+        print(f"[upsert_external_links] error: {e}")
+        return False

@@ -1,0 +1,14 @@
+{
+  "venvPath": ".",
+  "venv": "venv",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Windows",
+  "pythonPath": "D:\\AI INTERVIEWER\\backend\\venv\\Scripts\\python.exe",
+  "include": ["."],
+  "exclude": ["venv", "__pycache__", ".git"],
+  "typeCheckingMode": "off",
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false,
+  "reportUndefinedVariable": false,
+  "useLibraryCodeForTypes": true
+}

@@ -1,0 +1,1131 @@
+/**
+ * ReportPage — Full post-interview Ultra-Report with SSE streaming.
+ * Route: /report/:sessionId
+ *
+ * Sections (in render order):
+ *  1. SSE Loading State  (while generating)
+ *  2. What Went Wrong callout
+ *  3. Score Header + Improvement Delta
+ *  4. Repeated Offenders alert
+ *  5. 6-Axis Communication Radar + Delivery Consistency
+ *  6. Filler & Hesitation Heatmap
+ *  7. Per-Question Deep Dive
+ *  8. Root Cause Pattern Groups + B.S. Detector
+ *  9. Company Fit Calibration (if target_company set)
+ * 10. SWOT Analysis
+ * 11. Skill Decay Alerts
+ * 12. CV Audit
+ * 13. Skills to Work On
+ * 14. 30-Day Sprint Plan
+ * 15. Follow-Up Questions
+ * 16. Next Interview Blueprint CTA
+ * 17. Study Recommendations (legacy)
+ */
+import { useState, useEffect, useRef } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import {
+  RadarChart, Radar, PolarGrid, PolarAngleAxis,
+  BarChart, Bar, LineChart, Line,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+} from 'recharts'
+import { getReportWithSSE } from '../lib/api'
+import {
+  Trophy, TrendingUp, TrendingDown, BookOpen, ChevronRight,
+  Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
+  Target, Zap, Brain, ArrowUp, ArrowDown, Minus, Shield,
+  MessageSquare, BarChart2, Compass, Clock, Flame, Eye,
+  Share2, Download, Play, Pause, Volume2, X, Copy, Check,
+} from 'lucide-react'
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const ROUND_LABELS = {
+  technical: 'Technical', hr: 'HR / Behavioural',
+  dsa: 'DSA / Coding', system_design: 'System Design',
+}
+
+const SSE_STAGES = [
+  { key: 'core_analysis',       label: 'Scoring your answers…',           pct: 25 },
+  { key: 'behavioral_analysis', label: 'Analyzing your delivery…',         pct: 50 },
+  { key: 'company_fit',         label: 'Calibrating against hiring bar…',  pct: 70 },
+  { key: 'playbook_generation', label: 'Building your 30-day plan…',       pct: 85 },
+  { key: 'complete',            label: 'Finalizing report…',               pct: 100 },
+]
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function scoreColor(s) {
+  const n = +s
+  if (n >= 80) return '#4ade80'
+  if (n >= 60) return '#facc15'
+  if (n >= 40) return '#fb923c'
+  return '#f87171'
+}
+
+function scoreColor10(s) { return scoreColor(s * 10) }
+
+function gradeColor(g) {
+  if (!g) return '#94a3b8'
+  if (g.startsWith('A')) return '#4ade80'
+  if (g.startsWith('B')) return '#facc15'
+  if (g.startsWith('C')) return '#fb923c'
+  return '#f87171'
+}
+
+function hireColor(h) {
+  if (!h) return '#94a3b8'
+  if (h.includes('Strong')) return '#4ade80'
+  if (h === 'Yes') return '#a3e635'
+  if (h === 'Maybe') return '#facc15'
+  return '#f87171'
+}
+
+function normArea(a) {
+  if (typeof a === 'string') return { area: a }
+  return a || {}
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function ScoreRing({ score, size = 120, max = 100 }) {
+  const R   = (size / 2) - 10
+  const C   = 2 * Math.PI * R
+  const pct = Math.min(100, Math.max(0, score)) / max
+  const off = C * (1 - pct)
+  const col = scoreColor(score)
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg style={{ transform: 'rotate(-90deg)' }} width={size} height={size}>
+        <circle cx={size/2} cy={size/2} r={R} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={8}/>
+        <circle cx={size/2} cy={size/2} r={R} fill="none"
+          stroke={col} strokeWidth={8} strokeLinecap="round"
+          strokeDasharray={C} strokeDashoffset={off}
+          style={{ transition: 'stroke-dashoffset 1.4s ease' }}
+        />
+      </svg>
+      <div className="absolute text-center">
+        <p className="font-bold leading-none" style={{ color: col, fontSize: size * 0.22 }}>{score}</p>
+        <p className="text-xs text-muted">/{max}</p>
+      </div>
+    </div>
+  )
+}
+
+function SectionCard({ icon, title, color = '#7c3aed', children, className = '' }) {
+  const ref     = useRef(null)
+  const [vis, setVis] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      ([e]) => { if (e.isIntersecting) { setVis(true); obs.disconnect() } },
+      { threshold: 0.08, rootMargin: '0px 0px -40px 0px' }
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+  return (
+    <div ref={ref} className={`glass p-6 ${className}`}
+      style={{
+        opacity: vis ? 1 : 0,
+        transform: vis ? 'translateY(0)' : 'translateY(20px)',
+        transition: 'opacity 0.55s ease, transform 0.55s ease',
+      }}>
+      <h2 className="font-bold mb-4 flex items-center gap-2" style={{ color }}>
+        {icon} {title}
+      </h2>
+      {children}
+    </div>
+  )
+}
+
+function Chip({ label, color = '#7c3aed', size = 'sm' }) {
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-lg font-medium text-${size}`}
+      style={{ background: `${color}20`, color, border: `1px solid ${color}40` }}>
+      {label}
+    </span>
+  )
+}
+
+// ── Audio Clip Player ─────────────────────────────────────────────────────────
+
+function AudioClipPlayer({ audioUrl, startSec, label }) {
+  const audioRef = useRef(null)
+  const [playing, setPlaying] = useState(false)
+  const [progress, setProgress] = useState(0)
+
+  if (!audioUrl) return null
+
+  const toggle = () => {
+    const el = audioRef.current
+    if (!el) return
+    if (playing) {
+      el.pause()
+    } else {
+      if (startSec != null && el.currentTime === 0) el.currentTime = startSec
+      el.play()
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <button
+        onClick={toggle}
+        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg transition-all"
+        style={{
+          background: playing ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.06)',
+          border: `1px solid ${playing ? 'rgba(124,58,237,0.5)' : 'rgba(255,255,255,0.1)'}`,
+          color: playing ? '#a78bfa' : 'var(--color-muted)',
+        }}>
+        {playing ? <Pause size={11} /> : <Play size={11} />}
+        <Volume2 size={10} />
+        {label || 'Review the Tape'}
+      </button>
+      {playing && (
+        <div className="flex-1 max-w-[120px] h-1 rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }}>
+          <div className="h-full rounded-full transition-all duration-300"
+            style={{ width: `${progress}%`, background: '#7c3aed' }} />
+        </div>
+      )}
+      <audio
+        ref={audioRef}
+        src={audioUrl}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setProgress(0) }}
+        onTimeUpdate={() => {
+          const el = audioRef.current
+          if (!el || !el.duration) return
+          setProgress((el.currentTime / el.duration) * 100)
+        }}
+      />
+    </div>
+  )
+}
+
+// ── Share / PDF Modal ─────────────────────────────────────────────────────────
+
+function ShareModal({ report, onClose }) {
+  const [copied, setCopied] = useState(false)
+  const cardRef = useRef(null)
+
+  const {
+    overall_score = 0, grade, round_type = 'technical', difficulty,
+    strong_areas = [], target_company, hire_recommendation,
+  } = report
+
+  const scoreCol = scoreColor(+overall_score)
+  const ROUND_LABELS_SHORT = { technical: 'Technical', hr: 'HR', dsa: 'DSA', system_design: 'System Design' }
+
+  const copyLink = async () => {
+    await navigator.clipboard.writeText(window.location.href)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const printCard = () => {
+    // Insert print-specific CSS, print, then remove
+    const style = document.createElement('style')
+    style.id = '__report_print_style'
+    style.textContent = `
+      @media print {
+        body > *:not(#__report_print_root) { display: none !important; }
+        #__report_print_root { display: block !important; position: fixed; top: 0; left: 0; width: 100%; }
+        @page { size: A4 landscape; margin: 0; }
+      }
+    `
+    document.head.appendChild(style)
+    const el = cardRef.current
+    if (el) {
+      el.id = '__report_print_root'
+      window.print()
+      el.removeAttribute('id')
+    }
+    document.head.removeChild(style)
+  }
+
+  const strongList = strong_areas.slice(0, 3).map(a => {
+    const { area } = typeof a === 'string' ? { area: a } : (a || {})
+    return area
+  }).filter(Boolean)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)' }}>
+      <div className="glass max-w-lg w-full p-6 space-y-5" style={{ border: '1px solid rgba(124,58,237,0.4)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-lg">Share Report</h3>
+          <button onClick={onClose} className="text-muted hover:text-white transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Shareable card preview */}
+        <div ref={cardRef} className="rounded-2xl p-6 space-y-4"
+          style={{ background: 'linear-gradient(135deg, #1a0a2e 0%, #0d1a2e 100%)', border: '1px solid rgba(124,58,237,0.4)' }}>
+          {/* Top row */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-muted">AI Mock Interview</p>
+              <p className="font-bold text-xl gradient-text">Interview Report</p>
+            </div>
+            <div className="text-right">
+              <p className="text-4xl font-black" style={{ color: scoreCol }}>{+Number(overall_score).toFixed(0)}</p>
+              <p className="text-xs text-muted">/ 100</p>
+            </div>
+          </div>
+          {/* Meta */}
+          <div className="flex flex-wrap gap-2">
+            <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
+              style={{ background: 'rgba(124,58,237,0.2)', color: '#a78bfa' }}>
+              {ROUND_LABELS_SHORT[round_type] || round_type}
+            </span>
+            {difficulty && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-semibold capitalize"
+                style={{ background: 'rgba(6,182,212,0.15)', color: '#06b6d4' }}>
+                {difficulty}
+              </span>
+            )}
+            {grade && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                style={{ background: `${scoreColor(+overall_score)}20`, color: scoreColor(+overall_score) }}>
+                Grade {grade}
+              </span>
+            )}
+            {hire_recommendation && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                style={{ background: 'rgba(74,222,128,0.15)', color: '#4ade80' }}>
+                {hire_recommendation}
+              </span>
+            )}
+          </div>
+          {/* Strengths */}
+          {strongList.length > 0 && (
+            <div>
+              <p className="text-xs text-muted mb-1.5">Key Strengths</p>
+              <div className="space-y-1">
+                {strongList.map((s, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    <CheckCircle size={11} style={{ color: '#4ade80' }} />
+                    <span>{s}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Footer */}
+          {target_company && (
+            <p className="text-xs text-muted">Target: <span className="text-cyan-400">{target_company}</span></p>
+          )}
+          <p className="text-xs text-muted pt-1" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+            Generated by AI Interviewer Platform
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-3">
+          <button onClick={copyLink}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+            {copied ? <Check size={14} style={{ color: '#4ade80' }} /> : <Copy size={14} />}
+            {copied ? 'Copied!' : 'Copy Link'}
+          </button>
+          <button onClick={printCard}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all btn-primary">
+            <Download size={14} />
+            Export PDF
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Loading State (SSE Progress) ──────────────────────────────────────────────
+
+function ReportLoading({ stage, progress, label }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="glass p-10 max-w-md w-full text-center space-y-6">
+        <div className="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #22d3ee)' }}>
+          <Brain size={32} className="text-white" style={{ animation: 'pulse 1.5s infinite' }} />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold gradient-text mb-2">Generating Your Report</h2>
+          <p className="text-muted text-sm">{label || 'Analyzing your session…'}</p>
+        </div>
+        <div className="space-y-2">
+          <div className="flex justify-between text-xs text-muted">
+            <span>{label}</span>
+            <span>{progress}%</span>
+          </div>
+          <div className="h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.07)' }}>
+            <div className="h-full rounded-full transition-all duration-700"
+              style={{
+                width: `${progress}%`,
+                background: 'linear-gradient(90deg, #7c3aed, #22d3ee)',
+              }}
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          {SSE_STAGES.map((s) => (
+            <div key={s.key} className={`flex items-center gap-2 text-xs transition-all ${
+              progress >= s.pct ? 'text-white' : 'text-muted'
+            }`}>
+              {progress >= s.pct
+                ? <CheckCircle size={12} style={{ color: '#4ade80' }} />
+                : <div className="w-3 h-3 rounded-full" style={{ background: 'rgba(255,255,255,0.1)' }} />
+              }
+              {s.label}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Custom Tooltips ───────────────────────────────────────────────────────────
+
+function QTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null
+  const d = payload[0]?.payload || {}
+  return (
+    <div className="glass p-3 text-xs max-w-xs" style={{ border: '1px solid rgba(124,58,237,0.4)' }}>
+      <p className="font-semibold mb-1 text-white text-sm">{d.label}</p>
+      <p className="text-muted">{d.question_text}</p>
+      <p className="mt-1" style={{ color: scoreColor(d.score * 10) }}>Score: {d.score}/10</p>
+    </div>
+  )
+}
+
+function FillerTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null
+  const d = payload[0]?.payload || {}
+  return (
+    <div className="glass p-3 text-xs max-w-xs" style={{ border: '1px solid rgba(251,146,60,0.4)' }}>
+      <p className="font-semibold text-white mb-1">{d.question_id}</p>
+      <p className="text-muted">Fillers: <span className="text-orange-400 font-bold">{d.filler_count}</span></p>
+      {d.filler_words?.length > 0 && (
+        <p className="text-muted mt-1">Words: {d.filler_words.slice(0, 5).join(', ')}</p>
+      )}
+      <p className="text-muted mt-1">Confidence: {d.confidence_score}/100</p>
+    </div>
+  )
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+export default function ReportPage() {
+  const { sessionId } = useParams()
+  const navigate      = useNavigate()
+
+  const [report,     setReport]     = useState(null)
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState(null)
+  const [stage,      setStage]      = useState('core_analysis')
+  const [progress,   setProgress]   = useState(10)
+  const [stageLabel, setStageLabel] = useState('Scoring your answers…')
+  const [shareOpen,  setShareOpen]  = useState(false)
+
+  useEffect(() => {
+    if (!sessionId) return
+    getReportWithSSE(
+      sessionId,
+      (evt) => {
+        setStage(evt.stage)
+        setProgress(evt.progress || 10)
+        setStageLabel(evt.label || 'Processing…')
+      },
+      (reportData) => {
+        setReport(reportData)
+        setLoading(false)
+      },
+      (errMsg) => {
+        setError(errMsg || 'Failed to load report.')
+        setLoading(false)
+      },
+    )
+  }, [sessionId])
+
+  if (loading) return <ReportLoading stage={stage} progress={progress} label={stageLabel} />
+  if (error) return (
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="glass p-8 max-w-md text-center">
+        <XCircle size={40} className="text-red-400 mx-auto mb-4" />
+        <h2 className="text-xl font-bold mb-2">Report Error</h2>
+        <p className="text-muted mb-6 text-sm">{error}</p>
+        <button onClick={() => navigate('/dashboard')} className="btn-primary">Back to Dashboard</button>
+      </div>
+    </div>
+  )
+
+  const {
+    overall_score = 0, round_type = 'technical', difficulty = '',
+    num_questions = 0, timer_mins = 0, grade, hire_recommendation,
+    summary = '', compared_to_level = '',
+
+    // Core
+    skill_ratings = [], question_scores = [], per_question_analysis = [],
+    strong_areas = [], weak_areas = [], red_flags = [],
+    hire_signal = {}, failure_patterns = [], study_recommendations = [],
+    interview_tips = [], cv_audit = {}, study_roadmap = {},
+    mock_ready_topics = [], not_ready_topics = [],
+    target_company = '', candidate_name = '',
+
+    // New fields
+    what_went_wrong, improvement_vs_last, repeated_offenders = [],
+    communication_breakdown = {}, six_axis_radar = {},
+    delivery_consistency = {}, filler_heatmap = [],
+    pattern_groups = [], blind_spots = [], bs_flag = [],
+    company_fit, skill_decay = [],
+    swot = {}, skills_to_work_on = [], thirty_day_plan = {},
+    auto_resources = [], follow_up_questions = [],
+    next_interview_blueprint,
+  } = report
+
+  const overall = +Number(overall_score).toFixed(1)
+
+  // Recharts datasets
+  const radarData = Object.entries(six_axis_radar || {}).map(([k, v]) => ({
+    subject: k, A: +Number(v).toFixed(1), fullMark: 100,
+  }))
+  const legacyRadarData = (skill_ratings || []).map(s => ({
+    subject: s.skill, A: +Number(s.score).toFixed(1), fullMark: 10,
+  }))
+
+  const qaData = (per_question_analysis?.length ? per_question_analysis : question_scores).map((q, i) => ({
+    label: `Q${i + 1}`, question_text: q.question_text || q.question || '',
+    score: q.score || 0,
+  }))
+
+  const fillerData = filler_heatmap.map(f => ({
+    question_id: f.question_id, filler_count: f.filler_count || 0,
+    confidence_score: f.confidence_score || 0, filler_words: f.filler_words || [],
+  }))
+
+  const deliveryArc = (delivery_consistency?.arc_plot || []).map((v, i) => ({
+    q: `Q${i + 1}`, confidence: v,
+  }))
+
+  return (
+    <div className="min-h-screen pt-20 pb-16 px-4">
+      <div className="max-w-5xl mx-auto space-y-6">
+
+        {/* ── Nav ─────────────────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold gradient-text mb-1">Interview Report</h1>
+            <p className="text-muted text-sm">
+              {ROUND_LABELS[round_type]} · {difficulty} · {num_questions} Qs · {timer_mins}m
+              {target_company && <> · <span className="text-purple-400">{target_company}</span></>}
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setShareOpen(true)}
+              className="flex items-center gap-1.5 btn-secondary text-sm py-2 px-4">
+              <Share2 size={14} /> Share
+            </button>
+            <button onClick={() => navigate('/dashboard')} className="btn-secondary text-sm py-2 px-4">
+              <Home size={14} /> Dashboard
+            </button>
+            <button onClick={() => navigate('/')} className="btn-primary text-sm py-2 px-4">
+              <RotateCcw size={14} /> New Interview
+            </button>
+          </div>
+        </div>
+
+        {/* Share Modal */}
+        {shareOpen && report && (
+          <ShareModal report={report} onClose={() => setShareOpen(false)} />
+        )}
+
+        {/* ── What Went Wrong callout ─────────────────────────────────────── */}
+        {what_went_wrong && (
+          <div className="rounded-2xl p-5 flex gap-4 animate-fade-in-up"
+            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)' }}>
+            <AlertTriangle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-400 text-sm mb-1">What Went Wrong</p>
+              <p className="text-sm leading-relaxed">{what_went_wrong}</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Repeated Offenders alert ────────────────────────────────────── */}
+        {repeated_offenders?.length > 0 && (
+          <div className="rounded-2xl p-4 flex gap-3"
+            style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
+            <Flame size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-amber-400 text-sm mb-1">
+                Recurring Issues ({repeated_offenders.length})
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {repeated_offenders.map((r, i) => (
+                  <Chip key={i} label={`${r.issue} ×${r.count_across_sessions}`} color="#f59e0b" />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Hero Score Card ─────────────────────────────────────────────── */}
+        <div className="glass p-8 flex flex-col sm:flex-row items-center gap-8">
+          <ScoreRing score={overall} size={140} max={100} />
+          <div className="flex-1 text-center sm:text-left">
+            <div className="flex items-center gap-3 justify-center sm:justify-start mb-2 flex-wrap">
+              <Trophy size={22} style={{ color: gradeColor(grade) }} />
+              <span className="text-4xl font-bold" style={{ color: gradeColor(grade) }}>
+                {grade || 'N/A'}
+              </span>
+              {hire_recommendation && (
+                <span className="text-sm px-3 py-1 rounded-full font-semibold"
+                  style={{ background: `${hireColor(hire_recommendation)}20`, color: hireColor(hire_recommendation) }}>
+                  {hire_recommendation}
+                </span>
+              )}
+            </div>
+            {/* Improvement delta */}
+            {improvement_vs_last && (
+              <div className="flex items-center gap-2 mb-2">
+                {improvement_vs_last.score_delta > 0
+                  ? <ArrowUp size={14} className="text-green-400" />
+                  : improvement_vs_last.score_delta < 0
+                    ? <ArrowDown size={14} className="text-red-400" />
+                    : <Minus size={14} className="text-muted" />
+                }
+                <span className="text-sm font-semibold"
+                  style={{ color: improvement_vs_last.score_delta > 0 ? '#4ade80' : improvement_vs_last.score_delta < 0 ? '#f87171' : '#94a3b8' }}>
+                  {improvement_vs_last.score_delta > 0 ? '+' : ''}{improvement_vs_last.score_delta} vs last {ROUND_LABELS[round_type]}
+                </span>
+              </div>
+            )}
+            <p className="text-muted text-sm leading-relaxed max-w-xl">{summary}</p>
+            {compared_to_level && (
+              <p className="text-xs text-purple-400 mt-2 italic">{compared_to_level}</p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3 flex-shrink-0">
+            {[
+              { label: 'Total Qs',  val: num_questions },
+              { label: 'Answered',  val: qaData.filter(q => q.score > 0).length },
+              { label: 'Score',     val: `${overall}` },
+              { label: 'Grade',     val: grade || '—' },
+            ].map(({ label, val }) => (
+              <div key={label} className="text-center p-3 rounded-xl"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
+                <p className="font-bold text-lg leading-none">{val}</p>
+                <p className="text-xs text-muted mt-0.5">{label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── 6-Axis Communication Radar + Delivery Consistency ───────────── */}
+        {(radarData.length > 0 || deliveryArc.length > 0) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {radarData.length > 0 && (
+              <SectionCard icon={<MessageSquare size={16}/>} title="Communication (6-Axis)" color="#22d3ee">
+                <ResponsiveContainer width="100%" height={260}>
+                  <RadarChart data={radarData} margin={{ top: 0, right: 30, bottom: 0, left: 30 }}>
+                    <PolarGrid stroke="rgba(255,255,255,0.08)" />
+                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                    <Radar name="Score" dataKey="A" stroke="#22d3ee" fill="#22d3ee" fillOpacity={0.2}
+                      dot={{ r: 3, fill: '#67e8f9' }} />
+                  </RadarChart>
+                </ResponsiveContainer>
+                {communication_breakdown && Object.keys(communication_breakdown).length > 0 && (
+                  <div className="grid grid-cols-2 gap-2 mt-3">
+                    {Object.entries(communication_breakdown).map(([k, v]) => (
+                      <div key={k} className="flex justify-between items-center text-xs">
+                        <span className="text-muted truncate mr-2">{k}</span>
+                        <span className="font-semibold flex-shrink-0" style={{ color: scoreColor(v) }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SectionCard>
+            )}
+
+            {deliveryArc.length > 0 && (
+              <SectionCard icon={<TrendingUp size={16}/>} title="Delivery Consistency" color="#a78bfa">
+                {delivery_consistency?.verdict && (
+                  <p className="text-sm text-muted mb-3">
+                    <span className="font-semibold text-white">{delivery_consistency.verdict}</span>
+                    {delivery_consistency.drop != null && (
+                      <> — {delivery_consistency.drop > 0 ? `dropped ${delivery_consistency.drop} pts` : `improved ${Math.abs(delivery_consistency.drop)} pts`} by end</>
+                    )}
+                  </p>
+                )}
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={deliveryArc} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
+                    <XAxis dataKey="q" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <Tooltip formatter={(v) => [`${v}/100`, 'Confidence']}
+                      contentStyle={{ background: '#1e1e2e', border: '1px solid #7c3aed40', borderRadius: 8 }} />
+                    <Line type="monotone" dataKey="confidence" stroke="#a78bfa" strokeWidth={2}
+                      dot={{ r: 4, fill: '#7c3aed' }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </SectionCard>
+            )}
+          </div>
+        )}
+
+        {/* ── Filler & Hesitation Heatmap ─────────────────────────────────── */}
+        {fillerData.length > 0 && (
+          <SectionCard icon={<BarChart2 size={16}/>} title="Filler Word Heatmap" color="#fb923c">
+            <p className="text-xs text-muted mb-3">
+              Higher bars = more filler words per question. Hover for details.
+            </p>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={fillerData} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
+                <XAxis dataKey="question_id" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+                <Tooltip content={<FillerTooltip />} cursor={{ fill: 'rgba(251,146,60,0.08)' }} />
+                <Bar dataKey="filler_count" radius={[4, 4, 0, 0]}>
+                  {fillerData.map((_, i) => <Cell key={i} fill="#fb923c" opacity={0.8} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </SectionCard>
+        )}
+
+        {/* ── Per-Question Scores Chart ────────────────────────────────────── */}
+        {qaData.length > 0 && (
+          <SectionCard icon={<TrendingUp size={16}/>} title="Per-Question Scores" color="#4ade80">
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={qaData} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
+                <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+                <Tooltip content={<QTooltip />} cursor={{ fill: 'rgba(124,58,237,0.08)' }} />
+                <Bar dataKey="score" radius={[6, 6, 0, 0]}>
+                  {qaData.map((e, i) => <Cell key={i} fill={scoreColor10(e.score)} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </SectionCard>
+        )}
+
+        {/* ── Strong & Weak Areas ─────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <SectionCard icon={<CheckCircle size={16}/>} title="Strong Areas" color="#4ade80">
+            {strong_areas.length === 0 ? <p className="text-muted text-sm">—</p>
+              : strong_areas.map((a, i) => {
+                const { area, evidence, score } = normArea(a)
+                return (
+                  <div key={i} className="flex items-start gap-2 mb-3">
+                    <CheckCircle size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium">{area || a}</p>
+                      {evidence && <p className="text-xs text-muted mt-0.5">"{evidence}"</p>}
+                      {score && <Chip label={`${score}/100`} color="#4ade80" size="xs" />}
+                    </div>
+                  </div>
+                )
+              })
+            }
+          </SectionCard>
+          <SectionCard icon={<XCircle size={16}/>} title="Areas to Improve" color="#f87171">
+            {weak_areas.length === 0 ? <p className="text-muted text-sm">—</p>
+              : weak_areas.map((a, i) => {
+                const { area, what_was_missed, how_to_improve, score } = normArea(a)
+                return (
+                  <div key={i} className="mb-3">
+                    <div className="flex items-start gap-2">
+                      <XCircle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-sm font-medium">{area || a}</p>
+                      {score && <Chip label={`${score}/100`} color="#f87171" size="xs" />}
+                    </div>
+                    {what_was_missed && <p className="text-xs text-muted ml-5 mt-0.5">Missed: {what_was_missed}</p>}
+                    {how_to_improve && <p className="text-xs text-purple-400 ml-5 mt-0.5">→ {how_to_improve}</p>}
+                  </div>
+                )
+              })
+            }
+          </SectionCard>
+        </div>
+
+        {/* ── Root Cause Pattern Groups ────────────────────────────────────── */}
+        {pattern_groups?.length > 0 && (
+          <SectionCard icon={<Brain size={16}/>} title="Root Cause Analysis" color="#e879f9">
+            <div className="space-y-4">
+              {pattern_groups.map((p, i) => (
+                <div key={i} className="p-4 rounded-xl"
+                  style={{ background: `rgba(232,121,249,0.06)`, border: '1px solid rgba(232,121,249,0.2)' }}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Chip label={p.severity || 'medium'} color={p.severity === 'critical' ? '#f87171' : p.severity === 'high' ? '#fb923c' : '#facc15'} />
+                    <p className="font-semibold text-sm">{p.pattern}</p>
+                  </div>
+                  {p.questions_affected?.length > 0 && (
+                    <p className="text-xs text-muted mb-1">Affects: {p.questions_affected.join(', ')}</p>
+                  )}
+                  <p className="text-sm text-muted"><span className="text-white">Root cause:</span> {p.core_gap}</p>
+                  {p.evidence && <p className="text-xs text-muted mt-1 italic">"{p.evidence}"</p>}
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── B.S. Detector ───────────────────────────────────────────────── */}
+        {bs_flag?.length > 0 && (
+          <div className="rounded-2xl p-5"
+            style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
+            <h2 className="font-bold mb-3 flex items-center gap-2 text-red-400">
+              <Shield size={16} /> Evasion Detected
+            </h2>
+            <p className="text-xs text-muted mb-3">Questions where you rambled without giving a real answer:</p>
+            <div className="space-y-3">
+              {bs_flag.map((f, i) => (
+                <div key={i} className="flex gap-3">
+                  <Chip label={f.question_id} color="#f87171" />
+                  <div>
+                    <p className="text-sm">{f.flag_reason}</p>
+                    <p className="text-xs text-muted">Detection confidence: {f.confidence}%</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Company Fit ─────────────────────────────────────────────────── */}
+        {company_fit && (
+          <SectionCard icon={<Target size={16}/>} title={`${company_fit.target_company || 'Company'} Fit Calibration`} color="#22d3ee">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              {[
+                { label: 'Your Score', val: `${company_fit.your_score}`, color: scoreColor(company_fit.your_score) },
+                { label: 'Bar Required', val: `${company_fit.bar_score_required}`, color: '#94a3b8' },
+                { label: 'Pass Probability', val: `${company_fit.pass_probability}%`, color: scoreColor(company_fit.pass_probability) },
+              ].map(({ label, val, color }) => (
+                <div key={label} className="text-center p-4 rounded-xl"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
+                  <p className="text-2xl font-bold" style={{ color }}>{val}</p>
+                  <p className="text-xs text-muted mt-1">{label}</p>
+                </div>
+              ))}
+            </div>
+            {company_fit.gap_breakdown?.length > 0 && (
+              <div className="mb-4">
+                <p className="text-xs text-muted uppercase tracking-wider mb-2">Dimension Gaps</p>
+                <div className="space-y-2">
+                  {company_fit.gap_breakdown.map((g, i) => (
+                    <div key={i} className="flex items-center gap-3 text-sm">
+                      <span className="flex-1 text-muted truncate">{g.dimension}</span>
+                      <span style={{ color: scoreColor(g.yours) }}>{g.yours}</span>
+                      <span className="text-muted">/ {g.required}</span>
+                      <span style={{ color: g.delta < 0 ? '#f87171' : '#4ade80' }}>
+                        {g.delta > 0 ? '+' : ''}{g.delta}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {company_fit.culture_gaps?.length > 0 && (
+              <div className="mb-3">
+                <p className="text-xs text-muted uppercase tracking-wider mb-2">Culture Gaps</p>
+                {company_fit.culture_gaps.map((g, i) => (
+                  <div key={i} className="flex gap-2 mb-1">
+                    <span className="text-amber-400 flex-shrink-0">•</span>
+                    <p className="text-sm text-muted">{g}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {company_fit.next_round_vulnerabilities?.length > 0 && (
+              <div>
+                <p className="text-xs text-muted uppercase tracking-wider mb-2">Next-Round Vulnerabilities</p>
+                {company_fit.next_round_vulnerabilities.map((v, i) => (
+                  <div key={i} className="flex gap-2 mb-1">
+                    <AlertTriangle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-muted">{v}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+        )}
+
+        {/* ── SWOT Grid ───────────────────────────────────────────────────── */}
+        {swot && Object.keys(swot).length > 0 && (
+          <SectionCard icon={<Compass size={16}/>} title="SWOT Analysis" color="#7c3aed">
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { key: 'strengths',     label: 'Strengths',     color: '#4ade80', icon: '↑' },
+                { key: 'weaknesses',    label: 'Weaknesses',    color: '#f87171', icon: '↓' },
+                { key: 'opportunities', label: 'Opportunities', color: '#22d3ee', icon: '→' },
+                { key: 'threats',       label: 'Threats',       color: '#fb923c', icon: '⚠' },
+              ].map(({ key, label, color, icon }) => (
+                <div key={key} className="p-4 rounded-xl"
+                  style={{ background: `${color}08`, border: `1px solid ${color}25` }}>
+                  <p className="text-xs font-bold mb-2" style={{ color }}>{icon} {label}</p>
+                  <ul className="space-y-1">
+                    {(swot[key] || []).map((item, i) => (
+                      <li key={i} className="text-xs text-muted">• {item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Skill Decay Alerts ──────────────────────────────────────────── */}
+        {skill_decay?.length > 0 && (
+          <div className="rounded-2xl p-5"
+            style={{ background: 'rgba(251,146,60,0.07)', border: '1px solid rgba(251,146,60,0.25)' }}>
+            <h2 className="font-bold mb-3 flex items-center gap-2 text-orange-400">
+              <TrendingDown size={16} /> Skill Decay Detected
+            </h2>
+            <div className="space-y-2">
+              {skill_decay.map((d, i) => (
+                <div key={i} className="flex items-center gap-3 text-sm">
+                  <ArrowDown size={14} className="text-red-400 flex-shrink-0" />
+                  <span className="font-medium">{d.skill}</span>
+                  <span className="text-muted">{d.prev_score} → {d.curr_score}</span>
+                  <Chip label={`${d.delta}`} color="#f87171" size="xs" />
+                  <span className="text-xs text-muted flex-1">{d.alert_msg}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── CV Audit ────────────────────────────────────────────────────── */}
+        {cv_audit?.items?.length > 0 && (
+          <SectionCard icon={<Eye size={16}/>} title="CV Honesty Audit" color="#e879f9">
+            <div className="flex items-center gap-4 mb-4">
+              <ScoreRing score={cv_audit.overall_cv_honesty_score || 0} size={80} max={100} />
+              <div>
+                <p className="font-semibold">Honesty Score: {cv_audit.overall_cv_honesty_score}%</p>
+                {cv_audit.note && <p className="text-sm text-muted mt-1">{cv_audit.note}</p>}
+              </div>
+            </div>
+            <div className="space-y-2">
+              {cv_audit.items.slice(0, 8).map((item, i) => (
+                <div key={i} className="flex items-center gap-3 text-sm">
+                  {item.answered_well === true
+                    ? <CheckCircle size={13} className="text-green-400 flex-shrink-0" />
+                    : item.answered_well === false
+                      ? <XCircle size={13} className="text-red-400 flex-shrink-0" />
+                      : <Minus size={13} className="text-muted flex-shrink-0" />
+                  }
+                  <span className="flex-1 truncate">{item.claim}</span>
+                  <Chip label={item.demonstrated_level || 'Not Tested'} size="xs"
+                    color={item.answered_well ? '#4ade80' : item.answered_well === false ? '#f87171' : '#94a3b8'} />
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Skills to Work On ───────────────────────────────────────────── */}
+        {skills_to_work_on?.length > 0 && (
+          <SectionCard icon={<Zap size={16}/>} title="Skills to Work On" color="#facc15">
+            <div className="space-y-3">
+              {skills_to_work_on.map((s, i) => (
+                <div key={i} className="flex items-start gap-3 p-3 rounded-xl"
+                  style={{ background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.15)' }}>
+                  <Chip label={s.priority || 'Medium'} size="xs"
+                    color={s.priority === 'High' ? '#f87171' : s.priority === 'Low' ? '#4ade80' : '#facc15'} />
+                  <div>
+                    <p className="text-sm font-medium">{s.skill}</p>
+                    {s.reason && <p className="text-xs text-muted mt-0.5">{s.reason}</p>}
+                    {s.resources?.length > 0 && (
+                      <p className="text-xs text-purple-400 mt-1">→ {s.resources.join(' · ')}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── 30-Day Sprint Plan ──────────────────────────────────────────── */}
+        {thirty_day_plan && Object.keys(thirty_day_plan).some(k => thirty_day_plan[k]?.length > 0) && (
+          <SectionCard icon={<Clock size={16}/>} title="30-Day Sprint Plan" color="#22d3ee">
+            <div className="space-y-4">
+              {['week_1', 'week_2', 'week_3', 'week_4'].map((wk, wi) => {
+                const items = thirty_day_plan[wk] || []
+                if (!items.length) return null
+                return (
+                  <details key={wk} className="group">
+                    <summary className="flex items-center gap-3 cursor-pointer select-none list-none p-3 rounded-xl"
+                      style={{ background: 'rgba(34,211,238,0.06)' }}>
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                        style={{ background: 'linear-gradient(135deg, #22d3ee, #7c3aed)' }}>
+                        {wi + 1}
+                      </div>
+                      <span className="font-medium text-sm">Week {wi + 1}</span>
+                      <span className="text-xs text-muted ml-auto">{items.length} task{items.length > 1 ? 's' : ''}</span>
+                      <ChevronRight size={14} className="text-muted group-open:rotate-90 transition-transform" />
+                    </summary>
+                    <div className="mt-2 space-y-2 pl-3">
+                      {items.map((item, ii) => (
+                        <div key={ii} className="p-3 rounded-xl text-sm"
+                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)' }}>
+                          <p className="font-medium">{item.topic}</p>
+                          {item.goal && <p className="text-xs text-muted mt-0.5">{item.goal}</p>}
+                          {item.task && <p className="text-xs text-cyan-400 mt-0.5">→ {item.task}</p>}
+                          <div className="flex items-center gap-3 mt-1">
+                            {item.resource && <span className="text-xs text-purple-400">{item.resource}</span>}
+                            {item.hours && <span className="text-xs text-muted">{item.hours}h</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )
+              })}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Follow-Up Questions ─────────────────────────────────────────── */}
+        {follow_up_questions?.length > 0 && (
+          <SectionCard icon={<MessageSquare size={16}/>} title="A Human Interviewer Would Now Ask…" color="#a78bfa">
+            <div className="space-y-3">
+              {follow_up_questions.map((q, i) => (
+                <details key={i} className="group glass">
+                  <summary className="flex items-center gap-3 p-4 cursor-pointer select-none list-none">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-lg flex-shrink-0"
+                      style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa' }}>
+                      Q{i + 1}
+                    </span>
+                    <p className="text-sm flex-1">{q.question}</p>
+                    <ChevronRight size={14} className="text-muted group-open:rotate-90 transition-transform" />
+                  </summary>
+                  <div className="px-4 pb-4 space-y-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                    {q.why_asked && (
+                      <p className="text-xs text-muted mt-3"><span className="text-amber-400">Why:</span> {q.why_asked}</p>
+                    )}
+                    {Array.isArray(q.model_answer_hint)
+                      ? q.model_answer_hint.map((h, j) => (
+                          <p key={j} className="text-xs text-green-400">• {h}</p>
+                        ))
+                      : q.model_answer_hint && (
+                          <p className="text-xs text-green-400">{q.model_answer_hint}</p>
+                        )
+                    }
+                  </div>
+                </details>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Per-Question Deep Dive ───────────────────────────────────────── */}
+        {(per_question_analysis?.length > 0 || question_scores?.length > 0) && (
+          <div>
+            <h2 className="font-bold mb-4 flex items-center gap-2">
+              <ChevronRight size={16} className="text-purple-400" /> Question-by-Question Feedback
+            </h2>
+            <div className="space-y-3">
+              {(per_question_analysis?.length ? per_question_analysis : question_scores).map((q, i) => (
+                <details key={i} className="glass group">
+                  <summary className="flex items-center gap-3 p-4 cursor-pointer select-none list-none">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-lg flex-shrink-0"
+                      style={{ background: `${scoreColor10(q.score)}20`, color: scoreColor10(q.score) }}>
+                      Q{i + 1} · {q.score}/10
+                    </span>
+                    <p className="text-sm flex-1 line-clamp-1">{q.question_text || q.question || ''}</p>
+                    {q.verdict && <Chip label={q.verdict} size="xs" color={scoreColor10(q.score)} />}
+                    <ChevronRight size={14} className="text-muted group-open:rotate-90 transition-transform" />
+                  </summary>
+                  <div className="px-4 pb-4 space-y-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                    {q.answer_summary && (
+                      <div className="mt-3">
+                        <p className="text-xs text-muted uppercase tracking-wider mb-1">Summary</p>
+                        <p className="text-sm leading-relaxed text-muted">{q.answer_summary}</p>
+                      </div>
+                    )}
+                    {q.key_insight && (
+                      <div>
+                        <p className="text-xs text-muted uppercase tracking-wider mb-1">Key Insight</p>
+                        <p className="text-sm text-purple-300">{q.key_insight}</p>
+                      </div>
+                    )}
+                    {(q.strengths?.length > 0 || q.improvements?.length > 0) && (
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        {q.strengths?.length > 0 && (
+                          <div>
+                            <p className="text-xs text-green-400 font-semibold mb-1">✓ Strengths</p>
+                            {q.strengths.map((s, j) => <p key={j} className="text-xs text-muted">• {s}</p>)}
+                          </div>
+                        )}
+                        {q.improvements?.length > 0 && (
+                          <div>
+                            <p className="text-xs text-red-400 font-semibold mb-1">✗ Improve</p>
+                            {q.improvements.map((s, j) => <p key={j} className="text-xs text-muted">• {s}</p>)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* "Review the Tape" — audio playback if URL stored */}
+                    <AudioClipPlayer
+                      audioUrl={q.audio_url}
+                      startSec={q.audio_start_sec}
+                      label={`Review Q${i + 1} Audio`}
+                    />
+                  </div>
+                </details>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Study Recommendations (legacy) ──────────────────────────────── */}
+        {study_recommendations?.length > 0 && (
+          <SectionCard icon={<BookOpen size={16}/>} title="Study Recommendations" color="#f59e0b">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {study_recommendations.map((r, i) => {
+                const topic = typeof r === 'string' ? r : r.topic
+                const priority = r.priority
+                const reason = r.reason
+                return (
+                  <div key={i} className="p-3 rounded-xl"
+                    style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                    <div className="flex items-start gap-2 mb-1">
+                      <span className="text-amber-400 font-bold text-sm flex-shrink-0">{i + 1}.</span>
+                      <div>
+                        <p className="text-sm font-medium leading-snug">{topic}</p>
+                        {priority && <Chip label={priority} size="xs" color={priority === 'High' ? '#f87171' : '#facc15'} />}
+                        {reason && <p className="text-xs text-muted mt-1">{reason}</p>}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Next Interview Blueprint CTA ─────────────────────────────────── */}
+        {next_interview_blueprint && (
+          <div className="rounded-2xl p-6 text-center"
+            style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.15), rgba(34,211,238,0.1))', border: '1px solid rgba(124,58,237,0.3)' }}>
+            <Star size={24} className="text-purple-400 mx-auto mb-3" />
+            <h3 className="font-bold text-lg mb-1">Your Next Interview</h3>
+            <p className="text-muted text-sm mb-4">{next_interview_blueprint.reason}</p>
+            <div className="flex flex-wrap justify-center gap-2 mb-4">
+              <Chip label={ROUND_LABELS[next_interview_blueprint.round_type] || next_interview_blueprint.round_type} color="#7c3aed" />
+              <Chip label={next_interview_blueprint.difficulty} color="#22d3ee" />
+              <Chip label={`${next_interview_blueprint.timer_mins}m`} color="#a78bfa" />
+              {next_interview_blueprint.focus_topics?.map((t, i) => (
+                <Chip key={i} label={t} color="#4ade80" size="xs" />
+              ))}
+            </div>
+            <button onClick={() => navigate('/')} className="btn-primary">
+              <RotateCcw size={16} /> Start This Session
+            </button>
+          </div>
+        )}
+
+      </div>
+    </div>
+  )
+}

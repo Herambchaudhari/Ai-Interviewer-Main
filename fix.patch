@@ -1,0 +1,16 @@
+--- backend/routers/session.py
++++ backend/routers/session.py
+@@ -432,10 +432,9 @@
+         try:
+             updated_questions = list(questions) + [next_q]
+             update_session(body.session_id, {"questions": updated_questions})
+         except Exception as e:
+             print(f"[submit_answer/append_question] Error updating session DB: {e}")
+-
+-        print(f"[submit_answer] adaptive engine failed: {e}")
+-        # Fallback: serve next pre-generated question if available
+-        next_index = q_index + 1
++    except Exception as e:
++        print(f"[submit_answer] adaptive engine failed: {e}")
++        # Fallback: serve next pre-generated question if available
++        next_index = q_index + 1

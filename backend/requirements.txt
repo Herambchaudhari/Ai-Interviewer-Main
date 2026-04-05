@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+groq
+pdfplumber
+supabase
+PyJWT
+python-multipart
+httpx
+faster-whisper
+python-jose[cryptography]
+duckduckgo-search>=6.3.7
+ddgs>=0.1.0
