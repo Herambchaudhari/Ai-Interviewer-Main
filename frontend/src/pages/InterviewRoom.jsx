@@ -694,25 +694,16 @@ export default function InterviewRoom() {
               />
             </>
           ) : isMCQ ? (
-            <>
-              <QuestionPanel
-                question={currentQ}
-                questionIndex={qIndex}
-                totalQuestions={total}
-                roundType={roundType}
-                status={status}
-              />
-              <MCQQuestionPanel
-                question={currentQ}
-                questionIndex={qIndex}
-                totalQuestions={total}
-                selectedOptionIndex={selectedOptionIndex}
-                onSelect={handleMcqSelect}
-                disabled={status === 'evaluating'}
-                status={status}
-                timeLeft={mcqTimeLeft}
-              />
-            </>
+            <MCQQuestionPanel
+              question={currentQ}
+              questionIndex={qIndex}
+              totalQuestions={total}
+              selectedOptionIndex={selectedOptionIndex}
+              onSelect={handleMcqSelect}
+              disabled={status === 'evaluating'}
+              status={status}
+              timeLeft={mcqTimeLeft}
+            />
           ) : (
             <>
               <QuestionPanel
