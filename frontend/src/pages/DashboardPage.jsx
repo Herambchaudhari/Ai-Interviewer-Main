@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuthContext } from '../context/AuthContext'
-import { getProfile, getUserReports, getMarketNews } from '../lib/api'
+import { getProfile, getUserReports, getMarketNews, getUserChecklists } from '../lib/api'
 import RoundCards from '../components/RoundCards'
 import SessionConfig from '../components/SessionConfig'
 import { COMPANY_SECTORS } from '../constants/companies'
@@ -9,7 +9,7 @@ import {
   CalendarDays, TrendingUp, ChevronRight,
   BarChart2, RefreshCcw, Trophy, Clock,
   GraduationCap, Settings, Building2, Star, Layers,
-  Globe, ExternalLink, Activity, Loader2
+  Globe, ExternalLink, Activity, Loader2, CheckSquare, CheckCircle,
 } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { getReportRoute } from '../lib/routes'
@@ -50,6 +50,18 @@ export default function DashboardPage() {
   const [loadingNews, setLoadingNews]       = useState(true)
   const [reloadsLeft, setReloadsLeft]       = useState(5)   // max 5 per day
   const DAILY_LIMIT                         = 5
+
+  const [latestChecklist, setLatestChecklist] = useState(null)
+
+  useEffect(() => {
+    if (!user?.id) return
+    getUserChecklists(1)
+      .then(res => {
+        const list = res?.data?.checklists?.[0]
+        if (list) setLatestChecklist(list)
+      })
+      .catch(() => {})
+  }, [user?.id])
 
   const fetchNews = (forceRefresh = false) => {
     setLoadingNews(true)
@@ -315,6 +327,44 @@ export default function DashboardPage() {
           )}
         </div>
         )}
+
+        {/* ── Preparation Checklist Widget ───────────────────────────────── */}
+        {latestChecklist?.items?.length > 0 && (() => {
+          const items = Array.isArray(latestChecklist.items) ? latestChecklist.items : []
+          const done  = items.filter(i => i.checked).length
+          const total = items.length
+          const pct   = Math.round((done / total) * 100)
+          const pending = items.filter(i => !i.checked).slice(0, 3)
+          return (
+            <div className="glass p-5 animate-fade-in-up delay-200">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-bold text-base flex items-center gap-2">
+                  <CheckSquare size={16} style={{ color: '#4ade80' }} />
+                  Prep Checklist
+                </h2>
+                <span className="text-xs text-muted">{done}/{total} done</span>
+              </div>
+              {/* Progress bar */}
+              <div className="h-1.5 rounded-full mb-3" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                <div className="h-1.5 rounded-full transition-all" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #4ade80, #22d3ee)' }} />
+              </div>
+              {/* Top 3 pending */}
+              <div className="space-y-1.5">
+                {pending.map(item => (
+                  <div key={item.id} className="flex items-center gap-2 text-sm">
+                    <div className="w-3.5 h-3.5 rounded flex-shrink-0"
+                      style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }} />
+                    <span className="text-muted truncate">{item.title}</span>
+                  </div>
+                ))}
+              </div>
+              <Link to="/context-hub" className="text-xs font-semibold mt-3 flex items-center gap-1"
+                style={{ color: '#4ade80' }}>
+                View full checklist in Hub <ChevronRight size={12} />
+              </Link>
+            </div>
+          )
+        })()}
 
         {/* ── Past Reports ───────────────────────────────────────────────── */}
         <div className="animate-fade-in-up delay-300">

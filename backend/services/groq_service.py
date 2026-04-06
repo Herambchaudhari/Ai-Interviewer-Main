@@ -1078,6 +1078,7 @@ async def _gen_core(
     session: dict,
     profile: dict,
     market_context: str,
+    code_quality_metrics: dict = None,
 ) -> dict:
     """Stage 1 Groq call — core analysis with hire signal + failure patterns."""
     from prompts.report_prompt import build_core_analysis_prompt
@@ -1088,6 +1089,7 @@ async def _gen_core(
         question_scores=question_scores,
         overall_score=overall_score,
         market_context=market_context,
+        code_quality_metrics=code_quality_metrics,
     )
     radar_skills = _RADAR_SKILLS_BY_ROUND.get(round_type, _RADAR_SKILLS_BY_ROUND["technical"])
 
@@ -1288,4 +1290,100 @@ Return ONLY valid JSON (no markdown):
         return parsed
     except Exception as e:
         print(f"[synthesize_market_trends] Failed: {e}")
+        return fallback
+
+
+# ── Code Quality LLM Analysis ─────────────────────────────────────────────────
+
+async def _gen_code_quality_analysis(
+    code: str,
+    language: str,
+    static_metrics: dict,
+    question_text: str,
+) -> dict:
+    """
+    LLM-powered code quality analysis for a single DSA submission.
+
+    Inputs:
+        code            — submitted source code
+        language        — programming language
+        static_metrics  — output of analyze_code_quality() (heuristic metrics)
+        question_text   — the DSA problem statement
+
+    Returns a dict with:
+        code_quality_radar, code_review_notes, optimization_suggestions,
+        best_solution_approach, complexity_analysis
+    """
+    fallback = {
+        "code_quality_radar": {
+            "Algorithm Design":  50,
+            "Code Readability":  50,
+            "Time Efficiency":   50,
+            "Space Efficiency":  50,
+            "Edge Case Coverage": 50,
+            "Code Style":        50,
+        },
+        "code_review_notes":        ["Could not analyse code."],
+        "optimization_suggestions": [],
+        "best_solution_approach":   "Review the problem and revisit your approach.",
+        "complexity_analysis":      {"time": "Unknown", "space": "Unknown"},
+    }
+
+    if not code or not code.strip():
+        return fallback
+
+    code_snippet = code[:1500]   # keep prompt size manageable
+
+    prompt = f"""You are a senior software engineer conducting a code review.
+
+PROBLEM: {question_text}
+
+SUBMITTED CODE ({language}):
+```
+{code_snippet}
+```
+
+STATIC METRICS:
+- Lines of code: {static_metrics.get('lines_of_code', 0)}
+- Cyclomatic complexity: {static_metrics.get('cyclomatic_complexity', 0)}
+- Has comments: {static_metrics.get('has_comments', False)}
+- Variable naming score: {static_metrics.get('variable_naming_score', 0)}/100
+- Execution time: {static_metrics.get('execution_time_ms', 0)} ms
+- Memory used: {static_metrics.get('memory_kb', 0)} KB
+- Test result: {static_metrics.get('status', 'Unknown')}
+
+Analyse the code and return ONLY valid JSON (no markdown, no extra text):
+{{
+  "code_quality_radar": {{
+    "Algorithm Design":   <0-100>,
+    "Code Readability":   <0-100>,
+    "Time Efficiency":    <0-100>,
+    "Space Efficiency":   <0-100>,
+    "Edge Case Coverage": <0-100>,
+    "Code Style":         <0-100>
+  }},
+  "code_review_notes": [
+    "<specific observation about this code — max 3 items>"
+  ],
+  "optimization_suggestions": [
+    "<concrete improvement — max 3 items>"
+  ],
+  "best_solution_approach": "<1-2 sentences describing the optimal approach>",
+  "complexity_analysis": {{
+    "time":  "<O(n log n) style>",
+    "space": "<O(n) style>"
+  }}
+}}"""
+
+    try:
+        raw = await _achat([{"role": "user", "content": prompt}], temperature=0.2, max_tokens=800)
+        result = json.loads(_clean(raw))
+        # Clamp radar scores to 0-100
+        radar = result.get("code_quality_radar", {})
+        for axis in radar:
+            radar[axis] = max(0, min(100, int(radar[axis])))
+        result["code_quality_radar"] = radar
+        return result
+    except Exception as e:
+        print(f"[_gen_code_quality_analysis] error: {e}")
         return fallback

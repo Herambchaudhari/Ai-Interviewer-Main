@@ -421,4 +421,27 @@ export async function getMarketNews(profileId, forceRefresh = false) {
 }
 
 
+// ── Checklists ────────────────────────────────────────────────────────────────
+
+/** GET /api/v1/context-hub/checklists */
+export async function getUserChecklists(limit = 5) {
+  const { data } = await api.get(`/context-hub/checklists?limit=${limit}`)
+  return data
+}
+
+/** PATCH /api/v1/context-hub/checklists/:checklistId/items */
+export async function toggleChecklistItem(checklistId, itemId, checked) {
+  const { data } = await api.patch(`/context-hub/checklists/${checklistId}/items`, { item_id: itemId, checked })
+  return data
+}
+
+// ── PROGRESS ──────────────────────────────────────────────────────────────────
+export async function getUserProgress(userId, { limit = 20, roundType } = {}) {
+  const params = new URLSearchParams({ limit })
+  if (roundType) params.set('round_type', roundType)
+  const { data } = await api.get(`/progress/${userId}?${params}`)
+  return data
+}
+
+
 export default api

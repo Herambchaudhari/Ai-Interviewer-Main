@@ -21,12 +21,12 @@
  * 16. Next Interview Blueprint CTA
  * 17. Study Recommendations (legacy)
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
   BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
 import { getReportWithSSE } from '../lib/api'
 import {
@@ -34,7 +34,7 @@ import {
   Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
   Target, Zap, Brain, ArrowUp, ArrowDown, Minus, Shield,
   MessageSquare, BarChart2, Compass, Clock, Flame, Eye,
-  Share2, Download, Play, Pause, Volume2, X, Copy, Check,
+  Share2, Download, Play, Pause, Volume2, X, Copy, Check, Users,
 } from 'lucide-react'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -222,25 +222,31 @@ function ShareModal({ report, onClose }) {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const printCard = () => {
-    // Insert print-specific CSS, print, then remove
-    const style = document.createElement('style')
-    style.id = '__report_print_style'
-    style.textContent = `
-      @media print {
-        body > *:not(#__report_print_root) { display: none !important; }
-        #__report_print_root { display: block !important; position: fixed; top: 0; left: 0; width: 100%; }
-        @page { size: A4 landscape; margin: 0; }
-      }
-    `
-    document.head.appendChild(style)
+  const [exporting, setExporting] = useState(false)
+
+  const printCard = async () => {
     const el = cardRef.current
-    if (el) {
-      el.id = '__report_print_root'
+    if (!el) return
+    setExporting(true)
+    try {
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ])
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#0a0014' })
+      const imgData = canvas.toDataURL('image/png')
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+      const pdfW = pdf.internal.pageSize.getWidth()
+      const pdfH = (canvas.height * pdfW) / canvas.width
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH)
+      const name = report.candidate_name ? report.candidate_name.replace(/\s+/g, '_') : 'Candidate'
+      pdf.save(`AI_Interview_Report_${name}.pdf`)
+    } catch (e) {
+      console.error('PDF export failed:', e)
       window.print()
-      el.removeAttribute('id')
+    } finally {
+      setExporting(false)
     }
-    document.head.removeChild(style)
   }
 
   const strongList = strong_areas.slice(0, 3).map(a => {
@@ -330,10 +336,11 @@ function ShareModal({ report, onClose }) {
             {copied ? <Check size={14} style={{ color: '#4ade80' }} /> : <Copy size={14} />}
             {copied ? 'Copied!' : 'Copy Link'}
           </button>
-          <button onClick={printCard}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all btn-primary">
+          <button onClick={printCard} disabled={exporting}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all btn-primary"
+            style={{ opacity: exporting ? 0.7 : 1 }}>
             <Download size={14} />
-            Export PDF
+            {exporting ? 'Exporting…' : 'Export PDF'}
           </button>
         </div>
       </div>
@@ -485,6 +492,14 @@ export default function ReportPage() {
     auto_resources = [], follow_up_questions = [],
     proctoring_summary = {}, interview_integrity = null,
     next_interview_blueprint,
+    // Phase 2: Code quality
+    code_quality_metrics = null,
+    // Phase 4: Peer comparison
+    peer_comparison = null,
+    // Phase 5: Adaptive study schedule
+    study_schedule = null,
+    // Phase 6: Preparation checklist
+    checklist: reportChecklist = [],
   } = report
 
   const overall = +Number(overall_score).toFixed(1)
@@ -832,6 +847,173 @@ export default function ReportPage() {
           </div>
         )}
 
+        {/* ── Code Quality Analysis (DSA rounds only) ─────────────────────── */}
+        {round_type === 'dsa' && code_quality_metrics && (
+          <SectionCard icon={<BarChart2 size={16}/>} title="Code Quality Analysis" color="#a78bfa">
+            {/* Aggregate stats row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+              {[
+                { label: 'Test Pass Rate', value: `${Math.round((code_quality_metrics.test_pass_rate || 0) * 100)}%` },
+                { label: 'Avg Exec Time', value: `${code_quality_metrics.execution_time_ms || 0} ms` },
+                { label: 'Avg Memory', value: `${code_quality_metrics.memory_kb || 0} KB` },
+                { label: 'Naming Score', value: `${code_quality_metrics.variable_naming_score || 0}/100` },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded-lg p-3 text-center" style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)' }}>
+                  <p className="text-xs text-muted mb-1">{label}</p>
+                  <p className="font-bold text-lg" style={{ color: '#a78bfa' }}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Per-question code quality radar */}
+            {(() => {
+              const perQ = code_quality_metrics.per_question || []
+              const firstRadar = perQ[0]?.code_quality_radar
+              if (!firstRadar) return null
+              // Aggregate radar across all questions
+              const axes = Object.keys(firstRadar)
+              const avgRadar = axes.map(axis => ({
+                subject: axis,
+                A: Math.round(perQ.reduce((sum, q) => sum + (q.code_quality_radar?.[axis] || 0), 0) / perQ.length),
+                fullMark: 100,
+              }))
+              return (
+                <div className="mb-5">
+                  <p className="text-sm text-muted mb-3">Averaged across {perQ.length} question(s)</p>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <RadarChart data={avgRadar}>
+                      <PolarGrid stroke="rgba(255,255,255,0.1)"/>
+                      <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                      <Radar dataKey="A" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.25}/>
+                      <Tooltip formatter={v => [`${v}/100`]} contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40' }}/>
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+              )
+            })()}
+
+            {/* Per-question expandable cards */}
+            <div className="space-y-3">
+              {(code_quality_metrics.per_question || []).map((q, i) => (
+                <details key={i} className="rounded-lg overflow-hidden" style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                  <summary className="px-4 py-3 cursor-pointer text-sm font-medium flex items-center justify-between">
+                    <span>{q.question_text ? q.question_text.slice(0, 60) + '…' : `Question ${i + 1}`}</span>
+                    <span className="text-xs" style={{ color: q.test_pass_rate === 1 ? '#4ade80' : '#f87171' }}>
+                      {q.test_pass_rate === 1 ? 'Accepted' : q.status || 'Not Accepted'}
+                    </span>
+                  </summary>
+                  <div className="px-4 pb-4">
+                    {q.code_review_notes?.length > 0 && (
+                      <div className="mb-2">
+                        <p className="text-xs font-semibold text-muted mb-1">Review Notes</p>
+                        <ul className="list-disc list-inside space-y-1">
+                          {q.code_review_notes.map((note, ni) => <li key={ni} className="text-sm">{note}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {q.optimization_suggestions?.length > 0 && (
+                      <div className="mb-2">
+                        <p className="text-xs font-semibold text-muted mb-1">Optimizations</p>
+                        <ul className="list-disc list-inside space-y-1">
+                          {q.optimization_suggestions.map((s, si) => <li key={si} className="text-sm text-yellow-300">{s}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {q.complexity_analysis && (
+                      <div className="flex gap-4 mt-2">
+                        <span className="text-xs px-2 py-1 rounded" style={{ background: 'rgba(74,222,128,0.1)', color: '#4ade80' }}>
+                          Time: {q.complexity_analysis.time}
+                        </span>
+                        <span className="text-xs px-2 py-1 rounded" style={{ background: 'rgba(251,146,60,0.1)', color: '#fb923c' }}>
+                          Space: {q.complexity_analysis.space}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Peer Comparison ──────────────────────────────────────────────── */}
+        {peer_comparison && (
+          <SectionCard icon={<Users size={16}/>} title="Peer Comparison" color="#06b6d4">
+            {peer_comparison.sample_size > 0 ? (
+              <>
+                {/* Summary strip */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                  {[
+                    { label: 'Your Score',    val: `${overall}`,    color: scoreColor(overall) },
+                    { label: 'Peer Avg',      val: peer_comparison.avg_peer_score != null ? `${peer_comparison.avg_peer_score}` : '—', color: '#94a3b8' },
+                    { label: 'Percentile',    val: peer_comparison.overall_percentile != null ? `${peer_comparison.overall_percentile}th` : '—', color: '#06b6d4' },
+                    { label: 'Peer Hire Rate',val: peer_comparison.hire_rate != null ? `${peer_comparison.hire_rate}%` : '—', color: '#4ade80' },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} className="glass p-3 text-center rounded-xl">
+                      <p className="text-xl font-bold" style={{ color }}>{val}</p>
+                      <p className="text-xs text-muted mt-0.5">{label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Insight */}
+                {peer_comparison.insight && (
+                  <p className="text-sm text-muted mb-4 italic">{peer_comparison.insight}</p>
+                )}
+
+                {/* Radar comparison bar chart */}
+                {peer_comparison.radar_comparison?.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-xs text-muted uppercase tracking-widest mb-2">Axis-by-Axis vs Peers</p>
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart
+                        data={peer_comparison.radar_comparison}
+                        margin={{ top: 5, right: 10, bottom: 5, left: -20 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis dataKey="axis" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
+                        <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
+                        <Tooltip
+                          contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12 }}
+                          formatter={(v, name) => [v, name === 'user_score' ? 'You' : 'Peer Avg']}
+                        />
+                        <Bar dataKey="user_score" name="you" fill="#06b6d4" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="peer_avg"   name="peer_avg" fill="rgba(148,163,184,0.4)" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
+                {/* Grade distribution */}
+                {Object.keys(peer_comparison.grade_distribution || {}).length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted uppercase tracking-widest mb-2">Grade Distribution (peers)</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {Object.entries(peer_comparison.grade_distribution).map(([g, pct]) => {
+                        const isUser = g === peer_comparison.user_grade
+                        return (
+                          <div key={g}
+                            className="flex flex-col items-center px-3 py-2 rounded-xl text-xs"
+                            style={{
+                              background: isUser ? 'rgba(6,182,212,0.15)' : 'rgba(255,255,255,0.04)',
+                              border: isUser ? '1px solid rgba(6,182,212,0.5)' : '1px solid rgba(255,255,255,0.08)',
+                            }}>
+                            <span className="font-bold text-base" style={{ color: isUser ? '#06b6d4' : '#94a3b8' }}>{g}</span>
+                            <span style={{ color: isUser ? '#06b6d4' : '#64748b' }}>{pct}%</span>
+                            {isUser && <span className="text-[10px] text-cyan-400 mt-0.5">you</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted">{peer_comparison.insight || 'Not enough peer data yet.'}</p>
+            )}
+          </SectionCard>
+        )}
+
         {/* ── Company Fit ─────────────────────────────────────────────────── */}
         {company_fit && (
           <SectionCard icon={<Target size={16}/>} title={`${company_fit.target_company || 'Company'} Fit Calibration`} color="#22d3ee">
@@ -1123,6 +1305,132 @@ export default function ReportPage() {
               ))}
             </div>
           </div>
+        )}
+
+        {/* ── Adaptive Study Schedule ─────────────────────────────────────── */}
+        {study_schedule?.topics?.length > 0 && (
+          <SectionCard icon={<BookOpen size={16}/>} title="Adaptive Study Schedule" color="#4ade80">
+            {/* Summary line */}
+            <div className="flex flex-wrap gap-4 mb-5 text-sm">
+              <span className="text-muted">
+                <span className="font-semibold text-white">{study_schedule.topics.length}</span> topics tracked
+              </span>
+              {study_schedule.days_until_target != null && (
+                <span className="text-muted">
+                  <span className="font-semibold text-white">{study_schedule.days_until_target}</span> days to interview
+                </span>
+              )}
+              <span className="text-muted">
+                <span className="font-semibold text-white">{study_schedule.schedule_horizon}</span>-day horizon
+              </span>
+            </div>
+
+            {/* Topic cards */}
+            <div className="space-y-3">
+              {study_schedule.topics.map(t => {
+                const pColor = t.priority === 'Critical' ? '#f87171'
+                  : t.priority === 'High'     ? '#fb923c'
+                  : t.priority === 'Medium'   ? '#facc15'
+                  : '#4ade80'
+                return (
+                  <div key={t.topic}
+                    className="glass p-4 rounded-xl"
+                    style={{ borderLeft: `3px solid ${pColor}` }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-semibold text-sm text-white">{t.topic}</p>
+                      <div className="flex items-center gap-2">
+                        {t.score != null && (
+                          <span className="text-xs text-muted">Score: <span className="font-bold text-white">{t.score}</span></span>
+                        )}
+                        <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                          style={{ background: `${pColor}20`, color: pColor }}>
+                          {t.priority}
+                        </span>
+                      </div>
+                    </div>
+                    {/* Review timeline */}
+                    <div className="flex flex-wrap gap-2">
+                      {t.reviews.map((r, i) => (
+                        <div key={i}
+                          className="text-xs px-2.5 py-1 rounded-lg text-center"
+                          style={{ background: 'rgba(255,255,255,0.05)', minWidth: 80 }}>
+                          <p className="font-medium text-white">{r.session_type}</p>
+                          <p className="text-muted">{r.date}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Next 7 days quick view */}
+            {(() => {
+              const today = new Date()
+              const next7 = Object.entries(study_schedule.daily_plan || {})
+                .filter(([d]) => {
+                  const diff = (new Date(d) - today) / 86400000
+                  return diff >= 0 && diff < 7
+                })
+                .slice(0, 7)
+              if (!next7.length) return null
+              return (
+                <div className="mt-5">
+                  <p className="text-xs text-muted uppercase tracking-widest mb-2">Next 7 Days</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                    {next7.map(([d, topics]) => (
+                      <div key={d} className="glass p-2.5 rounded-xl text-xs">
+                        <p className="font-semibold text-white mb-1">{new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</p>
+                        {topics.map(tp => (
+                          <p key={tp} className="text-muted truncate">· {tp}</p>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+          </SectionCard>
+        )}
+
+        {/* ── Preparation Checklist ──────────────────────────────────────── */}
+        {reportChecklist?.length > 0 && (
+          <SectionCard icon={<CheckCircle size={16}/>} title="Preparation Checklist" color="#4ade80">
+            <p className="text-xs text-muted mb-4">
+              {reportChecklist.filter(i => i.checked).length} / {reportChecklist.length} completed
+            </p>
+            <div className="space-y-2">
+              {reportChecklist.map((item) => {
+                const catColor = {
+                  'Weak Area Fix':    '#f87171',
+                  'Practice':         '#06b6d4',
+                  'Concept Review':   '#7c3aed',
+                  'Resource':         '#f59e0b',
+                  'Mock Interview':   '#4ade80',
+                  'Company Research': '#a78bfa',
+                }[item.category] || '#94a3b8'
+                const priorityColor = item.priority === 'High' ? '#f87171' : item.priority === 'Medium' ? '#facc15' : '#4ade80'
+                return (
+                  <div key={item.id}
+                    className="flex items-start gap-3 p-3 rounded-xl"
+                    style={{ background: 'rgba(255,255,255,0.03)', opacity: item.checked ? 0.5 : 1 }}>
+                    <div className="w-4 h-4 rounded mt-0.5 flex-shrink-0"
+                      style={{ background: item.checked ? '#4ade80' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+                      {item.checked && <Check size={12} style={{ color: '#0f172a', margin: 1 }} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-white" style={{ textDecoration: item.checked ? 'line-through' : 'none' }}>{item.title}</p>
+                      {item.details && <p className="text-xs text-muted mt-0.5 truncate">{item.details}</p>}
+                    </div>
+                    <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: `${catColor}20`, color: catColor }}>{item.category}</span>
+                      <span className="text-xs" style={{ color: priorityColor }}>{item.priority}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </SectionCard>
         )}
 
         {/* ── Study Recommendations (legacy) ──────────────────────────────── */}
