@@ -11,8 +11,16 @@ from typing import Optional
 from auth import get_current_user
 from services.groq_service import generate_questions
 from services.db_service import save_session, get_profile as _get_profile
+from services.evaluator import evaluate_mcq_response
 
 router = APIRouter()
+
+_ROUND_LABELS = {
+    "technical": "Technical",
+    "hr": "HR",
+    "dsa": "DSA",
+    "mcq_practice": "MCQ Practice",
+}
 
 
 def _ok(data: dict, message: str = "Success") -> dict:
@@ -26,6 +34,135 @@ def _err(error: str, status: int = 400):
     )
 
 
+def _resolve_context_bundle(session: dict) -> dict:
+    context_bundle = dict(session.get("context_bundle") or {})
+    profile_id = session.get("profile_id")
+
+    if profile_id:
+        try:
+            profile = _get_profile(profile_id) or {}
+            parsed = profile.get("parsed_data") or {}
+            if isinstance(parsed, dict):
+                context_bundle = {**parsed, **context_bundle}
+        except Exception:
+            pass
+
+    target_company = session.get("target_company") or context_bundle.get("target_company") or ""
+    target_role = (
+        session.get("target_role")
+        or session.get("job_role")
+        or context_bundle.get("target_role")
+        or context_bundle.get("job_role")
+        or ""
+    )
+
+    if target_company:
+        context_bundle["target_company"] = target_company
+    if target_role:
+        context_bundle["job_role"] = target_role
+
+    return context_bundle
+
+
+def _build_session_label(round_type: str, target_company: str = "", job_role: str = "") -> str:
+    round_label = _ROUND_LABELS.get(round_type or "technical", "Interview")
+    role = (job_role or "").strip()
+    company = (target_company or "").strip()
+
+    if role and company:
+        return f"{round_label} - {role} @ {company}"
+    if role:
+        return f"{round_label} - {role}"
+    if company:
+        return f"{round_label} - {company}"
+    return f"{round_label} Interview"
+
+
+def _resolve_question_type(round_type: str) -> str:
+    if round_type == "dsa":
+        return "code"
+    if round_type == "mcq_practice":
+        return "mcq"
+    return "speech"
+
+
+def _resolve_question_time_limit(round_type: str, difficulty: str) -> int:
+    if round_type == "mcq_practice":
+        return {"easy": 75, "medium": 90, "hard": 120}.get(difficulty, 90)
+    return _TIME_LIMITS[difficulty]
+
+
+def _serialize_question_payload(question: dict, fallback_order: int = 0) -> dict:
+    return {
+        "id": question.get("id"),
+        "text": question.get("question_text", question.get("text", "")),
+        "question_text": question.get("question_text", question.get("text", "")),
+        "category": question.get("topic", question.get("category", "")),
+        "type": question.get("type", "speech"),
+        "time_limit_secs": question.get("time_limit_secs", 180),
+        "expected_points": question.get("expected_concepts", question.get("expected_points", [])),
+        "title": question.get("title", ""),
+        "description": question.get("description", question.get("question_text", "")),
+        "examples": question.get("examples", []),
+        "constraints": question.get("constraints", []),
+        "difficulty": question.get("difficulty_level", ""),
+        "hint": question.get("hint", ""),
+        "order_index": question.get("order_index", fallback_order),
+        "is_follow_up": question.get("is_follow_up", False),
+        "decision_reason": question.get("decision_reason", ""),
+        "options": question.get("options", []),
+        "explanation": question.get("explanation", ""),
+        "source_signal": question.get("source_signal", ""),
+    }
+
+
+def _normalize_verbal_evaluation(evaluation: dict) -> dict:
+    evaluation = dict(evaluation or {})
+
+    strengths = evaluation.get("strengths") or evaluation.get("strong_points") or []
+    improvements = evaluation.get("improvements") or evaluation.get("weak_points") or []
+
+    if isinstance(strengths, str):
+        strengths = [strengths]
+    if isinstance(improvements, str):
+        improvements = [improvements]
+
+    evaluation["strengths"] = [str(item).strip() for item in strengths if str(item).strip()]
+    evaluation["improvements"] = [str(item).strip() for item in improvements if str(item).strip()]
+    evaluation.setdefault("feedback", "")
+    evaluation.setdefault("dimension_scores", {})
+    evaluation.setdefault("missing_concepts", [])
+    return evaluation
+
+
+def _feedback_chunks(text: str, target_chars: int = 120) -> list[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+
+    words = cleaned.split()
+    if len(cleaned) <= target_chars or len(words) <= 8:
+        return [cleaned]
+
+    chunks = []
+    current = []
+    current_len = 0
+    for word in words:
+        projected = current_len + len(word) + (1 if current else 0)
+        if current and projected > target_chars:
+            chunks.append(" ".join(current))
+            current = [word]
+            current_len = len(word)
+        else:
+            current.append(word)
+            current_len = projected
+
+    if current:
+        chunks.append(" ".join(current))
+
+    return chunks
+
+
 class StudentMetaPayload(BaseModel):
     name:             Optional[str]       = None
     year:             Optional[str]       = None
@@ -37,7 +174,7 @@ class StudentMetaPayload(BaseModel):
 
 class SessionStartRequest(BaseModel):
     profile_id:   str
-    round_type:   str           # technical | hr | dsa | system_design
+    round_type:   str           # technical | hr | dsa | mcq_practice
     difficulty:   str           # fresher | mid-level | senior  (maps to easy/medium/hard)
     timer_mins:   int = 30
     num_questions: int = 8
@@ -81,7 +218,7 @@ async def start_session(
         return _err(f"Invalid difficulty '{body.difficulty}'. Use: fresher, mid-level, senior.")
 
     round_type = body.round_type.lower()
-    if round_type not in ("technical", "hr", "dsa", "system_design"):
+    if round_type not in ("technical", "hr", "dsa", "mcq_practice"):
         return _err(f"Invalid round_type '{body.round_type}'.")
 
     # ── Assemble full candidate context (Phase 1) ──────────────────────────
@@ -112,6 +249,13 @@ async def start_session(
         context["target_company"] = body.target_company or ""
         context["job_role"] = body.job_role or "Software Engineer"
 
+    session_label = _build_session_label(
+        round_type=round_type,
+        target_company=context.get("target_company", ""),
+        job_role=context.get("job_role", ""),
+    )
+    context["session_label"] = session_label
+
     # resume_data alias kept for generate_questions() compat below
     resume_data = context
 
@@ -127,11 +271,11 @@ async def start_session(
         return _err(f"Failed to generate questions: {str(e)}", status=500)
 
     # Attach stable IDs and time limits to each question
-    time_limit = _TIME_LIMITS[difficulty]
+    time_limit = _resolve_question_time_limit(round_type, difficulty)
     for i, q in enumerate(questions):
         q["id"]          = str(uuid.uuid4())
         q["order_index"] = i
-        q["type"]        = "code" if round_type == "dsa" else "speech"
+        q["type"]        = _resolve_question_type(round_type)
         q["time_limit_secs"] = time_limit
 
     # ── Save session ───────────────────────────────────────────────────────
@@ -166,15 +310,18 @@ async def start_session(
             "first_question": {
                 "id":              first_question.get("id"),
                 "text":            first_question.get("question_text", ""),
-                "type":            first_question.get("type", "speech"),
+                "type":            first_question.get("type", _resolve_question_type(round_type)),
                 "time_limit_secs": first_question.get("time_limit_secs", 180),
                 "category":        first_question.get("category", ""),
+                "options":         first_question.get("options", []),
+                "explanation":     first_question.get("explanation", ""),
             },
             "questions": questions,          # all questions — frontend stores in sessionStorage
             "timer_mins":    body.timer_mins,
             "round_type":    round_type,
             "difficulty":    difficulty,
             "num_questions": body.num_questions,
+            "session_label": session_label,
         },
         message="Session created successfully",
     )
@@ -288,6 +435,9 @@ class AnswerRequest(BaseModel):
     session_id:       str
     question_id:      str
     transcript:       str
+    language:         Optional[str] = "python"
+    selected_option:  Optional[str] = None
+    selected_option_index: Optional[int] = None
     time_taken_secs:  Optional[int] = None
     current_question: Optional[dict] = None
     is_last_question: Optional[bool] = False
@@ -319,7 +469,7 @@ async def submit_answer(
     round_type      = session.get("round_type", "technical")
     questions       = session.get("questions", [])
     num_questions   = session.get("num_questions", 8)
-    context_bundle  = session.get("context_bundle") or {}
+    context_bundle  = _resolve_context_bundle(session)
 
     # Find current question object
     current_q = next((q for q in questions if q.get("id") == body.question_id), body.current_question)
@@ -328,13 +478,20 @@ async def submit_answer(
     q_topic   = (current_q or {}).get("topic") or (current_q or {}).get("category", "")
 
     # ── Evaluate — choose evaluator based on round type ────────────────────
+    is_mcq_round = round_type == "mcq_practice"
     is_code_round = round_type == "dsa"
     looks_like_code = (
         body.transcript.startswith(("def ", "class ", "#", "//", "import ", "public ", "package ", "func "))
         or "\n" in body.transcript[:100]
     )
 
-    if is_code_round or looks_like_code:
+    if is_mcq_round:
+        evaluation = evaluate_mcq_response(
+            question=current_q or {"question_text": q_text},
+            selected_option_index=body.selected_option_index,
+            selected_option_text=body.selected_option or body.transcript,
+        )
+    elif is_code_round or looks_like_code:
         evaluation = await evaluate_code(
             question=current_q or {"question_text": q_text},
             code=body.transcript,
@@ -351,6 +508,7 @@ async def submit_answer(
             round_type=round_type,
             scoring_context=body.scoring_context,
         )
+        evaluation = _normalize_verbal_evaluation(evaluation)
 
     evaluation["question_id"]    = body.question_id
     evaluation["question_text"]  = q_text
@@ -369,6 +527,14 @@ async def submit_answer(
             "question_id":        body.question_id,
             "question":           q_text,
             "answer":             body.transcript,
+            "language":           body.language,
+            "question_type":      "mcq" if is_mcq_round else ("code" if is_code_round or looks_like_code else "speech"),
+            "selected_option":    evaluation.get("selected_option", body.selected_option),
+            "selected_option_index": evaluation.get("selected_option_index", body.selected_option_index),
+            "correct_option":     evaluation.get("correct_option", (current_q or {}).get("correct_option")),
+            "correct_option_index": evaluation.get("correct_option_index", (current_q or {}).get("correct_option_index")),
+            "is_correct":         evaluation.get("is_correct"),
+            "explanation":        (current_q or {}).get("explanation", ""),
             "score":              evaluation.get("score"),
             "feedback":           evaluation.get("feedback", ""),
             "verdict":            evaluation.get("verdict", ""),
@@ -381,6 +547,7 @@ async def submit_answer(
             "is_follow_up":       evaluation.get("is_follow_up", False),
             "scoring_meta":       body.scoring_context or {},
             "dimension_scores":   evaluation.get("dimension_scores", {}),
+            "red_flag_detected":  evaluation.get("red_flag_detected", ""),
         })
         existing_scores.append(evaluation.get("score"))
         answered_count = len(existing_transcript)
@@ -409,6 +576,23 @@ async def submit_answer(
             "next_question":    None,
         })
 
+    if is_mcq_round:
+        next_index = q_index + 1
+        next_q = questions[next_index] if next_index < len(questions) else None
+        if next_q is None:
+            return _ok(data={
+                "evaluation":       evaluation,
+                "session_complete": True,
+                "next_question":    None,
+            })
+        next_q["order_index"] = next_index
+        return _ok(data={
+            "evaluation":       evaluation,
+            "session_complete": False,
+            "next_question":    _serialize_question_payload(next_q, answered_count),
+            "is_follow_up":     False,
+        })
+
     # ── Generate next question via adaptive engine ─────────────────────────
     from services.adaptive_engine import generate_adaptive_next_question
     try:
@@ -424,8 +608,8 @@ async def submit_answer(
         )
         next_q["order_index"]     = answered_count
         next_q["id"]              = str(uuid.uuid4())
-        next_q["time_limit_secs"] = _TIME_LIMITS.get(session.get("difficulty", "medium"), 180)
-        next_q["type"]            = "code" if round_type == "dsa" else "speech"
+        next_q["time_limit_secs"] = _resolve_question_time_limit(round_type, session.get("difficulty", "medium"))
+        next_q["type"]            = _resolve_question_type(round_type)
 
         # Append newly generated question to session
         try:
@@ -450,24 +634,7 @@ async def submit_answer(
     return _ok(data={
         "evaluation":       evaluation,
         "session_complete": False,
-        "next_question": {
-            "id":              next_q.get("id"),
-            "text":            next_q.get("question_text", next_q.get("text", "")),
-            "question_text":   next_q.get("question_text", next_q.get("text", "")),
-            "category":        next_q.get("topic", next_q.get("category", "")),
-            "type":            next_q.get("type", "speech"),
-            "time_limit_secs": next_q.get("time_limit_secs", 180),
-            "expected_points": next_q.get("expected_concepts", next_q.get("expected_points", [])),
-            "title":           next_q.get("title", ""),
-            "description":     next_q.get("description", next_q.get("question_text", "")),
-            "examples":        next_q.get("examples", []),
-            "constraints":     next_q.get("constraints", []),
-            "difficulty":      next_q.get("difficulty_level", ""),
-            "hint":            next_q.get("hint", ""),
-            "order_index":     next_q.get("order_index", answered_count),
-            "is_follow_up":    next_q.get("is_follow_up", False),
-            "decision_reason": next_q.get("decision_reason", ""),
-        },
+        "next_question":    _serialize_question_payload(next_q, answered_count),
         "is_follow_up": next_q.get("is_follow_up", False),
     })
 
@@ -482,7 +649,7 @@ class RunCodeRequest(BaseModel):
     session_id: Optional[str] = None
 
 
-@router.post("/run-code")
+# Judge0 runner retired from active workflow
 async def run_code_endpoint(
     body: RunCodeRequest,
     user: dict = Depends(get_current_user),
@@ -574,6 +741,7 @@ async def skip_question(
     questions      = session.get("questions", [])
     num_questions  = session.get("num_questions", 8)
     context_bundle = session.get("context_bundle") or {}
+    round_type     = session.get("round_type", "technical")
 
     current_q  = next((q for q in questions if q.get("id") == body.question_id), body.current_question)
     q_index    = (current_q or {}).get("order_index", 0)
@@ -604,6 +772,17 @@ async def skip_question(
     if body.is_last_question or answered_count >= num_questions:
         return _ok(data={"session_complete": True, "next_question": None, "skipped": True})
 
+    if round_type == "mcq_practice":
+        next_q = questions[next_index] if next_index < len(questions) else None
+        if next_q is None:
+            return _ok(data={"session_complete": True, "next_question": None, "skipped": True})
+        next_q["order_index"] = next_index
+        return _ok(data={
+            "session_complete": False,
+            "next_question": _serialize_question_payload(next_q, answered_count),
+            "skipped": True,
+        })
+
     # Generate next question via adaptive engine (skip = neutral score 5, no follow-up)
     from services.adaptive_engine import generate_adaptive_next_question
     try:
@@ -617,8 +796,8 @@ async def skip_question(
         )
         next_q["order_index"]     = answered_count
         next_q["id"]              = str(uuid.uuid4())
-        next_q["time_limit_secs"] = _TIME_LIMITS.get(session.get("difficulty", "medium"), 180)
-        next_q["type"]            = "code" if session.get("round_type") == "dsa" else "speech"
+        next_q["time_limit_secs"] = _resolve_question_time_limit(round_type, session.get("difficulty", "medium"))
+        next_q["type"]            = _resolve_question_type(round_type)
         try:
             update_session(body.session_id, {"questions": list(questions) + [next_q]})
         except Exception:
@@ -632,24 +811,7 @@ async def skip_question(
 
     return _ok(data={
         "session_complete": False,
-        "next_question": {
-            "id":              next_q.get("id"),
-            "text":            next_q.get("question_text", next_q.get("text", "")),
-            "question_text":   next_q.get("question_text", next_q.get("text", "")),
-            "category":        next_q.get("topic", next_q.get("category", "")),
-            "type":            next_q.get("type", "speech"),
-            "time_limit_secs": next_q.get("time_limit_secs", 180),
-            "expected_points": next_q.get("expected_concepts", next_q.get("expected_points", [])),
-            "title":           next_q.get("title", ""),
-            "description":     next_q.get("description", next_q.get("question_text", "")),
-            "examples":        next_q.get("examples", []),
-            "constraints":     next_q.get("constraints", []),
-            "difficulty":      next_q.get("difficulty_level", ""),
-            "hint":            next_q.get("hint", ""),
-            "order_index":     next_q.get("order_index", answered_count),
-            "is_follow_up":    next_q.get("is_follow_up", False),
-            "decision_reason": next_q.get("decision_reason", ""),
-        },
+        "next_question": _serialize_question_payload(next_q, answered_count),
         "skipped": True,
     })
 
@@ -690,7 +852,7 @@ async def submit_answer_stream(
         round_type      = session.get("round_type", "technical")
         questions       = session.get("questions", [])
         num_questions   = session.get("num_questions", 8)
-        context_bundle  = session.get("context_bundle") or {}
+        context_bundle  = _resolve_context_bundle(session)
 
         current_q = next((q for q in questions if q.get("id") == body.question_id), body.current_question)
         q_text    = (current_q or {}).get("question_text", "")
@@ -715,47 +877,19 @@ async def submit_answer_stream(
             evaluation["strengths"]    = evaluation.get("code_quality", {}).get("positives", [])
             evaluation["improvements"] = evaluation.get("optimization_hints", [])
             full_text = evaluation.get("feedback", "")
-            yield f"data: {_json.dumps({'type': 'feedback_chunk', 'text': full_text})}\n\n"
         else:
-            # Build eval prompt for streaming
-            from services.evaluator import _build_eval_system_prompt, _build_eval_user_prompt
-            from services.groq_service import stream_chat
-            try:
-                sys_p  = _build_eval_system_prompt(round_type)
-                user_p = _build_eval_user_prompt(q_text, body.transcript, round_type, body.scoring_context)
-                async for chunk in stream_chat(sys_p, user_p, temperature=0.3, max_tokens=1000):
-                    full_text += chunk
-                    yield f"data: {_json.dumps({'type': 'feedback_chunk', 'text': chunk})}\n\n"
-            except Exception as e:
-                print(f"[answer/stream] streaming eval failed, falling back: {e}")
-                evaluation = await _eval_verbal(
-                    question=current_q or {"question_text": q_text},
-                    transcript=body.transcript,
-                    round_type=round_type,
-                    scoring_context=body.scoring_context,
-                )
-                full_text = evaluation.get("feedback", "")
-                yield f"data: {_json.dumps({'type': 'feedback_chunk', 'text': full_text})}\n\n"
+            evaluation = await _eval_verbal(
+                question=current_q or {"question_text": q_text},
+                transcript=body.transcript,
+                round_type=round_type,
+                scoring_context=body.scoring_context,
+            )
+            evaluation = _normalize_verbal_evaluation(evaluation)
 
         # Parse full streamed text → structured evaluation
-        if not is_code:
-            try:
-                import re
-                cleaned = full_text.strip().strip("```json").strip("```").strip()
-                # Find JSON object in streamed text
-                match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-                if match:
-                    evaluation = _json.loads(match.group())
-                else:
-                    evaluation = _json.loads(cleaned)
-            except Exception:
-                evaluation = {
-                    "score": 5, "feedback": full_text[:500],
-                    "strong_points": [], "weak_points": [],
-                    "missing_concepts": [], "communication_score": 5,
-                    "verdict": "Satisfactory", "answer_summary": "",
-                    "key_concept_missed": "", "follow_up_needed": False,
-                }
+        feedback_text = evaluation.get("feedback", "") if not is_code else full_text
+        for chunk in _feedback_chunks(feedback_text):
+            yield f"data: {_json.dumps({'type': 'feedback_chunk', 'text': chunk})}\n\n"
 
         evaluation["question_id"]    = body.question_id
         evaluation["question_text"]  = q_text
@@ -774,13 +908,15 @@ async def submit_answer_stream(
                 "score":              evaluation.get("score"),
                 "feedback":           evaluation.get("feedback", ""),
                 "verdict":            evaluation.get("verdict", ""),
-                "strengths":          evaluation.get("strong_points", evaluation.get("strengths", [])),
-                "improvements":       evaluation.get("weak_points", evaluation.get("improvements", [])),
+                "strengths":          evaluation.get("strengths", evaluation.get("strong_points", [])),
+                "improvements":       evaluation.get("improvements", evaluation.get("weak_points", [])),
                 "key_concept_missed": evaluation.get("key_concept_missed", ""),
                 "answer_summary":     evaluation.get("answer_summary", ""),
                 "category":           q_topic,
+                "topic":              q_topic,
                 "scoring_meta":       body.scoring_context or {},
                 "dimension_scores":   evaluation.get("dimension_scores", {}),
+                "red_flag_detected":  evaluation.get("red_flag_detected", ""),
             })
             answered_count = len(existing_transcript)
             from services.adaptive_engine import _update_detected_weaknesses
@@ -845,6 +981,7 @@ from fastapi import BackgroundTasks
 class EndSessionRequest(BaseModel):
     session_id: str
     reason:     Optional[str] = "completed"   # completed | timeout | manual
+    proctoring_summary: Optional[dict] = None
 
 
 async def _generate_report_bg(session_id: str):
@@ -866,6 +1003,10 @@ async def _generate_report_bg(session_id: str):
                 "answer_text":   e.get("answer", ""),
                 "score":         e.get("score") or 0,
                 "feedback":      e.get("feedback", ""),
+                "category":      e.get("category") or e.get("topic") or round_type,
+                "verdict":       e.get("verdict", ""),
+                "answer_summary": e.get("answer_summary", ""),
+                "key_concept_missed": e.get("key_concept_missed", ""),
             }
             for e in transcript
         ]
@@ -904,11 +1045,25 @@ async def end_session(
         if session and session.get("user_id") != user["user_id"]:
             return _err("Access denied.", status=403)
 
-        update_session(body.session_id, {
+        updates = {
             "status":     "completed",
             "ended_at":   __import__("datetime").datetime.utcnow().isoformat(),
             "end_reason": body.reason,
-        })
+        }
+        if session and isinstance(body.proctoring_summary, dict):
+            context_bundle = dict(session.get("context_bundle") or {})
+            context_bundle["proctoring_summary"] = body.proctoring_summary
+            context_bundle.setdefault(
+                "session_label",
+                _build_session_label(
+                    round_type=session.get("round_type", "technical"),
+                    target_company=session.get("target_company", ""),
+                    job_role=session.get("target_role") or context_bundle.get("job_role", ""),
+                ),
+            )
+            updates["context_bundle"] = context_bundle
+
+        update_session(body.session_id, updates)
     except Exception:
         pass   # Non-fatal if DB not configured
 

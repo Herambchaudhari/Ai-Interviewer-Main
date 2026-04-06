@@ -64,6 +64,7 @@ def _parse_question(raw: str, fallback_text: str = "Question could not be genera
         cleaned.setdefault("question_text",   cleaned["text"])
         cleaned.setdefault("type",            "technical")
         cleaned.setdefault("topic",           "General")
+        cleaned.setdefault("category",        cleaned["topic"])
         cleaned.setdefault("expected_concepts", [])
         cleaned.setdefault("difficulty_level", "medium")
         cleaned.setdefault("time_limit_secs", 180)
@@ -75,6 +76,7 @@ def _parse_question(raw: str, fallback_text: str = "Question could not be genera
             "question_text":    fallback_text,
             "type":            "technical",
             "topic":           "General",
+            "category":        "General",
             "expected_concepts": [],
             "difficulty_level": "medium",
             "time_limit_secs":  180,
@@ -154,6 +156,11 @@ async def generate_next_question(
         "4. The question must be on a DIFFERENT topic from the ones already covered.\n"
         "Generate the next question now."
     )
+    if round_type == "technical":
+        user_msg += (
+            "\n5. Prefer a resume/project deep-dive grounded in the candidate's actual projects and skills "
+            "unless the adaptive directive explicitly forces a standalone CS fundamentals question."
+        )
 
     if conversation_history and len(conversation_history) >= 4 and random.random() < 0.3:
         user_msg = (
@@ -226,21 +233,28 @@ async def generate_coding_question(
     diff_label    = _DIFFICULTY_LABELS.get(difficulty, "Medium")
     topic_hint    = _LANG_MAP.get(difficulty, "arrays/hashing")
     time_limit    = _TIME_MAP.get(difficulty, 1800)
+    target_company = profile.get("target_company", "the target company")
+    job_role = profile.get("job_role", "Software Engineer")
+    coding_ctx = profile.get("company_questions_context", "")
 
     system = (
         "You are a senior interviewer at a top tech company. "
-        "Generate a complete DSA coding problem. "
-        "Return ONLY valid JSON — no markdown."
+        "Generate a complete DSA coding problem that feels like a professional online assessment. "
+        "Return ONLY valid JSON - no markdown."
     )
     user_msg = (
         f"Candidate skills: {skills}\n"
+        f"Target company: {target_company}\n"
+        f"Target role: {job_role}\n"
         f"Difficulty: {diff_label}\n"
         f"Focus area: {topic_hint}\n"
         f"Already asked (DO NOT repeat): {asked_str}\n\n"
+        f"Recent company coding intelligence:\n{coding_ctx or 'No live company coding context available.'}\n\n"
+        "Make the problem feel aligned to the role and to recent company OA patterns when context is available.\n"
         "Return ONLY valid JSON:\n"
         "{\n"
         '  "title": "<short problem title>",\n'
-        '  "description": "<full problem statement, 2-4 paragraphs>",\n'
+        '  "description": "<full OA-style problem statement, 2-4 paragraphs>",\n'
         '  "examples": [\n'
         '    { "input": "<ex input>", "output": "<ex output>", "explanation": "<brief>" },\n'
         '    { "input": "<ex input>", "output": "<ex output>", "explanation": "<brief>" }\n'
@@ -278,4 +292,5 @@ async def generate_coding_question(
     result["text"]           = result.get("description", result.get("title", ""))
     result["time_limit_secs"] = time_limit
     result["type"]           = "coding"
+    result["category"]       = result.get("topic", "DSA")
     return result

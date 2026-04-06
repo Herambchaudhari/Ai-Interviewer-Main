@@ -3,7 +3,7 @@
  * Props: { onSelect }
  */
 import { useState } from 'react'
-import { Code2, User, Braces, Layers, CheckCircle } from 'lucide-react'
+import { Code2, User, Braces, ListChecks, CheckCircle } from 'lucide-react'
 
 const ROUNDS = [
   {
@@ -37,14 +37,14 @@ const ROUNDS = [
     tags: ['Arrays', 'Graphs', 'DP'],
   },
   {
-    id: 'system_design',
-    label: 'System Design',
-    Icon: Layers,
+    id: 'mcq_practice',
+    label: 'MCQ Practice',
+    Icon: ListChecks,
     accent: '#f59e0b',
     gradient: 'from-amber-600 to-orange-800',
     glow: 'rgba(245,158,11,0.4)',
-    description: 'Design scalable systems, trade-offs, architecture decisions',
-    tags: ['Scalability', 'CAP', 'Microservices'],
+    description: 'Timed company-specific screening with options, resume signals, and core CS',
+    tags: ['Company OA', 'Core CS', 'Resume'],
   },
 ]
 

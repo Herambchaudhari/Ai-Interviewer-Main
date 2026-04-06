@@ -12,10 +12,11 @@ const ROUND_COLORS = {
   technical:     '#7c3aed',
   hr:            '#ec4899',
   dsa:           '#06b6d4',
-  system_design: '#f59e0b',
+  mcq_practice: '#f59e0b',
+  system_design: '#94a3b8',
 }
 const ROUND_LABELS = {
-  technical: 'Technical', hr: 'HR', dsa: 'DSA', system_design: 'System Design',
+  technical: 'Technical', hr: 'HR', dsa: 'DSA', mcq_practice: 'MCQ Practice', system_design: 'Legacy System Design',
 }
 const DIFF_COLORS = { easy: '#4ade80', medium: '#f59e0b', hard: '#f87171' }
 

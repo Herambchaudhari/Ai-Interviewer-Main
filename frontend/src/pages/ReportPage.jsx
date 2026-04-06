@@ -40,7 +40,7 @@ import {
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ROUND_LABELS = {
   technical: 'Technical', hr: 'HR / Behavioural',
-  dsa: 'DSA / Coding', system_design: 'System Design',
+  dsa: 'DSA / Coding', mcq_practice: 'MCQ Practice', system_design: 'Legacy System Design',
 }
 
 const SSE_STAGES = [
@@ -214,7 +214,7 @@ function ShareModal({ report, onClose }) {
   } = report
 
   const scoreCol = scoreColor(+overall_score)
-  const ROUND_LABELS_SHORT = { technical: 'Technical', hr: 'HR', dsa: 'DSA', system_design: 'System Design' }
+  const ROUND_LABELS_SHORT = { technical: 'Technical', hr: 'HR', dsa: 'DSA', mcq_practice: 'MCQ', system_design: 'Legacy SD' }
 
   const copyLink = async () => {
     await navigator.clipboard.writeText(window.location.href)
@@ -465,6 +465,7 @@ export default function ReportPage() {
     overall_score = 0, round_type = 'technical', difficulty = '',
     num_questions = 0, timer_mins = 0, grade, hire_recommendation,
     summary = '', compared_to_level = '',
+    session_label = '',
 
     // Core
     skill_ratings = [], question_scores = [], per_question_analysis = [],
@@ -482,6 +483,7 @@ export default function ReportPage() {
     company_fit, skill_decay = [],
     swot = {}, skills_to_work_on = [], thirty_day_plan = {},
     auto_resources = [], follow_up_questions = [],
+    proctoring_summary = {}, interview_integrity = null,
     next_interview_blueprint,
   } = report
 
@@ -517,6 +519,9 @@ export default function ReportPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold gradient-text mb-1">Interview Report</h1>
+            {session_label && (
+              <p className="text-sm font-semibold text-white/90 mb-1">{session_label}</p>
+            )}
             <p className="text-muted text-sm">
               {ROUND_LABELS[round_type]} · {difficulty} · {num_questions} Qs · {timer_mins}m
               {target_company && <> · <span className="text-purple-400">{target_company}</span></>}
@@ -572,6 +577,41 @@ export default function ReportPage() {
         )}
 
         {/* ── Hero Score Card ─────────────────────────────────────────────── */}
+        {interview_integrity && (
+          <SectionCard icon={<Shield size={16}/>} title="Interview Integrity" color="#22d3ee">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
+              {[
+                { label: 'Status', value: interview_integrity.status, color: interview_integrity.status === 'Clear' ? '#4ade80' : interview_integrity.status === 'Minor Concerns' ? '#facc15' : '#f87171' },
+                { label: 'Integrity Score', value: `${interview_integrity.score}/100`, color: scoreColor(interview_integrity.score) },
+                { label: 'Flagged Events', value: interview_integrity.total_incidents, color: '#f97316' },
+                { label: 'Camera Uptime', value: `${Math.round((proctoring_summary?.camera_uptime_ratio || 0) * 100)}%`, color: '#22d3ee' },
+              ].map(card => (
+                <div key={card.label} className="rounded-xl p-4"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
+                  <p className="text-xs text-muted uppercase tracking-wider mb-1">{card.label}</p>
+                  <p className="text-lg font-bold" style={{ color: card.color }}>{card.value}</p>
+                </div>
+              ))}
+            </div>
+            <p className="text-sm text-muted leading-relaxed mb-4">{interview_integrity.summary}</p>
+            {proctoring_summary?.counts && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {Object.entries(proctoring_summary.counts).map(([key, value]) => (
+                  <Chip key={key} label={`${key.replaceAll('_', ' ')}: ${value}`} color={value ? '#f97316' : '#64748b'} size="xs" />
+                ))}
+              </div>
+            )}
+            <div className="space-y-2">
+              {interview_integrity.highlights?.map((item, index) => (
+                <div key={index} className="flex gap-2 text-sm">
+                  <AlertTriangle size={14} className="text-amber-300 flex-shrink-0 mt-0.5" />
+                  <p className="text-muted">{item}</p>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+
         <div className="glass p-8 flex flex-col sm:flex-row items-center gap-8">
           <ScoreRing score={overall} size={140} max={100} />
           <div className="flex-1 text-center sm:text-left">
@@ -1033,12 +1073,19 @@ export default function ReportPage() {
                       Q{i + 1} · {q.score}/10
                     </span>
                     <p className="text-sm flex-1 line-clamp-1">{q.question_text || q.question || ''}</p>
+                    <Chip label={q.category || q.topic || 'General'} size="xs" color="#22d3ee" />
                     {q.verdict && <Chip label={q.verdict} size="xs" color={scoreColor10(q.score)} />}
                     <ChevronRight size={14} className="text-muted group-open:rotate-90 transition-transform" />
                   </summary>
                   <div className="px-4 pb-4 space-y-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                    <div className="mt-3">
+                      <p className="text-xs text-muted uppercase tracking-wider mb-1">Category</p>
+                      <div>
+                        <Chip label={q.category || q.topic || 'General'} color="#22d3ee" size="xs" />
+                      </div>
+                    </div>
                     {q.answer_summary && (
-                      <div className="mt-3">
+                      <div>
                         <p className="text-xs text-muted uppercase tracking-wider mb-1">Summary</p>
                         <p className="text-sm leading-relaxed text-muted">{q.answer_summary}</p>
                       </div>

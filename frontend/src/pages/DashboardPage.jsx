@@ -18,7 +18,8 @@ const ROUND_LABELS = {
   technical:     'Technical',
   hr:            'HR / Behavioural',
   dsa:           'DSA / Coding',
-  system_design: 'System Design',
+  mcq_practice:  'MCQ Practice',
+  system_design: 'Legacy System Design',
 }
 
 const DIFF_BADGE = {

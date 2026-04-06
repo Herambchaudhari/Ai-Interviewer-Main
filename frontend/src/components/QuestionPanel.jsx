@@ -3,13 +3,13 @@
  * Props: { question, questionIndex, totalQuestions, roundType, status }
  * status: 'idle' | 'speaking' | 'listening' | 'processing' | 'evaluating'
  */
-import { Mic, Cpu, Users, Code2, Layers, Loader2, Bot } from 'lucide-react'
+import { Mic, Cpu, Users, Code2, ListChecks, Loader2, Bot } from 'lucide-react'
 
 const ROUND_META = {
   technical:     { label: 'Technical',     Icon: Cpu,    color: '#7c3aed' },
   hr:            { label: 'HR / Behav.',   Icon: Users,  color: '#ec4899' },
   dsa:           { label: 'DSA / Coding',  Icon: Code2,  color: '#06b6d4' },
-  system_design: { label: 'System Design', Icon: Layers, color: '#f59e0b' },
+  mcq_practice:  { label: 'MCQ Practice',  Icon: ListChecks, color: '#f59e0b' },
 }
 
 const STATUS_LABELS = {

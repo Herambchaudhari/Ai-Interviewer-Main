@@ -22,9 +22,9 @@ _RADAR_AXES = {
         "Problem Understanding", "Algorithm Design", "Code Quality",
         "Time Complexity", "Edge Cases", "Optimization"
     ],
-    "system_design": [
-        "Scalability", "Database Design", "Caching & CDN",
-        "API Design", "Trade-off Analysis", "Communication"
+    "mcq_practice": [
+        "Company Alignment", "Core CS",
+        "Resume Knowledge", "Role Fundamentals", "Accuracy", "Time Management"
     ],
 }
 
@@ -190,7 +190,10 @@ def build_cv_audit_prompt(
     for s in skills[:15]:
         cv_claims_lines.append(f"  Skill: {s}")
     for p in projects[:5]:
-        tech = ", ".join((p.get("tech") or [])[:5])
+        tech = p.get("tech") or p.get("tech_stack") or []
+        if isinstance(tech, str):
+            tech = [t.strip() for t in tech.split(",") if t.strip()]
+        tech = ", ".join(tech[:5])
         cv_claims_lines.append(f"  Project: {p.get('name', '')} [Stack: {tech}]")
     for e in exp[:3]:
         cv_claims_lines.append(f"  Experience: {e.get('title', '')} at {e.get('company', '')}")

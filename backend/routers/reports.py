@@ -57,7 +57,7 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
         "session_id":      session_id,
         "overall_score":   72,
         "grade":           "B+",
-        "summary":         "The candidate demonstrated solid foundational knowledge with clear communication. They performed well on core concepts but showed gaps in system-level thinking and edge case handling. With targeted practice, they can significantly improve.",
+        "summary":         "The candidate demonstrated solid foundational knowledge with clear communication. They performed well on core concepts but showed gaps in screening accuracy and edge case handling. With targeted practice, they can significantly improve.",
         "hire_recommendation": "Yes",
         "radar_scores": {
             "technical_knowledge": 70,
@@ -71,12 +71,12 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
             {"area": "Core Concepts", "evidence": "Demonstrated solid understanding of fundamental topics.", "score": 75},
         ],
         "weak_areas": [
-            {"area": "System Design", "what_was_missed": "Scalability trade-offs, load balancing strategies", "how_to_improve": "Study distributed systems. Read 'Design Data-Intensive Applications'.", "score": 45},
+            {"area": "Screening Accuracy", "what_was_missed": "Core concept recall under time pressure", "how_to_improve": "Review explanations and practice timed company-style MCQs.", "score": 45},
             {"area": "Edge Cases",    "what_was_missed": "Null inputs, empty arrays, overflow scenarios", "how_to_improve": "Practice defensive coding. Always ask 'what if?' before finalising a solution.", "score": 50},
         ],
         "per_question_analysis": [],
         "study_recommendations": [
-            {"topic": "System Design", "priority": "High",   "resources": ["ByteByteGo", "System Design Primer (GitHub)"], "reason": "Largest gap identified in the interview."},
+            {"topic": "Company-Specific Screening Prep", "priority": "High",   "resources": ["LeetCode Discuss", "GeeksForGeeks"], "reason": "Largest gap identified in the interview."},
             {"topic": "DSA Practice",  "priority": "Medium", "resources": ["LeetCode", "NeetCode.io"],                    "reason": "Edge cases and optimal solutions need reinforcement."},
             {"topic": "Networking",    "priority": "Low",    "resources": ["CS50 on YouTube", "Beej's Guide to Networking"], "reason": "Basic networking questions were partially answered."},
         ],

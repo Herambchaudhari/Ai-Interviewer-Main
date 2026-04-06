@@ -29,9 +29,11 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 from services.web_researcher import (
     fetch_personalized_news,
     search_company_trends,
+    search_company_interview_questions,
     _search_via_tavily,
     _search_via_ddgs,
     _STATIC_FALLBACK,
+    _CS_FUNDAMENTALS_STATIC_FALLBACK,
     _cache,
     _daily_counts,
     check_and_increment_daily_limit,
@@ -171,19 +173,49 @@ async def test_7_session_path():
     return ok
 
 
+async def test_8_interview_questions():
+    section("Test 8: Company Interview Questions Search (40/40/20 pipeline)")
+    text = await search_company_interview_questions("Google", "Software Engineer")
+    ok = isinstance(text, str) and len(text) > 50
+    print(f"  Returned {len(text)} characters")
+    if text:
+        print(f"  Preview: {text[:150]}...")
+    # Verify it always has content (live or static fallback)
+    has_cs_content = any(kw in text.lower() for kw in ["oop", "dbms", "acid", "tcp", "thread", "interview", "algorithm"])
+    print(f"  Contains CS fundamental keywords: {has_cs_content}")
+    ok = ok and has_cs_content
+    print(PASS if ok else FAIL)
+    return ok
+
+
+async def test_9_interview_questions_fallback():
+    section("Test 9: Interview Questions Static Fallback")
+    # Empty company should return static CS fundamentals
+    text = await search_company_interview_questions("", "Software Engineer")
+    ok = isinstance(text, str) and len(text) > 50
+    has_core = all(kw in text for kw in ["OOP", "DBMS", "OS", "CN"])
+    print(f"  Static fallback length: {len(text)} chars")
+    print(f"  Contains all core subjects: {has_core}")
+    ok = ok and has_core
+    print(PASS if ok else FAIL)
+    return ok
+
+
 async def main():
     print("\n" + "="*55)
     print("  🔍 Search Pipeline Verification Suite")
     print("="*55)
 
     tests = [
-        ("Tavily Primary",    test_1_tavily),
-        ("DDGS Fallback",     test_2_ddgs),
-        ("Static Fallback",   test_3_static_fallback),
-        ("Cache Hit",         test_4_cache_hit),
-        ("Force Refresh",     test_5_force_refresh),
-        ("Daily Limit",       test_6_daily_limit),
-        ("Session Path",      test_7_session_path),
+        ("Tavily Primary",         test_1_tavily),
+        ("DDGS Fallback",          test_2_ddgs),
+        ("Static Fallback",        test_3_static_fallback),
+        ("Cache Hit",              test_4_cache_hit),
+        ("Force Refresh",          test_5_force_refresh),
+        ("Daily Limit",            test_6_daily_limit),
+        ("Session Path",           test_7_session_path),
+        ("Interview Questions",    test_8_interview_questions),
+        ("IQ Static Fallback",     test_9_interview_questions_fallback),
     ]
 
     passed = 0

@@ -26,14 +26,16 @@ const ROUND_LABELS = {
   technical:     'Technical',
   hr:            'HR / Behavioural',
   dsa:           'DSA / Coding',
-  system_design: 'System Design',
+  mcq_practice:  'MCQ Practice',
+  system_design: 'Legacy System Design',
 }
 
 const ROUND_COLORS = {
   technical:     { bg: 'rgba(124,58,237,0.15)', text: '#7c3aed' },
   hr:            { bg: 'rgba(236,72,153,0.15)', text: '#ec4899' },
   dsa:           { bg: 'rgba(6,182,212,0.15)',  text: '#06b6d4' },
-  system_design: { bg: 'rgba(245,158,11,0.15)', text: '#f59e0b' },
+  mcq_practice:  { bg: 'rgba(245,158,11,0.15)', text: '#f59e0b' },
+  system_design: { bg: 'rgba(148,163,184,0.15)', text: '#94a3b8' },
 }
 
 const DIFF_COLORS = {
@@ -753,7 +755,7 @@ export default function ReportsSection() {
     { id: 'technical',     label: 'Technical' },
     { id: 'hr',            label: 'HR' },
     { id: 'dsa',           label: 'DSA' },
-    { id: 'system_design', label: 'System Design' },
+    { id: 'mcq_practice',  label: 'MCQ Practice' },
   ]
 
   return (

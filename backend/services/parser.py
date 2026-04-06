@@ -3,18 +3,32 @@ Parser service — PDF text extraction + Groq-powered resume parsing.
 """
 import json
 import os
+from pathlib import Path
 import re
 from typing import Optional
 import pdfplumber
+from dotenv import load_dotenv
 from groq import Groq
 
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 _client = None
+
+
+def _require_env(name: str) -> str:
+    value = os.getenv(name)
+    if value:
+        return value
+    raise RuntimeError(
+        f"Missing required environment variable: {name}. "
+        "Make sure backend/.env exists and restart the backend."
+    )
 
 
 def _get_client() -> Groq:
     global _client
     if _client is None:
-        _client = Groq(api_key=os.environ["GROQ_API_KEY"])
+        _client = Groq(api_key=_require_env("GROQ_API_KEY"))
     return _client
 
 
