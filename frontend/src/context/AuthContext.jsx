@@ -13,33 +13,19 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // --- MOCKED AUTH LOGIC ---
-    // Instantly inject dev-user without pinging Supabase
-    setSession({ access_token: 'dummy-token' })
-    setUser({ id: 'dev-user', email: 'dev@example.com', user_metadata: { full_name: 'Dev User' } })
-    localStorage.setItem('access_token', 'dummy-token')
-    setLoading(false)
+    // onAuthStateChange fires immediately with INITIAL_SESSION — no need for a separate getSession call
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s)
+      setUser(s?.user ?? null)
+      if (s?.access_token) {
+        localStorage.setItem('access_token', s.access_token)
+      } else {
+        localStorage.removeItem('access_token')
+      }
+      setLoading(false)
+    })
 
-    // --- ORIGINAL AUTH LOGIC (Commented out) ---
-    // supabase.auth.getSession().then(({ data: { session: s } }) => {
-    //   setSession(s)
-    //   setUser(s?.user ?? null)
-    //   if (s?.access_token) localStorage.setItem('access_token', s.access_token)
-    //   setLoading(false)
-    // })
-    // 
-    // const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
-    //   setSession(s)
-    //   setUser(s?.user ?? null)
-    //   if (s?.access_token) {
-    //     localStorage.setItem('access_token', s.access_token)
-    //   } else {
-    //     localStorage.removeItem('access_token')
-    //   }
-    //   setLoading(false)
-    // })
-    // 
-    // return () => subscription.unsubscribe()
+    return () => subscription.unsubscribe()
   }, [])
 
   const signInWithEmail = async (email, password) => {

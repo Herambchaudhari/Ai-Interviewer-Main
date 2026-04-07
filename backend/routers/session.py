@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from auth import get_current_user
-from services.groq_service import generate_questions
+from services.interviewer import generate_first_question
 from services.db_service import save_session, get_profile as _get_profile
 from services.evaluator import evaluate_mcq_response
 
@@ -208,10 +208,10 @@ async def start_session(
 ):
     """
     1. Validate difficulty
-    2. Fetch candidate profile from Supabase
-    3. Generate num_questions questions via Groq
+    2. Assemble full candidate context (Phase 1)
+    3. Generate ONLY the first question — adaptive engine generates subsequent ones
     4. Persist session to Supabase
-    5. Return { session_id, first_question, questions }
+    5. Return { session_id, first_question, questions: [first_question] }
     """
     difficulty = _DIFFICULTY_MAP.get(body.difficulty.lower())
     if not difficulty:
@@ -256,27 +256,22 @@ async def start_session(
     )
     context["session_label"] = session_label
 
-    # resume_data alias kept for generate_questions() compat below
-    resume_data = context
-
-    # ── Generate questions ─────────────────────────────────────────────────
+    # ── Generate only the first question — adaptive engine generates the rest ──
     try:
-        questions = await generate_questions(
-            resume_data=resume_data,
+        first_q = await generate_first_question(
+            profile=context,
             round_type=round_type,
             difficulty=difficulty,
-            num_questions=body.num_questions,
         )
     except Exception as e:
-        return _err(f"Failed to generate questions: {str(e)}", status=500)
+        return _err(f"Failed to generate first question: {str(e)}", status=500)
 
-    # Attach stable IDs and time limits to each question
     time_limit = _resolve_question_time_limit(round_type, difficulty)
-    for i, q in enumerate(questions):
-        q["id"]          = str(uuid.uuid4())
-        q["order_index"] = i
-        q["type"]        = _resolve_question_type(round_type)
-        q["time_limit_secs"] = time_limit
+    first_q["id"]             = str(uuid.uuid4())
+    first_q["order_index"]    = 0
+    first_q["type"]           = _resolve_question_type(round_type)
+    first_q["time_limit_secs"] = time_limit
+    questions = [first_q]
 
     # ── Save session ───────────────────────────────────────────────────────
     session_data = {
@@ -316,7 +311,7 @@ async def start_session(
                 "options":         first_question.get("options", []),
                 "explanation":     first_question.get("explanation", ""),
             },
-            "questions": questions,          # all questions — frontend stores in sessionStorage
+            "questions": questions,          # only first question — rest generated adaptively via /answer
             "timer_mins":    body.timer_mins,
             "round_type":    round_type,
             "difficulty":    difficulty,

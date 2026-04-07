@@ -1,6 +1,7 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider } from './context/AuthContext'
+import { ThemeProvider } from './context/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -10,6 +11,7 @@ import OnboardingPage from './pages/OnboardingPage'
 import DashboardPage from './pages/DashboardPage'
 import InterviewRoom from './pages/InterviewRoom'
 import Report from './pages/ReportPage'
+import SharedReportPage from './pages/SharedReportPage'
 import SettingsPage from './pages/SettingsPage'
 import ContextHubPage from './pages/ContextHubPage'
 import NotFound from './pages/NotFound'
@@ -17,6 +19,7 @@ import NotFound from './pages/NotFound'
 export default function App() {
   return (
     <ErrorBoundary>
+    <ThemeProvider>
     <AuthProvider>
     <BrowserRouter>
       <Toaster
@@ -37,9 +40,8 @@ export default function App() {
       <Navbar />
       <Routes>
         {/* Public */}
-        {/* Mocked out login so /auth redirects right into the app */}
-        <Route path="/auth" element={<Navigate to="/" replace />} />
-        {/* <Route path="/auth" element={<AuthPage />} /> */}
+        <Route path="/auth" element={<AuthPage />} />
+        <Route path="/share/:token" element={<SharedReportPage />} />
 
         {/* Protected */}
         <Route path="/" element={
@@ -72,6 +74,7 @@ export default function App() {
       </Routes>
     </BrowserRouter>
     </AuthProvider>
+    </ThemeProvider>
     </ErrorBoundary>
   )
 }

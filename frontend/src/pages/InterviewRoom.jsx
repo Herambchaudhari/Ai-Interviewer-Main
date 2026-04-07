@@ -188,7 +188,7 @@ export default function InterviewRoom() {
       try {
         const s = JSON.parse(raw)
         setSession(s)
-        setTotal(s.questions?.length || 0)
+        setTotal(s.num_questions || s.questions?.length || 0)
         setRoundType(s.round_type || 'technical')
         setDifficulty(s.difficulty || 'medium')
         const first = s.questions?.[0] || null
@@ -368,7 +368,7 @@ export default function InterviewRoom() {
           endInterview()
           return
         }
-        const next = inner?.next_question || session?.questions?.[qIndex + 1]
+        const next = inner?.next_question
         if (next) {
           applyNextQuestion(next)
         }

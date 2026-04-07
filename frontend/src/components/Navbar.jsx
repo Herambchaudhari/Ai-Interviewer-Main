@@ -4,11 +4,13 @@
  */
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { Brain, LogOut, LayoutDashboard, Upload, Settings, Layers } from 'lucide-react'
+import { useTheme } from '../context/ThemeContext'
+import { Brain, LogOut, LayoutDashboard, Upload, Settings, Layers, Sun, Moon } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function Navbar() {
   const { user, signOut } = useAuth()
+  const { isDark, toggleTheme } = useTheme()
   const navigate  = useNavigate()
   const location  = useLocation()
   const path      = location.pathname
@@ -33,10 +35,11 @@ export default function Navbar() {
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-3 no-print"
       style={{
-        background: 'rgba(255,255,255,0.9)',
+        background: 'var(--navbar-bg)',
         backdropFilter: 'blur(20px)',
         borderBottom: '1px solid var(--color-border)',
         boxShadow: '0 1px 4px rgba(15,23,42,0.06)',
+        transition: 'background 0.3s ease',
       }}>
 
       {/* Logo */}
@@ -75,6 +78,16 @@ export default function Navbar() {
           <Settings size={14} />
           <span className="hidden sm:inline">Settings</span>
         </Link>
+
+        {/* Dark / Light toggle */}
+        <button
+          onClick={toggleTheme}
+          className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+          title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+        >
+          {isDark ? <Sun size={14} /> : <Moon size={14} />}
+          <span className="hidden sm:inline">{isDark ? 'Light' : 'Dark'}</span>
+        </button>
 
         <button onClick={handleSignOut}
           className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"

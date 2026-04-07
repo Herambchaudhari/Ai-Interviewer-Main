@@ -28,7 +28,7 @@ import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
-import { getReportWithSSE } from '../lib/api'
+import { getReportWithSSE, generateShareLink } from '../lib/api'
 import {
   Trophy, TrendingUp, TrendingDown, BookOpen, ChevronRight,
   Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
@@ -204,8 +204,12 @@ function AudioClipPlayer({ audioUrl, startSec, label }) {
 
 // ── Share / PDF Modal ─────────────────────────────────────────────────────────
 
-function ShareModal({ report, onClose }) {
-  const [copied, setCopied] = useState(false)
+function ShareModal({ report, sessionId, onClose }) {
+  const [copied,        setCopied]        = useState(false)
+  const [shareUrl,      setShareUrl]      = useState('')
+  const [shareLoading,  setShareLoading]  = useState(false)
+  const [shareError,    setShareError]    = useState('')
+  const [urlCopied,     setUrlCopied]     = useState(false)
   const cardRef = useRef(null)
 
   const {
@@ -215,6 +219,32 @@ function ShareModal({ report, onClose }) {
 
   const scoreCol = scoreColor(+overall_score)
   const ROUND_LABELS_SHORT = { technical: 'Technical', hr: 'HR', dsa: 'DSA', mcq_practice: 'MCQ', system_design: 'Legacy SD' }
+
+  // Generate a backend share link
+  const handleGenerateLink = async () => {
+    if (!sessionId) return
+    setShareLoading(true)
+    setShareError('')
+    try {
+      const res = await generateShareLink(sessionId)
+      if (res?.data?.share_url) {
+        setShareUrl(res.data.share_url)
+      } else {
+        setShareError('Could not generate link. Try again.')
+      }
+    } catch (e) {
+      setShareError(e?.response?.data?.detail || 'Failed to generate share link.')
+    } finally {
+      setShareLoading(false)
+    }
+  }
+
+  const copyShareUrl = async () => {
+    if (!shareUrl) return
+    await navigator.clipboard.writeText(shareUrl)
+    setUrlCopied(true)
+    setTimeout(() => setUrlCopied(false), 2000)
+  }
 
   const copyLink = async () => {
     await navigator.clipboard.writeText(window.location.href)
@@ -328,13 +358,60 @@ function ShareModal({ report, onClose }) {
           </p>
         </div>
 
+        {/* ── Public Shareable Link ───────────────────────────────────────── */}
+        <div className="rounded-xl p-4 space-y-3"
+          style={{ background: 'rgba(91,94,246,0.08)', border: '1px solid rgba(91,94,246,0.2)' }}>
+          <p className="text-xs font-semibold text-muted uppercase tracking-wide flex items-center gap-1.5">
+            <Users size={12} /> Public Share Link
+          </p>
+          {!shareUrl ? (
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-muted flex-1">
+                Anyone with the link can view a summary of this report — no login needed.
+              </p>
+              <button
+                onClick={handleGenerateLink}
+                disabled={shareLoading}
+                className="btn-primary text-xs py-1.5 px-3 flex-shrink-0 flex items-center gap-1.5"
+                style={{ opacity: shareLoading ? 0.7 : 1 }}>
+                {shareLoading ? 'Generating…' : 'Generate Link'}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <input
+                readOnly
+                value={shareUrl}
+                className="flex-1 text-xs px-3 py-2 rounded-lg font-mono truncate"
+                style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  color: 'var(--color-text)',
+                }}
+              />
+              <button
+                onClick={copyShareUrl}
+                className="flex items-center gap-1.5 text-xs py-2 px-3 rounded-lg transition-all"
+                style={{
+                  background: urlCopied ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.07)',
+                  border: `1px solid ${urlCopied ? '#4ade80' : 'rgba(255,255,255,0.12)'}`,
+                  color: urlCopied ? '#4ade80' : 'var(--color-muted)',
+                }}>
+                {urlCopied ? <Check size={13} /> : <Copy size={13} />}
+                {urlCopied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          )}
+          {shareError && <p className="text-xs" style={{ color: 'var(--color-error)' }}>{shareError}</p>}
+        </div>
+
         {/* Actions */}
         <div className="flex gap-3">
           <button onClick={copyLink}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all"
             style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
             {copied ? <Check size={14} style={{ color: '#4ade80' }} /> : <Copy size={14} />}
-            {copied ? 'Copied!' : 'Copy Link'}
+            {copied ? 'Copied!' : 'Copy Page URL'}
           </button>
           <button onClick={printCard} disabled={exporting}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all btn-primary"
@@ -558,7 +635,7 @@ export default function ReportPage() {
 
         {/* Share Modal */}
         {shareOpen && report && (
-          <ShareModal report={report} onClose={() => setShareOpen(false)} />
+          <ShareModal report={report} sessionId={sessionId} onClose={() => setShareOpen(false)} />
         )}
 
         {/* ── What Went Wrong callout ─────────────────────────────────────── */}

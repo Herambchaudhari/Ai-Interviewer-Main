@@ -11,19 +11,11 @@ const BASE_URL = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.
 const api = axios.create({ baseURL: `${BASE_URL}/api/v1` })
 
 // Request interceptor — attach Supabase JWT
-// Request interceptor — attach Supabase JWT
 api.interceptors.request.use(async (config) => {
-  // --- MOCKED AUTH LOGIC ---
-  const token = localStorage.getItem('access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session?.access_token) {
+    config.headers.Authorization = `Bearer ${session.access_token}`
   }
-  
-  // --- ORIGINAL AUTH LOGIC (Commented out) ---
-  // const { data: { session } } = await supabase.auth.getSession()
-  // if (session?.access_token) {
-  //   config.headers.Authorization = `Bearer ${session.access_token}`
-  // }
   return config
 })
 
@@ -443,5 +435,33 @@ export async function getUserProgress(userId, { limit = 20, roundType } = {}) {
   return data
 }
 
+
+// ── Share Report ──────────────────────────────────────────────────────────────
+
+/** POST /api/v1/share/{sessionId} — generate a public share link */
+export async function generateShareLink(sessionId) {
+  const { data } = await api.post(`/share/${sessionId}`)
+  return data  // { success, data: { share_token, share_url }, error }
+}
+
+/** DELETE /api/v1/share/{sessionId} — revoke the share link */
+export async function revokeShareLink(sessionId) {
+  const { data } = await api.delete(`/share/${sessionId}`)
+  return data
+}
+
+/** GET /api/v1/share/view/{token} — public, no auth needed */
+export async function getSharedReport(token) {
+  // Use plain fetch — no auth header — so it works for non-logged-in visitors
+  const BASE = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== '')
+    ? import.meta.env.VITE_API_URL
+    : ''
+  const res  = await fetch(`${BASE}/api/v1/share/view/${token}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.detail || `Error ${res.status}`)
+  }
+  return res.json()  // { success, data: reportRow, error }
+}
 
 export default api
