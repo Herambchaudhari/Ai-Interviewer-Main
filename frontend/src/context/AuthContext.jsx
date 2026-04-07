@@ -1,81 +1,97 @@
 /**
  * AuthContext — global auth state via React Context.
- * Wraps Supabase auth + JWT storage for the axios interceptor.
+ *
+ * [AUTH DISABLED] — Supabase OAuth/login is temporarily disabled.
+ * This provider now returns a mock "always-authenticated" user so the
+ * rest of the application works without any Supabase configuration.
+ *
+ * To re-enable: restore the original Supabase-backed implementation
+ * from git history and set VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY.
  */
-import { createContext, useContext, useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { createContext, useContext, useState } from 'react'
+
+// ── Original Supabase import (commented out) ──
+// import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext(null)
 
+/** Mock user object that satisfies every component that reads user.id / user.email */
+const MOCK_USER = {
+  id: 'dev-user',
+  email: 'dev@localhost',
+  user_metadata: { full_name: 'Developer' },
+}
+
 export function AuthProvider({ children }) {
-  const [user, setUser]       = useState(null)
-  const [session, setSession] = useState(null)
-  const [loading, setLoading] = useState(true)
+  // Always authenticated with the mock user — no loading state needed
+  const [user]    = useState(MOCK_USER)
+  const [session] = useState({ access_token: 'dev-token' })
+  const loading   = false
 
-  useEffect(() => {
-    // --- MOCKED AUTH LOGIC ---
-    // Instantly inject dev-user without pinging Supabase
-    setSession({ access_token: 'dummy-token' })
-    setUser({ id: 'dev-user', email: 'dev@example.com', user_metadata: { full_name: 'Dev User' } })
-    localStorage.setItem('access_token', 'dummy-token')
-    setLoading(false)
+  // ── Original Supabase auth logic (commented out) ──────────────────────────
+  // const [user, setUser]       = useState(null)
+  // const [session, setSession] = useState(null)
+  // const [loading, setLoading] = useState(true)
+  //
+  // useEffect(() => {
+  //   const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+  //     setSession(s)
+  //     setUser(s?.user ?? null)
+  //     if (s?.access_token) {
+  //       localStorage.setItem('access_token', s.access_token)
+  //     } else {
+  //       localStorage.removeItem('access_token')
+  //     }
+  //     setLoading(false)
+  //   })
+  //   return () => subscription.unsubscribe()
+  // }, [])
+  // ──────────────────────────────────────────────────────────────────────────
 
-    // --- ORIGINAL AUTH LOGIC (Commented out) ---
-    // supabase.auth.getSession().then(({ data: { session: s } }) => {
-    //   setSession(s)
-    //   setUser(s?.user ?? null)
-    //   if (s?.access_token) localStorage.setItem('access_token', s.access_token)
-    //   setLoading(false)
-    // })
-    // 
-    // const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
-    //   setSession(s)
-    //   setUser(s?.user ?? null)
-    //   if (s?.access_token) {
-    //     localStorage.setItem('access_token', s.access_token)
-    //   } else {
-    //     localStorage.removeItem('access_token')
-    //   }
-    //   setLoading(false)
-    // })
-    // 
-    // return () => subscription.unsubscribe()
-  }, [])
-
-  const signInWithEmail = async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
-    return data
-  }
-
-  const signUpWithEmail = async (email, password, name = '') => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: name } },
-    })
-    if (error) throw error
-    return data
-  }
-
-  const signInWithGoogle = async () => {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${window.location.origin}/dashboard` },
-    })
-    if (error) throw error
-    return data
-  }
-
+  // ── Stubbed auth methods (no-ops) ─────────────────────────────────────────
+  const signInWithEmail = async () => { /* no-op: auth disabled */ }
+  const signUpWithEmail = async () => { /* no-op: auth disabled */ }
+  const signInWithGoogle = async () => { /* no-op: auth disabled */ }
   const signOut = async () => {
-    await supabase.auth.signOut()
+    // Clear local caches so the Upload page acts like a fresh start
     localStorage.removeItem('access_token')
     localStorage.removeItem('profile_id')
     localStorage.removeItem('parsed_profile')
     localStorage.removeItem('student_meta')
-    setUser(null)
-    setSession(null)
   }
+
+  // ── Original Supabase auth methods (commented out) ────────────────────────
+  // const signInWithEmail = async (email, password) => {
+  //   const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  //   if (error) throw error
+  //   return data
+  // }
+  // const signUpWithEmail = async (email, password, name = '') => {
+  //   const { data, error } = await supabase.auth.signUp({
+  //     email, password,
+  //     options: { data: { full_name: name } },
+  //   })
+  //   if (error) throw error
+  //   return data
+  // }
+  // const signInWithGoogle = async () => {
+  //   const { data, error } = await supabase.auth.signInWithOAuth({
+  //     provider: 'google',
+  //     options: { redirectTo: `${window.location.origin}/dashboard` },
+  //   })
+  //   if (error) throw error
+  //   return data
+  // }
+  // const signOut = async () => {
+  //   await supabase.auth.signOut()
+  //   localStorage.removeItem('access_token')
+  //   localStorage.removeItem('profile_id')
+  //   localStorage.removeItem('parsed_profile')
+  //   localStorage.removeItem('student_meta')
+  //   setUser(null)
+  //   setSession(null)
+  // }
+  // ──────────────────────────────────────────────────────────────────────────
 
   const value = {
     user, session, loading,

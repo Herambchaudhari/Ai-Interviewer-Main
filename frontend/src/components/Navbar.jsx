@@ -1,42 +1,58 @@
 /**
- * Navbar — visible on all pages except /auth and during interviews.
- * Shows logo, user email, dashboard link, sign out.
+ * Navbar — visible on all pages except during interviews.
+ *
+ * [AUTH DISABLED] — Sign-out button and user email are hidden.
+ * Shows logo, dashboard link, and navigation with theme toggle.
+ * To re-enable auth UI: restore from git history.
  */
-import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { useAuth } from '../hooks/useAuth'
-import { Brain, LogOut, LayoutDashboard, Upload, Settings, Layers } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { Link, useLocation } from 'react-router-dom'
+import { useTheme } from '../context/ThemeContext'
+import { Brain, LayoutDashboard, Upload, Settings, Layers, Sun, Moon } from 'lucide-react'
+
+// ── Original auth imports (commented out) ───────────────────────────────────
+// import { useNavigate } from 'react-router-dom'
+// import { useAuth } from '../hooks/useAuth'
+// import { LogOut } from 'lucide-react'
+// import toast from 'react-hot-toast'
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function Navbar() {
-  const { user, signOut } = useAuth()
-  const navigate  = useNavigate()
+  const { isDark, toggleTheme } = useTheme()
   const location  = useLocation()
   const path      = location.pathname
 
-  // Hide on auth page and during active interview/coding sessions
-  const hidden = !user
-    || path === '/auth'
-    || path.startsWith('/interview/')
-    || path.startsWith('/coding/')
-  if (hidden) return null
+  // ── Original auth-aware visibility logic (commented out) ──────────────────
+  // const { user, signOut } = useAuth()
+  // const navigate  = useNavigate()
+  // const hidden = !user
+  //   || path === '/auth'
+  //   || path.startsWith('/interview/')
+  //   || path.startsWith('/coding/')
+  // if (hidden) return null
+  //
+  // const handleSignOut = async () => {
+  //   try {
+  //     await signOut()
+  //     toast.success('Signed out successfully')
+  //     navigate('/auth')
+  //   } catch {
+  //     toast.error('Sign out failed')
+  //   }
+  // }
+  // ──────────────────────────────────────────────────────────────────────────
 
-  const handleSignOut = async () => {
-    try {
-      await signOut()
-      toast.success('Signed out successfully')
-      navigate('/auth')
-    } catch {
-      toast.error('Sign out failed')
-    }
-  }
+  // Hide during active interview/coding sessions (auth page no longer exists)
+  const hidden = path.startsWith('/interview/') || path.startsWith('/coding/')
+  if (hidden) return null
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-3 no-print"
       style={{
-        background: 'rgba(255,255,255,0.9)',
+        background: 'var(--navbar-bg)',
         backdropFilter: 'blur(20px)',
         borderBottom: '1px solid var(--color-border)',
         boxShadow: '0 1px 4px rgba(15,23,42,0.06)',
+        transition: 'background 0.3s ease',
       }}>
 
       {/* Logo */}
@@ -50,10 +66,6 @@ export default function Navbar() {
 
       {/* Right side */}
       <div className="flex items-center gap-2">
-        <span className="text-muted text-xs hidden md:block mr-1 max-w-[180px] truncate">
-          {user.email}
-        </span>
-
         <Link to="/" className="btn-secondary text-xs py-2 px-3 hidden sm:flex items-center gap-1.5"
           title="Upload Resume">
           <Upload size={14} /> Upload
@@ -76,12 +88,23 @@ export default function Navbar() {
           <span className="hidden sm:inline">Settings</span>
         </Link>
 
-        <button onClick={handleSignOut}
+        {/* Dark / Light toggle */}
+        <button
+          onClick={toggleTheme}
+          className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+          title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+        >
+          {isDark ? <Sun size={14} /> : <Moon size={14} />}
+          <span className="hidden sm:inline">{isDark ? 'Light' : 'Dark'}</span>
+        </button>
+
+        {/* ── Original Sign-Out button (commented out) ───────────────────── */}
+        {/* <button onClick={handleSignOut}
           className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
           title="Sign Out">
           <LogOut size={14} />
           <span className="hidden sm:inline">Sign Out</span>
-        </button>
+        </button> */}
       </div>
     </nav>
   )

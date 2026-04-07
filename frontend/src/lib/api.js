@@ -1,27 +1,26 @@
 import axios from 'axios'
-import { supabase } from './supabase'
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// ── Original Supabase import (commented out — auth disabled) ──
+// import { supabase } from './supabase'
+
+// BASE_URL: empty string = use Vite proxy (relative URLs); fallback only if env is completely absent
+const BASE_URL = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== '')
+  ? import.meta.env.VITE_API_URL
+  : ''
+
 
 // ── Axios Instance ─────────────────────────────────────────────────────────
 const api = axios.create({ baseURL: `${BASE_URL}/api/v1` })
 
-// Request interceptor — attach Supabase JWT
-// Request interceptor — attach Supabase JWT
-api.interceptors.request.use(async (config) => {
-  // --- MOCKED AUTH LOGIC ---
-  const token = localStorage.getItem('access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  
-  // --- ORIGINAL AUTH LOGIC (Commented out) ---
-  // const { data: { session } } = await supabase.auth.getSession()
-  // if (session?.access_token) {
-  //   config.headers.Authorization = `Bearer ${session.access_token}`
-  // }
-  return config
-})
+// ── Original Supabase JWT interceptor (commented out — auth disabled) ──────
+// api.interceptors.request.use(async (config) => {
+//   const { data: { session } } = await supabase.auth.getSession()
+//   if (session?.access_token) {
+//     config.headers.Authorization = `Bearer ${session.access_token}`
+//   }
+//   return config
+// })
+// ───────────────────────────────────────────────────────────────────────────
 
 // Response interceptor — log errors and re-throw cleanly
 api.interceptors.response.use(
@@ -159,12 +158,12 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
   const url = `${BASE_URL}/api/v1/report/${sessionId}`
   let response
   try {
-    response = await fetch(url, {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : '',
-        Accept: 'text/event-stream, application/json',
-      },
-    })
+    const headers = { Accept: 'text/event-stream, application/json' }
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+
+    response = await fetch(url, { headers })
   } catch (e) {
     onError(e.message || 'Network error')
     return
@@ -416,5 +415,56 @@ export async function getMarketNews(profileId, forceRefresh = false) {
   return data
 }
 
+
+// ── Checklists ────────────────────────────────────────────────────────────────
+
+/** GET /api/v1/context-hub/checklists */
+export async function getUserChecklists(limit = 5) {
+  const { data } = await api.get(`/context-hub/checklists?limit=${limit}`)
+  return data
+}
+
+/** PATCH /api/v1/context-hub/checklists/:checklistId/items */
+export async function toggleChecklistItem(checklistId, itemId, checked) {
+  const { data } = await api.patch(`/context-hub/checklists/${checklistId}/items`, { item_id: itemId, checked })
+  return data
+}
+
+// ── PROGRESS ──────────────────────────────────────────────────────────────────
+export async function getUserProgress(userId, { limit = 20, roundType } = {}) {
+  const params = new URLSearchParams({ limit })
+  if (roundType) params.set('round_type', roundType)
+  const { data } = await api.get(`/progress/${userId}?${params}`)
+  return data
+}
+
+
+// ── Share Report ──────────────────────────────────────────────────────────────
+
+/** POST /api/v1/share/{sessionId} — generate a public share link */
+export async function generateShareLink(sessionId) {
+  const { data } = await api.post(`/share/${sessionId}`)
+  return data  // { success, data: { share_token, share_url }, error }
+}
+
+/** DELETE /api/v1/share/{sessionId} — revoke the share link */
+export async function revokeShareLink(sessionId) {
+  const { data } = await api.delete(`/share/${sessionId}`)
+  return data
+}
+
+/** GET /api/v1/share/view/{token} — public, no auth needed */
+export async function getSharedReport(token) {
+  // Use plain fetch — no auth header — so it works for non-logged-in visitors
+  const BASE = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== '')
+    ? import.meta.env.VITE_API_URL
+    : ''
+  const res  = await fetch(`${BASE}/api/v1/share/view/${token}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.detail || `Error ${res.status}`)
+  }
+  return res.json()  // { success, data: reportRow, error }
+}
 
 export default api

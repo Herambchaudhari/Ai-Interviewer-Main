@@ -25,9 +25,9 @@ def get_current_user(
     Decode and validate the Supabase JWT.
     Returns dict with 'user_id' and 'payload'.
     
-    Currently mocked to bypass auth and always return 'dev-user'.
+    Currently mocked to bypass auth and always return a valid dev UUID.
     """
-    user_id = "dev-user"
+    user_id = "0be77b5c-2d16-4b46-b2d1-b1a6b73e220f"
     return {"user_id": user_id, "payload": {"sub": user_id}}
     
     # --- ORIGINAL AUTH LOGIC (Commented out for now) ---

@@ -1,15 +1,19 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider } from './context/AuthContext'
+import { ThemeProvider } from './context/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
-import AuthPage from './pages/AuthPage'
+// ── AuthPage import (commented out — auth disabled) ──
+// import AuthPage from './pages/AuthPage'
+
 import UploadPage from './pages/Upload'
 import OnboardingPage from './pages/OnboardingPage'
 import DashboardPage from './pages/DashboardPage'
 import InterviewRoom from './pages/InterviewRoom'
 import Report from './pages/ReportPage'
+import SharedReportPage from './pages/SharedReportPage'
 import SettingsPage from './pages/SettingsPage'
 import ContextHubPage from './pages/ContextHubPage'
 import NotFound from './pages/NotFound'
@@ -17,6 +21,7 @@ import NotFound from './pages/NotFound'
 export default function App() {
   return (
     <ErrorBoundary>
+    <ThemeProvider>
     <AuthProvider>
     <BrowserRouter>
       <Toaster
@@ -36,12 +41,17 @@ export default function App() {
       />
       <Navbar />
       <Routes>
-        {/* Public */}
-        {/* Mocked out login so /auth redirects right into the app */}
+        {/* Auth route — redirect to home since login is disabled */}
         <Route path="/auth" element={<Navigate to="/" replace />} />
-        {/* <Route path="/auth" element={<AuthPage />} /> */}
 
-        {/* Protected */}
+        {/* ── Original auth route (commented out) ──
+        <Route path="/auth" element={<AuthPage />} />
+        */}
+
+        {/* Public */}
+        <Route path="/share/:token" element={<SharedReportPage />} />
+
+        {/* Protected (ProtectedRoute is currently a passthrough) */}
         <Route path="/" element={
           <ProtectedRoute><UploadPage /></ProtectedRoute>
         } />
@@ -72,6 +82,7 @@ export default function App() {
       </Routes>
     </BrowserRouter>
     </AuthProvider>
+    </ThemeProvider>
     </ErrorBoundary>
   )
 }
