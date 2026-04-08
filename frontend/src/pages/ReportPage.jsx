@@ -153,7 +153,13 @@ function AudioClipPlayer({ audioUrl, startSec, label }) {
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
 
-  if (!audioUrl) return null
+  if (!audioUrl) return (
+    <div className="flex items-center gap-1.5 mt-2 text-xs"
+      style={{ color: 'var(--color-muted)', opacity: 0.5 }}>
+      <Volume2 size={11} />
+      <span>Audio not recorded for this session</span>
+    </div>
+  )
 
   const toggle = () => {
     const el = audioRef.current
@@ -577,8 +583,10 @@ export default function ReportPage() {
     study_schedule = null,
     // Phase 6: Preparation checklist
     checklist: reportChecklist = [],
-    // Phase 2 MCQ: per-category accuracy breakdown
-    category_breakdown = {},
+    // Phase 2 MCQ: per-category accuracy breakdown (always an array)
+    category_breakdown = [],
+    // Debug mode flag — set by backend when GROQ_API_KEY is missing
+    _debug_mock = false,
   } = report
 
   const overall = +Number(overall_score).toFixed(1)
@@ -605,17 +613,34 @@ export default function ReportPage() {
     q: `Q${i + 1}`, confidence: v,
   }))
 
-  // MCQ category breakdown chart data (only populated for mcq_practice rounds)
-  const mcqCategoryData = Object.entries(category_breakdown || {}).map(([cat, d]) => ({
-    category: cat,
-    accuracy: typeof d === 'object' ? (d.accuracy ?? 0) : 0,
-    correct:  typeof d === 'object' ? (d.correct  ?? 0) : 0,
-    total:    typeof d === 'object' ? (d.total    ?? 1) : 1,
-  })).sort((a, b) => b.accuracy - a.accuracy)
+  // MCQ category breakdown chart data — always an array from backend now
+  const mcqCategoryData = (Array.isArray(category_breakdown) ? category_breakdown : []).map(d => ({
+    category: d.category || 'Uncategorized',
+    accuracy: d.accuracy ?? 0,
+    correct:  d.correct  ?? 0,
+    total:    d.total    ?? 1,
+  }))
 
   return (
     <div className="min-h-screen pt-20 pb-16 px-4">
       <div className="max-w-5xl mx-auto space-y-6">
+
+        {/* ── Debug Mode Banner ───────────────────────────────────────────── */}
+        {_debug_mock && (
+          <div className="rounded-2xl p-4 flex items-start gap-3"
+            style={{ background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.4)' }}>
+            <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" style={{ color: '#eab308' }} />
+            <div>
+              <p className="font-semibold text-sm" style={{ color: '#eab308' }}>
+                DEBUG MODE — Simulated Report
+              </p>
+              <p className="text-xs text-muted mt-0.5">
+                This is fake data. Connect a <code className="text-yellow-400">GROQ_API_KEY</code> in your backend
+                environment to generate real AI-powered reports.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Nav ─────────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between">

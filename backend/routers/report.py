@@ -99,10 +99,11 @@ def _merge_per_question_analysis(question_scores: list, per_question_analysis: l
     return merged
 
 
-def _build_mcq_category_breakdown(transcript: list) -> dict:
+def _build_mcq_category_breakdown(transcript: list) -> list:
     """
     Aggregate MCQ transcript entries by category.
-    Returns {category: {correct, total, accuracy, avg_score}} for the report.
+    Returns a list of {category, correct, total, accuracy, avg_score, score, verdict, comment}
+    so the shape is identical to what the LLM produces for non-MCQ rounds.
     Only includes entries where question_type == 'mcq'.
     """
     from collections import defaultdict
@@ -116,15 +117,24 @@ def _build_mcq_category_breakdown(transcript: list) -> dict:
         if entry.get("is_correct"):
             buckets[cat]["correct"] += 1
 
-    result = {}
+    result = []
     for cat, data in buckets.items():
         total = data["total"]
-        result[cat] = {
+        accuracy = round(data["correct"] / total * 100, 1) if total else 0.0
+        avg_score = round(data["score_sum"] / total, 1) if total else 0.0
+        result.append({
+            "category":  cat,
             "correct":   data["correct"],
             "total":     total,
-            "accuracy":  round(data["correct"] / total * 100, 1) if total else 0.0,
-            "avg_score": round(data["score_sum"] / total, 1) if total else 0.0,
-        }
+            "accuracy":  accuracy,
+            "avg_score": avg_score,
+            # Unified fields so frontend can render both MCQ and non-MCQ the same way
+            "score":     round(avg_score * 10),
+            "verdict":   "Strong" if accuracy >= 80 else "Needs Work" if accuracy >= 50 else "Weak",
+            "comment":   f"{data['correct']}/{total} correct ({accuracy}%)",
+        })
+    # Sort by accuracy descending so best categories appear first
+    result.sort(key=lambda x: x["accuracy"], reverse=True)
     return result
 
 
@@ -268,6 +278,7 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
         "proctoring_summary": None,
         "interview_integrity": None,
         "is_mock": True,
+        "_debug_mock": True,
     }
 
 

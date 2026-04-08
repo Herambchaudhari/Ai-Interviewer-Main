@@ -1292,6 +1292,50 @@ Return ONLY the JSON object."""
 
 
 # ── Report Generation ──────────────────────────────────────────────────────────
+
+def _compute_fallback_radar(question_scores: list, overall_score: float, radar_skills: list) -> dict:
+    """
+    Build radar scores from actual question category averages instead of
+    duplicating the overall score for every axis (which makes the chart useless).
+
+    Strategy:
+      1. Group per-question scores by their category.
+      2. For each radar axis, find all question groups whose category shares
+         at least one keyword with the axis name → average those scores.
+      3. If no matching category exists for an axis, fall back to overall_score×10.
+    All values are clamped to [0, 100].
+    """
+    overall_s = round(overall_score * 10)
+
+    def _norm(s: str) -> set:
+        # Lower-case, strip punctuation, split into words
+        import re
+        return set(re.sub(r"[^a-z0-9 ]", " ", s.lower()).split())
+
+    # Build {normalized_category: [score_pct, ...]} from question_scores
+    cat_buckets: dict = {}
+    for q in question_scores:
+        cat = (q.get("category") or "").strip()
+        if not cat:
+            continue
+        score_raw = q.get("score", 0) or 0
+        score_pct = min(100, max(0, round(float(score_raw) * 10)))
+        cat_buckets.setdefault(cat, []).append(score_pct)
+
+    result = {}
+    for skill in radar_skills:
+        skill_words = _norm(skill)
+        matched: list = []
+        for cat, scores in cat_buckets.items():
+            if skill_words & _norm(cat):   # at least one shared keyword
+                matched.extend(scores)
+        if matched:
+            result[skill] = min(100, max(0, round(sum(matched) / len(matched))))
+        else:
+            result[skill] = overall_s
+    return result
+
+
 _RADAR_SKILLS_BY_ROUND = {
     "technical": ["OOP & Design Patterns", "Data Structures & Algorithms", "DBMS & SQL", "OS & CN Concepts", "Project Knowledge", "Communication"],
     "hr":        ["Communication", "Problem Solving", "Teamwork", "Leadership", "Culture Fit", "Situational Judgment"],
@@ -1364,7 +1408,15 @@ async def _gen_core(
         # Fill defaults for new fields if LLM skipped them
         result.setdefault("hire_signal", _EMPTY_HIRE_SIGNAL)
         result.setdefault("failure_patterns", [])
-        result.setdefault("radar_scores", {s: int(overall_score * 10) for s in radar_skills})
+        # Use per-category fallback so all axes don't get the same value
+        if not result.get("radar_scores"):
+            result["radar_scores"] = _compute_fallback_radar(question_scores, overall_score, radar_skills)
+        else:
+            # Also patch any axis the LLM left at 0 (common hallucination)
+            fallback = _compute_fallback_radar(question_scores, overall_score, radar_skills)
+            for skill in radar_skills:
+                if not result["radar_scores"].get(skill):
+                    result["radar_scores"][skill] = fallback[skill]
         return result
 
     except Exception as e:
@@ -1375,7 +1427,7 @@ async def _gen_core(
             "hire_recommendation": "Yes" if s >= 65 else "Maybe",
             "summary": f"Overall score: {overall_score}/10 across {len(question_scores)} questions.",
             "compared_to_level": "Mid-level Engineer",
-            "radar_scores": {skill: s for skill in radar_skills},
+            "radar_scores": _compute_fallback_radar(question_scores, overall_score, radar_skills),
             "category_breakdown": [],
             "strong_areas": [],
             "weak_areas": [],
