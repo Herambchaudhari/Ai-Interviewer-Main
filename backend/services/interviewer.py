@@ -300,3 +300,94 @@ async def generate_coding_question(
     result["type"]           = "coding"
     result["category"]       = result.get("topic", "DSA")
     return result
+
+
+# ── MCQ question generator ────────────────────────────────────────────────────
+async def generate_mcq_questions(
+    num: int,
+    role: str,
+    company: str,
+    skills: list[str],
+    difficulty: str,
+    projects: list[dict],
+) -> list[dict]:
+    """
+    Generate MCQ questions via a dedicated LLM call that explicitly asks for
+    options[], correct_option_index, and explanation in the JSON schema.
+
+    Returns raw dicts — caller must run _normalize_mcq_question on each.
+    Falls back to an empty list on parse failure (caller uses fallback bank).
+    """
+    skill_str   = ", ".join((skills or [])[:12]) or "general software engineering"
+    company_str = company or "the target company"
+    role_str    = role or "Software Engineer"
+    diff_str    = difficulty or "medium"
+
+    project_lines = []
+    for p in (projects or [])[:4]:
+        name = p.get("name") or "a project"
+        tech = ", ".join((p.get("tech") or [])[:4]) or "various technologies"
+        project_lines.append(f"- {name} ({tech})")
+    project_str = "\n".join(project_lines) or "- No specific projects listed"
+
+    # Determine category spread based on role
+    role_lower = role_str.lower()
+    if "frontend" in role_lower or "ui" in role_lower:
+        focus_categories = "Frontend, CN, OOP, DBMS, Algorithms"
+    elif "backend" in role_lower or "server" in role_lower:
+        focus_categories = "Backend, DBMS, OS, CN, OOP"
+    elif "full" in role_lower:
+        focus_categories = "Frontend, Backend, DBMS, OOP, CN"
+    elif "data" in role_lower or "ml" in role_lower or "ai" in role_lower:
+        focus_categories = "Algorithms, DBMS, Backend, OS, ML"
+    elif "devops" in role_lower or "sre" in role_lower:
+        focus_categories = "DevOps, OS, CN, Backend, Algorithms"
+    else:
+        focus_categories = "OOP, DBMS, OS, CN, Algorithms"
+
+    system = (
+        f"You are a senior technical interviewer at {company_str} conducting an MCQ screening round "
+        f"for a {role_str} position. You write precise, unambiguous multiple-choice questions that test "
+        "real conceptual understanding — not trick questions, not trivia. Each question must have exactly "
+        "4 distinct options with ONE definitively correct answer."
+    )
+
+    user_msg = (
+        f"Generate exactly {num} MCQ screening questions for a {role_str} candidate at {company_str}.\n\n"
+        f"Candidate Profile:\n"
+        f"- Skills: {skill_str}\n"
+        f"- Difficulty: {diff_str.upper()}\n"
+        f"- Projects:\n{project_str}\n\n"
+        f"Cover these categories in a balanced mix: {focus_categories}\n"
+        f"Include at least 1 project-context question referencing the candidate's actual work above.\n\n"
+        "Rules:\n"
+        "1. Each option must be a clear, short phrase (no full sentences in options)\n"
+        "2. correct_option_index must be 0, 1, 2, or 3\n"
+        "3. Distribute correct answers across all 4 indices — do NOT always use index 0\n"
+        "4. explanation must explain WHY the correct answer is right in 1-2 sentences\n"
+        "5. category must be one of: OOP, DBMS, OS, CN, Frontend, Backend, FullStack, "
+        "Data, ML, DevOps, Mobile, Algorithms, DSA, Project\n\n"
+        "Return ONLY a valid JSON array — no markdown, no preamble:\n"
+        "[\n"
+        "  {\n"
+        '    "question_text": "<full question text>",\n'
+        '    "options": ["<option A>", "<option B>", "<option C>", "<option D>"],\n'
+        '    "correct_option_index": <0|1|2|3>,\n'
+        '    "explanation": "<why the correct answer is right>",\n'
+        '    "category": "<category>"\n'
+        "  }\n"
+        "]\n\n"
+        f"Return EXACTLY {num} questions."
+    )
+
+    try:
+        raw = await _achat(system, user_msg, temperature=0.7, max_tokens=3500)
+        cleaned = raw.strip().strip("```json").strip("```").strip()
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            parsed = parsed.get("questions", [])
+        if not isinstance(parsed, list):
+            return []
+        return parsed
+    except Exception:
+        return []

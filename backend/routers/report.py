@@ -99,6 +99,35 @@ def _merge_per_question_analysis(question_scores: list, per_question_analysis: l
     return merged
 
 
+def _build_mcq_category_breakdown(transcript: list) -> dict:
+    """
+    Aggregate MCQ transcript entries by category.
+    Returns {category: {correct, total, accuracy, avg_score}} for the report.
+    Only includes entries where question_type == 'mcq'.
+    """
+    from collections import defaultdict
+    buckets: dict = defaultdict(lambda: {"correct": 0, "total": 0, "score_sum": 0.0})
+    for entry in (transcript or []):
+        if entry.get("question_type") != "mcq":
+            continue
+        cat = (entry.get("category") or entry.get("topic") or "Uncategorized").strip()
+        buckets[cat]["total"] += 1
+        buckets[cat]["score_sum"] += float(entry.get("score") or 0)
+        if entry.get("is_correct"):
+            buckets[cat]["correct"] += 1
+
+    result = {}
+    for cat, data in buckets.items():
+        total = data["total"]
+        result[cat] = {
+            "correct":   data["correct"],
+            "total":     total,
+            "accuracy":  round(data["correct"] / total * 100, 1) if total else 0.0,
+            "avg_score": round(data["score_sum"] / total, 1) if total else 0.0,
+        }
+    return result
+
+
 def _build_session_label(round_type: str, target_company: str = "", job_role: str = "") -> str:
     round_label = _ROUND_AGENT_LABELS.get(round_type or "technical", "Interview")
     role = (job_role or "").strip()
@@ -671,7 +700,14 @@ async def _generate_report_sse(session_id: str, user_id: str):
 
         # Charts
         "radar_scores":         radar_scores,
-        "category_breakdown":   core_result.get("category_breakdown", []),
+        # For MCQ rounds, compute category breakdown deterministically from
+        # the transcript (is_correct + category per entry).  For other round
+        # types keep whatever the LLM core stage produced.
+        "category_breakdown":   (
+            _build_mcq_category_breakdown(transcript)
+            if round_type == "mcq_practice"
+            else core_result.get("category_breakdown", [])
+        ),
 
         # Strong / Weak
         "strong_areas":         core_result.get("strong_areas", []),

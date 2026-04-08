@@ -44,14 +44,15 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  const signInWithGoogle = async () => {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${window.location.origin}/dashboard` },
-    })
-    if (error) throw error
-    return data
-  }
+  // OAuth disabled — re-enable when Google OAuth is configured in Supabase
+  // const signInWithGoogle = async () => {
+  //   const { data, error } = await supabase.auth.signInWithOAuth({
+  //     provider: 'google',
+  //     options: { redirectTo: `${window.location.origin}/dashboard` },
+  //   })
+  //   if (error) throw error
+  //   return data
+  // }
 
   const signOut = async () => {
     await supabase.auth.signOut()
@@ -65,7 +66,7 @@ export function AuthProvider({ children }) {
 
   const value = {
     user, session, loading,
-    signInWithEmail, signUpWithEmail, signInWithGoogle, signOut,
+    signInWithEmail, signUpWithEmail, signOut,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

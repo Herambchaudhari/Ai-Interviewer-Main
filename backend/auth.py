@@ -14,8 +14,6 @@ from jose import jwt, JWTError
 
 security = HTTPBearer(auto_error=False)
 
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
-
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Security(security),
@@ -25,9 +23,21 @@ def get_current_user(
     Returns dict with 'user_id' and 'payload'.
 
     - If SUPABASE_JWT_SECRET is set: verifies signature (production mode).
-    - If SUPABASE_JWT_SECRET is not set: extracts sub from unverified claims
-      (local dev fallback — never deploy without the secret set).
+    - If SUPABASE_JWT_SECRET is not set: dev mode — accepts any token (unverified)
+      or no token at all (returns mock dev-user). Never deploy without secret set.
     """
+    SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+    if not SUPABASE_JWT_SECRET:
+        # Dev mode: no secret configured — accept any request
+        if not credentials:
+            return {"user_id": "dev-user", "payload": {"sub": "dev-user"}}
+        try:
+            payload = jwt.get_unverified_claims(credentials.credentials)
+            user_id = payload.get("sub", "dev-user")
+        except Exception:
+            user_id = "dev-user"
+        return {"user_id": user_id, "payload": {"sub": user_id}}
+
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -36,15 +46,6 @@ def get_current_user(
         )
 
     token = credentials.credentials
-
-    if not SUPABASE_JWT_SECRET:
-        # Dev fallback: no secret configured, trust the token's claims unverified
-        try:
-            payload = jwt.get_unverified_claims(token)
-            user_id = payload.get("sub", "dev-user")
-        except Exception:
-            user_id = "dev-user"
-        return {"user_id": user_id, "payload": {"sub": user_id}}
 
     try:
         payload = jwt.decode(

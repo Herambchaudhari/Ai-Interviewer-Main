@@ -169,7 +169,7 @@ def evaluate_mcq_response(
             "is_correct": False,
         }
 
-    score = 10 if is_correct else 2
+    score = 10 if is_correct else 0
     verdict = "Excellent" if is_correct else "Needs Improvement"
     feedback = (
         f"Correct. {explanation}" if is_correct else

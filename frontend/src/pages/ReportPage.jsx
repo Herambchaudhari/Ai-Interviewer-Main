@@ -577,6 +577,8 @@ export default function ReportPage() {
     study_schedule = null,
     // Phase 6: Preparation checklist
     checklist: reportChecklist = [],
+    // Phase 2 MCQ: per-category accuracy breakdown
+    category_breakdown = {},
   } = report
 
   const overall = +Number(overall_score).toFixed(1)
@@ -602,6 +604,14 @@ export default function ReportPage() {
   const deliveryArc = (delivery_consistency?.arc_plot || []).map((v, i) => ({
     q: `Q${i + 1}`, confidence: v,
   }))
+
+  // MCQ category breakdown chart data (only populated for mcq_practice rounds)
+  const mcqCategoryData = Object.entries(category_breakdown || {}).map(([cat, d]) => ({
+    category: cat,
+    accuracy: typeof d === 'object' ? (d.accuracy ?? 0) : 0,
+    correct:  typeof d === 'object' ? (d.correct  ?? 0) : 0,
+    total:    typeof d === 'object' ? (d.total    ?? 1) : 1,
+  })).sort((a, b) => b.accuracy - a.accuracy)
 
   return (
     <div className="min-h-screen pt-20 pb-16 px-4">
@@ -804,6 +814,74 @@ export default function ReportPage() {
               </SectionCard>
             )}
           </div>
+        )}
+
+        {/* ── MCQ Category Breakdown (mcq_practice rounds only) ───────────── */}
+        {round_type === 'mcq_practice' && mcqCategoryData.length > 0 && (
+          <SectionCard icon={<BarChart2 size={16}/>} title="MCQ Category Breakdown" color="#f59e0b">
+            <p className="text-xs text-muted mb-3">
+              Accuracy per topic — highlights which concept areas need the most revision.
+            </p>
+            <ResponsiveContainer width="100%" height={Math.max(180, mcqCategoryData.length * 42)}>
+              <BarChart
+                data={mcqCategoryData}
+                layout="vertical"
+                margin={{ top: 4, right: 40, bottom: 4, left: 8 }}
+              >
+                <XAxis
+                  type="number"
+                  domain={[0, 100]}
+                  tick={{ fill: '#94a3b8', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => `${v}%`}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="category"
+                  width={90}
+                  tick={{ fill: '#e2e8f0', fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  cursor={{ fill: 'rgba(245,158,11,0.08)' }}
+                  contentStyle={{ background: '#1e1e2e', border: '1px solid #f59e0b40', borderRadius: 8, fontSize: 12 }}
+                  formatter={(value, name, props) => [
+                    `${value}%  (${props.payload.correct}/${props.payload.total} correct)`,
+                    'Accuracy',
+                  ]}
+                />
+                <Bar dataKey="accuracy" radius={[0, 6, 6, 0]} maxBarSize={22}>
+                  {mcqCategoryData.map((entry, i) => (
+                    <Cell
+                      key={i}
+                      fill={
+                        entry.accuracy >= 80 ? '#4ade80'
+                        : entry.accuracy >= 50 ? '#f59e0b'
+                        : '#f87171'
+                      }
+                      opacity={0.85}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            {/* Summary row: overall MCQ accuracy */}
+            {(() => {
+              const totalQ  = mcqCategoryData.reduce((s, d) => s + d.total, 0)
+              const totalC  = mcqCategoryData.reduce((s, d) => s + d.correct, 0)
+              const overall = totalQ > 0 ? Math.round(totalC / totalQ * 100) : 0
+              return (
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/10 text-xs text-muted">
+                  <span>Overall MCQ accuracy</span>
+                  <span className="font-semibold" style={{ color: overall >= 80 ? '#4ade80' : overall >= 50 ? '#f59e0b' : '#f87171' }}>
+                    {totalC}/{totalQ} &nbsp;·&nbsp; {overall}%
+                  </span>
+                </div>
+              )
+            })()}
+          </SectionCard>
         )}
 
         {/* ── Filler & Hesitation Heatmap ─────────────────────────────────── */}

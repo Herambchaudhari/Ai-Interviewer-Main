@@ -4,6 +4,8 @@ Model: llama-3.3-70b-versatile
 """
 import os
 import json
+import copy
+import random
 import asyncio
 import math
 from pathlib import Path
@@ -410,6 +412,9 @@ def _normalize_mcq_question(question: dict, difficulty: str, project_names: list
         correct_index = int(correct_index) if correct_index is not None else None
     except Exception:
         correct_index = None
+    # Bounds guard: LLM sometimes returns 4 or -1; clamp to valid range
+    if correct_index is not None and not (0 <= correct_index <= 3):
+        correct_index = None
 
     correct_option = str(question.get("correct_option") or "").strip()
     if not correct_option and correct_index is not None and 0 <= correct_index < len(cleaned_options):
@@ -453,6 +458,259 @@ def _normalize_mcq_question(question: dict, difficulty: str, project_names: list
     }
 
 
+
+# ── Per-category question template bank (fallback — no API required) ─────────
+# Each template has: question_text, options[4], correct_option_index (varies!),
+# explanation, category. Placeholders: {company}, {role}, {skill}.
+_MCQ_TEMPLATE_BANK: dict[str, list[dict]] = {
+    "DBMS": [
+        {
+            "question_text": "Which ACID property guarantees that a transaction is fully completed or fully rolled back with no partial state?",
+            "options": ["Atomicity", "Consistency", "Isolation", "Durability"],
+            "correct_option_index": 0,
+            "explanation": "Atomicity ensures all-or-nothing execution — either every operation in a transaction succeeds, or none take effect.",
+        },
+        {
+            "question_text": "In a relational database, which normal form eliminates transitive functional dependencies?",
+            "options": ["1NF", "2NF", "3NF", "BCNF"],
+            "correct_option_index": 2,
+            "explanation": "3NF removes transitive dependencies: every non-key attribute must depend only on the primary key, not on other non-key attributes.",
+        },
+        {
+            "question_text": "Which type of database index is most efficient for range queries (e.g., WHERE age BETWEEN 20 AND 30)?",
+            "options": ["Hash index", "B-tree index", "Bitmap index", "Full-text index"],
+            "correct_option_index": 1,
+            "explanation": "B-tree indexes store keys in sorted order, making range scans efficient. Hash indexes only support equality lookups.",
+        },
+        {
+            "question_text": "What isolation level prevents dirty reads but still allows non-repeatable reads?",
+            "options": ["READ UNCOMMITTED", "READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"],
+            "correct_option_index": 1,
+            "explanation": "READ COMMITTED prevents dirty reads by only seeing committed data, but a second read within the same transaction may see new commits from other transactions.",
+        },
+        {
+            "question_text": "Which SQL clause is evaluated AFTER GROUP BY and filters aggregated results?",
+            "options": ["WHERE", "HAVING", "ORDER BY", "LIMIT"],
+            "correct_option_index": 1,
+            "explanation": "HAVING filters groups after aggregation. WHERE filters individual rows before grouping.",
+        },
+    ],
+    "OS": [
+        {
+            "question_text": "Which condition is NOT required for deadlock to occur according to Coffman's conditions?",
+            "options": ["Mutual exclusion", "Hold and wait", "Preemption allowed", "Circular wait"],
+            "correct_option_index": 2,
+            "explanation": "Deadlock requires no preemption (resources cannot be forcibly taken). If preemption is allowed, deadlock cannot occur.",
+        },
+        {
+            "question_text": "In virtual memory, which mechanism maps logical addresses to physical frames?",
+            "options": ["Segmentation table", "Page table", "File allocation table", "Interrupt vector"],
+            "correct_option_index": 1,
+            "explanation": "The page table is the OS data structure that translates virtual page numbers to physical frame numbers.",
+        },
+        {
+            "question_text": "Which CPU scheduling algorithm minimizes average waiting time when burst times are known in advance?",
+            "options": ["FCFS", "Round Robin", "SJF (Shortest Job First)", "Priority Scheduling"],
+            "correct_option_index": 2,
+            "explanation": "SJF achieves minimum average waiting time by always running the process with the shortest remaining burst time next.",
+        },
+        {
+            "question_text": "What is the key difference between a process and a thread?",
+            "options": [
+                "Threads have separate memory spaces; processes share memory",
+                "Processes have separate memory spaces; threads within a process share memory",
+                "Threads cannot run concurrently; processes can",
+                "Processes are lighter weight than threads",
+            ],
+            "correct_option_index": 1,
+            "explanation": "Processes have isolated address spaces. Threads within the same process share heap and global memory, making inter-thread communication cheaper but requiring synchronization.",
+        },
+    ],
+    "CN": [
+        {
+            "question_text": "Which layer of the OSI model is responsible for end-to-end error detection and flow control between hosts?",
+            "options": ["Network layer", "Data Link layer", "Transport layer", "Session layer"],
+            "correct_option_index": 2,
+            "explanation": "The Transport layer (TCP/UDP) handles end-to-end delivery, error detection, and flow control between two hosts across a network.",
+        },
+        {
+            "question_text": "Which HTTP behavior most directly reduces repeated network fetches in web clients?",
+            "options": ["HTTP caching with Cache-Control headers", "Increasing TCP window size", "Using HTTP/1.0 instead of HTTP/1.1", "Disabling TLS"],
+            "correct_option_index": 0,
+            "explanation": "Cache-Control headers let the client and proxies store responses locally, eliminating redundant round trips for unchanged resources.",
+        },
+        {
+            "question_text": "What is the primary difference between TCP and UDP?",
+            "options": [
+                "TCP is faster; UDP provides reliability",
+                "UDP provides reliability; TCP is connectionless",
+                "TCP provides reliable, ordered delivery; UDP is connectionless and faster",
+                "TCP uses less bandwidth; UDP uses more",
+            ],
+            "correct_option_index": 2,
+            "explanation": "TCP establishes a connection and guarantees ordered, reliable delivery via acknowledgements. UDP skips this overhead, making it faster for latency-sensitive applications.",
+        },
+        {
+            "question_text": "In REST APIs, which HTTP method is idempotent but NOT safe (it modifies state)?",
+            "options": ["GET", "POST", "PUT", "OPTIONS"],
+            "correct_option_index": 2,
+            "explanation": "PUT is idempotent (calling it multiple times with the same data produces the same result) but modifies server state, so it is not 'safe' in the HTTP sense.",
+        },
+    ],
+    "OOP": [
+        {
+            "question_text": "Which OOP principle is best described as 'exposing only essential behavior while hiding implementation details'?",
+            "options": ["Inheritance", "Polymorphism", "Abstraction", "Encapsulation"],
+            "correct_option_index": 2,
+            "explanation": "Abstraction presents a simplified interface to the user while hiding the internal complexity of how it works.",
+        },
+        {
+            "question_text": "The Liskov Substitution Principle (LSP) states that:",
+            "options": [
+                "A class should have only one reason to change",
+                "Objects of a subclass should be substitutable for objects of their superclass without breaking the program",
+                "High-level modules should not depend on low-level modules",
+                "A class should be open for extension but closed for modification",
+            ],
+            "correct_option_index": 1,
+            "explanation": "LSP requires that a subclass can replace its superclass anywhere without altering the correctness of the program — it enforces behavioral compatibility.",
+        },
+        {
+            "question_text": "Which design pattern ensures only one instance of a class exists across the entire application?",
+            "options": ["Factory", "Observer", "Singleton", "Decorator"],
+            "correct_option_index": 2,
+            "explanation": "The Singleton pattern restricts instantiation to a single object and provides a global point of access to it.",
+        },
+        {
+            "question_text": "Which concept allows a subclass method to provide a specific implementation of a method already defined in its superclass?",
+            "options": ["Overloading", "Overriding", "Encapsulation", "Composition"],
+            "correct_option_index": 1,
+            "explanation": "Method overriding lets a subclass replace the superclass's implementation of a method with its own version, enabling runtime polymorphism.",
+        },
+    ],
+    "Algorithms": [
+        {
+            "question_text": "What is the time complexity of binary search on a sorted array of n elements?",
+            "options": ["O(n)", "O(n log n)", "O(log n)", "O(1)"],
+            "correct_option_index": 2,
+            "explanation": "Binary search halves the search space at each step, giving O(log n) comparisons in the worst case.",
+        },
+        {
+            "question_text": "Which data structure provides O(1) average-case time complexity for both insertion and lookup?",
+            "options": ["Sorted array", "Linked list", "Hash map", "Binary search tree"],
+            "correct_option_index": 2,
+            "explanation": "Hash maps use a hash function to map keys to buckets, achieving O(1) average-case for insert and lookup (O(n) worst case with collisions).",
+        },
+        {
+            "question_text": "Dynamic programming is best applied when a problem has which two properties?",
+            "options": [
+                "Greedy choice and polynomial time",
+                "Optimal substructure and overlapping subproblems",
+                "Divide and conquer with no repeated subproblems",
+                "Linear time reduction and backtracking",
+            ],
+            "correct_option_index": 1,
+            "explanation": "DP works when optimal solutions to subproblems feed into the optimal solution for the whole problem (optimal substructure) AND the same subproblems recur (overlapping subproblems).",
+        },
+        {
+            "question_text": "Which graph traversal algorithm is most appropriate for finding the shortest path in an unweighted graph?",
+            "options": ["DFS", "BFS", "Dijkstra's", "Bellman-Ford"],
+            "correct_option_index": 1,
+            "explanation": "BFS explores nodes level by level, guaranteeing the shortest path (fewest edges) in an unweighted graph.",
+        },
+    ],
+    "Backend": [
+        {
+            "question_text": "Which caching strategy writes data to both the cache and the backing store simultaneously to maintain consistency?",
+            "options": ["Cache-aside", "Write-through", "Write-back", "Read-through"],
+            "correct_option_index": 1,
+            "explanation": "Write-through ensures the cache and database always stay in sync by writing to both on every update, at the cost of slightly higher write latency.",
+        },
+        {
+            "question_text": "In a microservices architecture, which pattern handles partial failures by stopping requests to a failing service?",
+            "options": ["Saga pattern", "Circuit Breaker", "API Gateway", "Event Sourcing"],
+            "correct_option_index": 1,
+            "explanation": "The Circuit Breaker opens (stops forwarding requests) when a downstream service repeatedly fails, preventing cascading failures and allowing the service time to recover.",
+        },
+        {
+            "question_text": "Which HTTP status code indicates that the server understood the request but the client is not authorized to access the resource?",
+            "options": ["400 Bad Request", "401 Unauthorized", "403 Forbidden", "404 Not Found"],
+            "correct_option_index": 2,
+            "explanation": "403 Forbidden means the server knows who the client is (authenticated) but has decided they do not have permission. 401 means the client has not provided credentials at all.",
+        },
+    ],
+    "Frontend": [
+        {
+            "question_text": "In React, what is the purpose of the useCallback hook?",
+            "options": [
+                "To memoize an expensive computed value",
+                "To trigger a side effect after render",
+                "To return a memoized version of a callback function that only changes when its dependencies change",
+                "To manage component lifecycle in class components",
+            ],
+            "correct_option_index": 2,
+            "explanation": "useCallback memoizes a function reference so it is not recreated on every render, preventing unnecessary re-renders of child components that receive the function as a prop.",
+        },
+        {
+            "question_text": "Which CSS property creates a new block formatting context and is commonly used to contain floats?",
+            "options": ["display: flex", "overflow: hidden", "position: relative", "z-index: 1"],
+            "correct_option_index": 1,
+            "explanation": "Setting overflow to a non-visible value (like hidden) on a container creates a new block formatting context, which causes it to expand to contain floated children.",
+        },
+        {
+            "question_text": "What does the browser's critical rendering path describe?",
+            "options": [
+                "How JavaScript modules are bundled",
+                "The sequence of steps to convert HTML/CSS/JS into pixels on screen",
+                "How service workers cache assets",
+                "The process of resolving DNS before a page load",
+            ],
+            "correct_option_index": 1,
+            "explanation": "The critical rendering path covers DOM construction, CSSOM construction, render tree creation, layout, and paint — all the steps needed to produce the first visible frame.",
+        },
+    ],
+    "DevOps": [
+        {
+            "question_text": "Which Kubernetes object ensures a specified number of pod replicas are always running?",
+            "options": ["Pod", "Service", "ReplicaSet", "ConfigMap"],
+            "correct_option_index": 2,
+            "explanation": "A ReplicaSet maintains the desired number of pod replicas. If a pod crashes, the ReplicaSet controller creates a new one to replace it.",
+        },
+        {
+            "question_text": "In CI/CD, what is the primary purpose of a staging environment?",
+            "options": [
+                "To store backup copies of production data",
+                "To run a production-like environment for final validation before release",
+                "To develop new features in isolation",
+                "To replace the need for automated tests",
+            ],
+            "correct_option_index": 1,
+            "explanation": "Staging mirrors production as closely as possible so that issues discovered there — integration bugs, config drift, performance problems — can be caught before reaching real users.",
+        },
+    ],
+}
+
+# Role → ordered list of categories to draw from in the fallback
+_ROLE_CATEGORY_ORDER: dict[str, list[str]] = {
+    "frontend":  ["Frontend", "CN", "OOP", "DBMS", "Algorithms"],
+    "backend":   ["Backend", "DBMS", "OS", "CN", "OOP"],
+    "fullstack": ["Frontend", "Backend", "DBMS", "OOP", "CN"],
+    "data":      ["Algorithms", "DBMS", "Backend", "OS", "OOP"],
+    "ml":        ["Algorithms", "DBMS", "Backend", "OS", "OOP"],
+    "devops":    ["DevOps", "OS", "CN", "Backend", "Algorithms"],
+    "mobile":    ["OOP", "CN", "Algorithms", "OS", "DBMS"],
+    "default":   ["OOP", "DBMS", "OS", "CN", "Algorithms"],
+}
+
+
+def _role_category_order(job_role: str) -> list[str]:
+    role_lower = (job_role or "").lower()
+    for key in _ROLE_CATEGORY_ORDER:
+        if key in role_lower:
+            return _ROLE_CATEGORY_ORDER[key]
+    return _ROLE_CATEGORY_ORDER["default"]
+
+
 def _build_mcq_fallback_questions(
     projects: list[dict],
     skills: list[str],
@@ -461,87 +719,69 @@ def _build_mcq_fallback_questions(
     job_role: str,
     target_company: str,
 ) -> list[dict]:
-    role_focus = _role_focus_config(job_role)
-    project_pool = projects or [{
-        "name": "your resume project",
-        "description": "an engineering project from the resume",
-        "tech": skills[:4],
-    }]
-
+    """
+    Build MCQ questions from the static per-category template bank.
+    No API calls — safe to use when Groq is unavailable.
+    Selects categories in role-priority order and shuffles within each category
+    so that correct answers are not always index 0.
+    """
     company_label = target_company or "the target company"
-    core_bank = [
-        {
-            "question_text": f"{company_label} often screens on database reliability. Which property guarantees that a transaction is fully completed or fully rolled back?",
-            "category": "DBMS",
-            "options": ["Atomicity", "Normalization", "Sharding", "Serialization"],
-            "correct_option_index": 0,
-            "explanation": "Atomicity ensures all-or-nothing execution of a transaction.",
-        },
-        {
-            "question_text": f"For a {job_role or 'software engineering'} screening at {company_label}, which HTTP behavior most directly reduces repeated network fetches in web clients?",
-            "category": role_focus["category"] if role_focus["category"] != "OOP" else "CN",
-            "options": ["Caching with cache-control semantics", "Increasing CSS specificity", "Using recursion in controllers", "Replacing SQL with CSV files"],
-            "correct_option_index": 0,
-            "explanation": "HTTP caching semantics are a core company-screening topic for performance-aware engineering roles.",
-        },
-        {
-            "question_text": f"{company_label} interview screens often test OS fundamentals. Which issue occurs when two or more threads wait forever on one another's resources?",
-            "category": "OS",
-            "options": ["Deadlock", "Star topology", "Segmentation", "Normalization"],
-            "correct_option_index": 0,
-            "explanation": "Deadlock is the classic concurrency failure mode where progress stops permanently.",
-        },
-        {
-            "question_text": f"In an OOP-focused screen for {company_label}, which principle is best described as exposing only essential behavior while hiding implementation details?",
-            "category": "OOP",
-            "options": ["Abstraction", "Duplication", "Serialization", "Replication"],
-            "correct_option_index": 0,
-            "explanation": "Abstraction hides internal complexity behind a simpler interface.",
-        },
-    ]
+    project_pool = projects or [{"name": "your resume project", "tech": skills[:4]}]
+    category_order = _role_category_order(job_role)
 
-    role_bank = [
-        {
-            "question_text": f"For the {job_role or 'software engineer'} role at {company_label}, which topic is most central to {role_focus['label']} fundamentals?",
-            "category": role_focus["category"],
-            "options": [
-                role_focus["topics"][0],
-                "Printing stack traces manually",
-                "Ignoring performance bottlenecks",
-                "Skipping code reviews entirely",
-            ],
-            "correct_option_index": 0,
-            "explanation": f"{role_focus['topics'][0]} is a strong role-aligned screening topic for this role.",
-        },
-    ]
+    # Build a shuffled pool from the template bank in role-priority order
+    pool: list[dict] = []
+    used_categories: set[str] = set()
 
-    project_bank = []
-    for project in project_pool[: max(1, min(4, count))]:
-        tech = ", ".join(project.get("tech", [])[:4]) or ", ".join(skills[:4]) or "the listed stack"
+    # First pass: one question per category in priority order
+    for cat in category_order:
+        templates = _MCQ_TEMPLATE_BANK.get(cat, [])
+        if templates:
+            pool.append(copy.deepcopy(random.choice(templates)))
+            used_categories.add(cat)
+
+    # Fill remaining slots by cycling through all categories
+    all_cats = list(_MCQ_TEMPLATE_BANK.keys())
+    random.shuffle(all_cats)
+    while len(pool) < count:
+        for cat in (category_order + all_cats):
+            if len(pool) >= count:
+                break
+            templates = _MCQ_TEMPLATE_BANK.get(cat, [])
+            if not templates:
+                continue
+            # Pick a template we haven't used yet in this batch if possible
+            existing_texts = {q["question_text"] for q in pool}
+            unused = [t for t in templates if t["question_text"] not in existing_texts]
+            chosen = copy.deepcopy(random.choice(unused) if unused else random.choice(templates))
+            pool.append(chosen)
+
+    # Add one project-context question using actual project data
+    if projects and len(pool) < count + 1:
+        project = random.choice(project_pool)
+        tech = ", ".join((project.get("tech") or skills)[:4]) or "the project stack"
         name = project.get("name") or "your project"
-        project_bank.append({
-            "question_text": f"Based on {name} on the resume, which discussion point would be most relevant in a {company_label} screening for {job_role or 'software engineer'}?",
-            "category": "Project",
-            "options": [
-                f"Explaining why {tech} was chosen and what trade-offs it introduced",
-                "Listing random buzzwords unrelated to the project",
-                "Avoiding implementation details entirely",
-                "Only describing the UI color palette",
-            ],
-            "correct_option_index": 0,
-            "explanation": "Strong resume-based screening questions focus on real implementation choices and trade-offs.",
-        })
-
-    bank = []
-    while len(bank) < count:
-        bank.extend(core_bank)
-        bank.extend(project_bank or core_bank[:1])
-        bank.extend(role_bank)
+        skill_sample = (skills[:2] or ["Python"])[0]
+        pool.insert(
+            min(len(pool), 2),  # Insert near the beginning so it appears early
+            {
+                "question_text": f"In a {company_label} screening for {job_role or 'Software Engineer'}, what aspect of your work on '{name}' (using {tech}) would be most relevant to discuss?",
+                "options": [
+                    f"The architectural trade-offs and why {tech} was chosen",
+                    "The colour scheme of the user interface",
+                    "The number of commits made to the repository",
+                    "Whether the project had a README file",
+                ],
+                "correct_option_index": 0,
+                "explanation": "Company screenings value candidates who can articulate technical decisions, trade-offs, and real implementation challenges from their own projects.",
+                "category": "Project",
+            },
+        )
 
     project_names = [p.get("name", "") for p in projects]
     return [
-        _normalize_mcq_question(question, difficulty, project_names)
-        for question in bank[:count]
+        _normalize_mcq_question(q, difficulty, project_names)
+        for q in pool[:count]
     ]
 
 
@@ -752,6 +992,39 @@ async def generate_questions(
     interview_q_ctx = resume_data.get("company_questions_context", "")
     role_focus   = _role_focus_config(job_role)
 
+    # ── MCQ: delegate to dedicated generator with MCQ-specific JSON schema ────
+    # The shared prompt returns question_text/category/expected_points only.
+    # MCQ needs options[], correct_option_index, explanation — so we use a
+    # purpose-built generator that asks for exactly that schema.
+    if round_type == "mcq_practice":
+        from services.interviewer import generate_mcq_questions
+        project_names = [p.get("name", "") for p in projects]
+        raw_questions = await generate_mcq_questions(
+            num=num_questions,
+            role=job_role,
+            company=target_comp,
+            skills=skill_list,
+            difficulty=difficulty,
+            projects=projects,
+        )
+        normalized = [
+            _normalize_mcq_question(q, difficulty, project_names)
+            for q in raw_questions
+        ]
+        # Top up with fallback if LLM returned fewer questions than requested
+        if len(normalized) < num_questions:
+            normalized.extend(
+                _build_mcq_fallback_questions(
+                    projects=projects,
+                    skills=skill_list,
+                    difficulty=difficulty,
+                    count=num_questions - len(normalized),
+                    job_role=job_role,
+                    target_company=target_comp,
+                )
+            )
+        return normalized[:num_questions]
+
     # Round-specific instructions
     if round_type == "technical":
         # Calculate question distribution counts
@@ -910,25 +1183,6 @@ Return EXACTLY {num_questions} questions covering DIVERSE topics."""
                 for question in questions[:num_questions]
             ]
 
-        if round_type == "mcq_practice":
-            project_names = [p.get("name", "") for p in projects]
-            normalized = [
-                _normalize_mcq_question(question, difficulty, project_names)
-                for question in questions[:num_questions]
-            ]
-            if len(normalized) < num_questions:
-                normalized.extend(
-                    _build_mcq_fallback_questions(
-                        projects=projects,
-                        skills=skill_list,
-                        difficulty=difficulty,
-                        count=num_questions - len(normalized),
-                        job_role=job_role,
-                        target_company=target_comp,
-                    )
-                )
-            return normalized[:num_questions]
-
         project_names = [p.get("name", "") for p in projects]
         return [
             _normalize_generated_question(question, difficulty, project_names)
@@ -963,15 +1217,6 @@ Return EXACTLY {num_questions} questions covering DIVERSE topics."""
                 }, difficulty)
                 for i in range(num_questions)
             ]
-        if round_type == "mcq_practice":
-            return _build_mcq_fallback_questions(
-                projects=projects,
-                skills=skill_list,
-                difficulty=difficulty,
-                count=num_questions,
-                job_role=job_role,
-                target_company=target_comp,
-            )
         return [
             {
                 "question_text": f"Question {i+1}",
