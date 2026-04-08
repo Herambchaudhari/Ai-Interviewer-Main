@@ -162,14 +162,20 @@ async def generate_next_question(
             "unless the adaptive directive explicitly forces a standalone CS fundamentals question."
         )
 
-    if conversation_history and len(conversation_history) >= 4 and random.random() < 0.3:
+    # Adaptive challenge: only when candidate scored ≤ 5 on the last 2 consecutive evaluations
+    recent_scores = [
+        entry.get("score", 10)
+        for entry in (conversation_history or [])
+        if isinstance(entry, dict) and entry.get("role") == "evaluation"
+    ]
+    should_challenge = len(recent_scores) >= 2 and all(s <= 5 for s in recent_scores[-2:])
+
+    if should_challenge:
         user_msg = (
-            "Based on the interview so far, you must throw a PSYCHOLOGICAL CURVEBALL or SEVERE CONSTRAINT. "
-            "If they answered superficially, use 'The 5 Whys' and aggressively interrogate their last answer. "
-            "If they solved the last topic easily, do NOT move to a new topic! Instead, inject a massive architectural or business constraint. "
-            "(Example: 'Your scaling solution works, but suddenly East-Coast AWS goes completely offline. How does your system recover?' or "
-            "'Your code is functionally correct but now imagine you only have 50MB of RAM.') "
-            "Force them to re-architect or defend their solution under extreme pressure."
+            "The candidate has struggled with the last two questions (scored ≤ 5 both times). "
+            "Do NOT move to a new topic. Instead, probe their weakest demonstrated area from a completely different angle — "
+            "ask a targeted follow-up that forces them to show deeper understanding. "
+            "Keep the question constructive and specific to what they got wrong."
         )
 
     raw = await _achat(system, user_msg)

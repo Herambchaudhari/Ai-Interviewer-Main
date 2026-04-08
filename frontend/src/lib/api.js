@@ -240,10 +240,11 @@ export async function endSession(payload) {
 }
 
 /** POST /api/v1/session/checkpoint — save current progress (Phase 5) */
-export async function checkpointSession(payload) {
-  // payload: { session_id, current_question_id, current_question_index, timer_remaining_secs, local_transcript }
+export async function checkpointSession(sessionId, payload) {
+  // payload: { current_question_index, scores, transcript, conversation_history,
+  //            detected_weaknesses, avoided_topics, timer_remaining_secs }
   try {
-    const { data } = await api.post('/session/checkpoint', payload)
+    const { data } = await api.post(`/session/${sessionId}/checkpoint`, payload)
     return data
   } catch {
     return null  // checkpoint is best-effort, never throw

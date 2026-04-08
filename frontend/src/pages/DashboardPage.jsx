@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuthContext } from '../context/AuthContext'
-import { getProfile, getUserReports, getMarketNews, getUserChecklists } from '../lib/api'
+import { getProfile, getUserReports, getMarketNews, getUserChecklists, getActiveSessions } from '../lib/api'
 import RoundCards from '../components/RoundCards'
 import SessionConfig from '../components/SessionConfig'
 import { COMPANY_SECTORS } from '../constants/companies'
@@ -52,6 +52,7 @@ export default function DashboardPage() {
   const DAILY_LIMIT                         = 5
 
   const [latestChecklist, setLatestChecklist] = useState(null)
+  const [activeSessions, setActiveSessions]   = useState([])
 
   useEffect(() => {
     if (!user?.id) return
@@ -120,8 +121,13 @@ export default function DashboardPage() {
     getUserReports(user.id)
       .then(res => setReports(res.data?.reports || []))
       .catch(() => {}) // fail silently — reports are optional
-      
+
     fetchNews()
+
+    // Check for unfinished sessions to offer resume
+    getActiveSessions()
+      .then(res => setActiveSessions(res?.sessions || []))
+      .catch(() => {})
   }, [user])
 
   const today = new Date().toLocaleDateString('en-IN', {
@@ -134,6 +140,37 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen pt-24 pb-16 px-4">
       <div className="max-w-5xl mx-auto">
+
+        {/* ── Resume banner ─────────────────────────────────────────────── */}
+        {activeSessions.length > 0 && (
+          <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 flex items-center justify-between gap-4 animate-fade-in-up">
+            <div className="flex items-center gap-3">
+              <Clock size={18} className="text-amber-400 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-300">You have an unfinished interview</p>
+                <p className="text-xs text-muted mt-0.5">
+                  {ROUND_LABELS[activeSessions[0].round_type] || activeSessions[0].round_type}
+                  {activeSessions[0].target_company ? ` · ${activeSessions[0].target_company}` : ''}
+                  {' · '}Question {(activeSessions[0].current_question_index ?? 0) + 1}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => navigate(`/interview/${activeSessions[0].id}`)}
+                className="btn-primary text-xs py-1.5 px-3"
+              >
+                Resume
+              </button>
+              <button
+                onClick={() => setActiveSessions([])}
+                className="btn-secondary text-xs py-1.5 px-3"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── Greeting ───────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between mb-6 animate-fade-in-up">

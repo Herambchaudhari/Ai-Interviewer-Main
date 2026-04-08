@@ -25,7 +25,8 @@ import { submitAnswerStreaming }      from '../hooks/useSSE'
 import tts                           from '../services/tts'
 import {
   transcribeSession, submitSessionAnswer,
-  skipQuestion as apiSkip, endSession as apiEnd, generateReport
+  skipQuestion as apiSkip, endSession as apiEnd, generateReport,
+  checkpointSession,
 } from '../lib/api'
 import { getReportRoute } from '../lib/routes'
 
@@ -180,6 +181,19 @@ export default function InterviewRoom() {
     }, 5000)
     return () => clearInterval(interval)
   }, [qStartTime])
+
+  // ── Auto-checkpoint every 60 s (best-effort, never blocks the UI) ─────────
+  useEffect(() => {
+    if (!sessionId || status === 'done') return
+    const interval = setInterval(() => {
+      checkpointSession(sessionId, {
+        current_question_index: qIndex,
+        scores,
+        timer_remaining_secs: timeLeft ?? undefined,
+      })
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [sessionId, qIndex, scores, timeLeft, status])
 
   // ── Load session from sessionStorage ──────────────────────────────────────
   useEffect(() => {

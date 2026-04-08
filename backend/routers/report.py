@@ -13,11 +13,14 @@ GET  /api/v1/report/:session_id/cached  → return cached report only (no genera
 Stages 1+2 run in parallel. Stages 3+4 run in parallel after 1+2 complete.
 Company Fit + Cross-Session analyses run concurrently with stages 1+2.
 """
+import os
 import json
 import asyncio
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from auth import get_current_user
+
+_DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
 from services.groq_service import _achat, _clean, _gen_core, _gen_cv_audit, _gen_code_quality_analysis
 from services.db_service import (
     get_session, get_report, save_report, get_profile,
@@ -790,7 +793,9 @@ async def get_or_generate_report(
         if cached and _is_complete_report(cached):
             return _ok(data=cached)
     except RuntimeError:
-        return _ok(data=_mock_report(session_id))
+        if _DEBUG:
+            return _ok(data=_mock_report(session_id))
+        return _err("Database not configured. Set SUPABASE_URL and SUPABASE_KEY.", status=503)
     except Exception:
         pass
 
@@ -802,7 +807,9 @@ async def get_or_generate_report(
         if session.get("user_id") != user["user_id"]:
             return _err("Access denied.", status=403)
     except RuntimeError:
-        return _ok(data=_mock_report(session_id))
+        if _DEBUG:
+            return _ok(data=_mock_report(session_id))
+        return _err("Database not configured. Set SUPABASE_URL and SUPABASE_KEY.", status=503)
     except Exception as e:
         return _err(str(e), status=500)
 
@@ -834,6 +841,8 @@ async def get_cached_report(
                 return _err("Access denied.", status=403)
         return _ok(data=cached)
     except RuntimeError:
-        return _ok(data=_mock_report(session_id))
+        if _DEBUG:
+            return _ok(data=_mock_report(session_id))
+        return _err("Database not configured. Set SUPABASE_URL and SUPABASE_KEY.", status=503)
     except Exception as e:
         return _err(str(e), status=500)

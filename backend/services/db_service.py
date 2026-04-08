@@ -259,6 +259,71 @@ def update_session(session_id: str, updates: dict) -> bool:
     return False
 
 
+# ── Checkpoint / Resume ───────────────────────────────────────────────────────
+def save_checkpoint(session_id: str, user_id: str, state: dict) -> bool:
+    """
+    Persist a mid-session snapshot.
+    Accepts any subset of: current_question_index, conversation_history,
+    scores, transcript, detected_weaknesses, avoided_topics, timer_remaining_secs.
+    Always stamps last_checkpoint_at.
+    Returns True on success.
+    """
+    allowed = {
+        "current_question_index", "conversation_history", "scores",
+        "transcript", "detected_weaknesses", "avoided_topics", "timer_remaining_secs",
+    }
+    updates = {k: v for k, v in state.items() if k in allowed}
+    updates["last_checkpoint_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Verify ownership before writing
+    session = get_session_with_auth(session_id, user_id)
+    if not session:
+        return False
+
+    return update_session(session_id, updates)
+
+
+def get_session_with_auth(session_id: str, user_id: str) -> Optional[dict]:
+    """Fetch a session only if it belongs to user_id. Returns None on mismatch."""
+    res = (
+        _db()
+        .table("sessions")
+        .select("*")
+        .eq("id", session_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if res.data:
+        return _normalize_session_row(res.data[0])
+    return None
+
+
+def get_active_sessions(user_id: str) -> list:
+    """
+    Return all sessions with status='active' for a user, newest first.
+    Only returns the fields needed for the resume prompt (no full transcript).
+    """
+    try:
+        res = (
+            _db()
+            .table("sessions")
+            .select(
+                "id, round_type, difficulty, target_company, target_role, "
+                "current_question_index, last_checkpoint_at, created_at, context_bundle"
+            )
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        print(f"[get_active_sessions] error: {e}")
+        return []
+
+
 # ── Reports ───────────────────────────────────────────────────────────────────
 def save_report(session_id: str, report_data: dict) -> str:
     """
