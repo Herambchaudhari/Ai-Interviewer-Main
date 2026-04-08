@@ -15,18 +15,20 @@ export default function Navbar() {
   const location  = useLocation()
   const path      = location.pathname
 
-  // Hide on auth page and during active interview/coding sessions
-  const hidden = !user
-    || path === '/auth'
-    || path.startsWith('/interview/')
+  // Hide during active interview/coding sessions
+  // AUTH DISABLED — removed !user and path === '/auth' conditions
+  const hidden = // !user ||           // AUTH DISABLED
+    // path === '/auth' ||              // AUTH DISABLED
+    path.startsWith('/interview/')
     || path.startsWith('/coding/')
   if (hidden) return null
 
+  // AUTH DISABLED — sign-out is a no-op; navigate to / instead of /auth
   const handleSignOut = async () => {
     try {
       await signOut()
-      toast.success('Signed out successfully')
-      navigate('/auth')
+      toast.success('Signed out')
+      navigate('/')
     } catch {
       toast.error('Sign out failed')
     }
