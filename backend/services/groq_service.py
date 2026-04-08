@@ -32,14 +32,14 @@ def _require_env(name: str) -> str:
 def get_client() -> Groq:
     global _client
     if _client is None:
-        _client = Groq(api_key=_require_env("GROQ_API_KEY"))
+        _client = Groq(api_key=_require_env("GROQ_API_KEY"), max_retries=0)
     return _client
 
 
 def _get_async_client() -> AsyncGroq:
     global _async_client
     if _async_client is None:
-        _async_client = AsyncGroq(api_key=_require_env("GROQ_API_KEY"))
+        _async_client = AsyncGroq(api_key=_require_env("GROQ_API_KEY"), max_retries=0)
     return _async_client
 
 
@@ -57,7 +57,7 @@ def _chat(messages: list, temperature: float = 0.7, max_tokens: int = 2048) -> s
 
 async def _achat(messages: list, temperature: float = 0.7, max_tokens: int = 2048) -> str:
     """Run synchronous Groq call in a thread pool to avoid blocking."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: _chat(messages, temperature, max_tokens))
 
 

@@ -267,7 +267,13 @@ async def start_session(
             difficulty=difficulty,
         )
     except Exception as e:
-        return _err(f"Failed to generate first question: {str(e)}", status=500)
+        err_str = str(e)
+        if "rate_limit_exceeded" in err_str or "429" in err_str:
+            return _err(
+                "AI service is temporarily rate-limited. Please wait a few minutes and try again.",
+                status=429,
+            )
+        return _err(f"Failed to generate first question: {err_str}", status=500)
 
     time_limit = _resolve_question_time_limit(round_type, difficulty)
     first_q["id"]             = str(uuid.uuid4())

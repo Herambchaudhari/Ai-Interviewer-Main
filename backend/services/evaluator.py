@@ -13,12 +13,12 @@ _client = None
 def _get_client() -> Groq:
     global _client
     if _client is None:
-        _client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        _client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
     return _client
 
 
 async def _achat(messages: list, temperature: float = 0.2, max_tokens: int = 1200) -> str:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     def _call():
         return _get_client().chat.completions.create(
             model="llama-3.3-70b-versatile",

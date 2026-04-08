@@ -26,12 +26,14 @@ def _get_client():
     global _client
     if _client is None:
         from groq import Groq
-        _client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        # max_retries=0: fail immediately on 429 rate-limit errors instead of
+        # waiting hours for the retry-after window (which caused infinite loading).
+        _client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
     return _client
 
 
 async def _achat(system: str, user: str, temperature=0.85, max_tokens=900) -> str:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     def _call():
         return _get_client().chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -42,7 +44,13 @@ async def _achat(system: str, user: str, temperature=0.85, max_tokens=900) -> st
             temperature=temperature,
             max_tokens=max_tokens,
         ).choices[0].message.content
-    return await loop.run_in_executor(None, _call)
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _call),
+            timeout=60.0,
+        )
+    except asyncio.TimeoutError:
+        raise RuntimeError("AI question generation timed out. Please try again.")
 
 
 def _rand_id() -> str:
