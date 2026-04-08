@@ -4,23 +4,15 @@ Used by session router /answer endpoint.
 """
 import json
 import asyncio
-from groq import Groq
-import os
+from services.api_manager import create_chat_completion
 
-_client = None
-
-
-def _get_client() -> Groq:
-    global _client
-    if _client is None:
-        _client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
-    return _client
+# _client caching removed, handled by api_manager
 
 
 async def _achat(messages: list, temperature: float = 0.2, max_tokens: int = 1200) -> str:
     loop = asyncio.get_running_loop()
     def _call():
-        return _get_client().chat.completions.create(
+        return create_chat_completion(
             model="llama-3.3-70b-versatile",
             messages=messages,
             temperature=temperature,

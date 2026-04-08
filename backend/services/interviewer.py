@@ -19,23 +19,15 @@ import os
 from typing import Optional
 
 from prompts.interviewer_prompt import build_interviewer_prompt
+from services.api_manager import create_chat_completion
 
-_client = None
-
-def _get_client():
-    global _client
-    if _client is None:
-        from groq import Groq
-        # max_retries=0: fail immediately on 429 rate-limit errors instead of
-        # waiting hours for the retry-after window (which caused infinite loading).
-        _client = Groq(api_key=os.getenv("GROQ_API_KEY"), max_retries=0)
-    return _client
+# _client caching removed, handled by api_manager
 
 
 async def _achat(system: str, user: str, temperature=0.85, max_tokens=900) -> str:
     loop = asyncio.get_running_loop()
     def _call():
-        return _get_client().chat.completions.create(
+        return create_chat_completion(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system},

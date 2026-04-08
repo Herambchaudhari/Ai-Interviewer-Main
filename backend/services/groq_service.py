@@ -12,11 +12,9 @@ from pathlib import Path
 from typing import AsyncIterator
 from dotenv import load_dotenv
 from groq import Groq, AsyncGroq
+from services.api_manager import create_chat_completion, create_async_chat_completion
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-
-_client = None
-_async_client = None
 
 
 def _require_env(name: str) -> str:
@@ -29,24 +27,13 @@ def _require_env(name: str) -> str:
     )
 
 
-def get_client() -> Groq:
-    global _client
-    if _client is None:
-        _client = Groq(api_key=_require_env("GROQ_API_KEY"), max_retries=0)
-    return _client
-
-
-def _get_async_client() -> AsyncGroq:
-    global _async_client
-    if _async_client is None:
-        _async_client = AsyncGroq(api_key=_require_env("GROQ_API_KEY"), max_retries=0)
-    return _async_client
+# DEPRECATED: use create_chat_completion / create_async_chat_completion directly from services.api_manager
+# Remaining _require_env is used locally if needed.
 
 
 def _chat(messages: list, temperature: float = 0.7, max_tokens: int = 2048) -> str:
     """Synchronous Groq chat call."""
-    client = get_client()
-    response = client.chat.completions.create(
+    response = create_chat_completion(
         model="llama-3.3-70b-versatile",
         messages=messages,
         temperature=temperature,
@@ -73,8 +60,7 @@ async def stream_chat(
         async for chunk in stream_chat(system_prompt, user_prompt):
             yield chunk
     """
-    client = _get_async_client()
-    stream = await client.chat.completions.create(
+    stream = await create_async_chat_completion(
         model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": system},
