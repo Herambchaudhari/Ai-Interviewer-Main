@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuthContext } from '../context/AuthContext'
 import {
   FileText, BarChart2, Database, BookOpen,
-  StickyNote, Briefcase, Layers,
+  StickyNote, Briefcase, Layers, TrendingUp, Folder,
 } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ReportsSection       from '../components/hub/ReportsSection'
@@ -16,7 +16,7 @@ import TopicsMasterySection from '../components/hub/TopicsMasterySection'
 import NotesSection         from '../components/hub/NotesSection'
 import ApplicationsSection  from '../components/hub/ApplicationsSection'
 import PortfolioSection     from '../components/hub/PortfolioSection'
-import { Folder }           from 'lucide-react'
+import ProgressSection      from '../components/hub/ProgressSection'
 
 import {
   getHubReports,
@@ -28,13 +28,14 @@ import {
 // Note: getHubReports kept for Notes tab fallback (loads sessions list)
 
 const TABS = [
-  { id: 'reports',      label: 'Reports',      icon: FileText,  color: '#7c3aed' },
-  { id: 'analytics',    label: 'Analytics',    icon: BarChart2, color: '#06b6d4' },
-  { id: 'resumes',      label: 'Resumes',      icon: Database,  color: '#10b981' },
-  { id: 'topics',       label: 'Topics',       icon: BookOpen,  color: '#f59e0b' },
-  { id: 'notes',        label: 'Notes',        icon: StickyNote,color: '#ec4899' },
-  { id: 'applications', label: 'Applications', icon: Briefcase, color: '#3b82f6' },
-  { id: 'portfolio',    label: 'Portfolio',    icon: Folder,    color: '#8b5cf6' },
+  { id: 'reports',      label: 'Reports',      icon: FileText,   color: '#7c3aed' },
+  { id: 'analytics',    label: 'Analytics',    icon: BarChart2,  color: '#06b6d4' },
+  { id: 'progress',     label: 'Progress',     icon: TrendingUp, color: '#4ade80' },
+  { id: 'resumes',      label: 'Resumes',      icon: Database,   color: '#10b981' },
+  { id: 'topics',       label: 'Topics',       icon: BookOpen,   color: '#f59e0b' },
+  { id: 'notes',        label: 'Notes',        icon: StickyNote, color: '#ec4899' },
+  { id: 'applications', label: 'Applications', icon: Briefcase,  color: '#3b82f6' },
+  { id: 'portfolio',    label: 'Portfolio',    icon: Folder,     color: '#8b5cf6' },
 ]
 
 export default function ContextHubPage() {
@@ -73,6 +74,9 @@ export default function ContextHubPage() {
         case 'applications':
           result = await getApplications()
           break
+        case 'progress':
+          setLoading(false)
+          return // data fetched inside ProgressSection directly
         case 'portfolio':
           setLoading(false)
           return // data fetched inside PortfolioSection directly
@@ -178,6 +182,9 @@ export default function ContextHubPage() {
                 sessions={tabData.reports?.reports || []}
                 onChange={handleApplicationsChanged}
               />
+            )}
+            {activeTab === 'progress' && (
+              <ProgressSection userId={user?.id} />
             )}
             {activeTab === 'portfolio' && (
               <PortfolioSection />

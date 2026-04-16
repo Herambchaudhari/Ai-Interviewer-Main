@@ -9,8 +9,11 @@ from pydantic import BaseModel
 from typing import Optional
 
 from auth import get_current_user
-from services.groq_service import generate_questions
-from services.db_service import save_session, get_profile as _get_profile
+from services.interviewer import generate_first_question
+from services.db_service import (
+    save_session, get_profile as _get_profile,
+    save_checkpoint, get_session_with_auth, get_active_sessions,
+)
 from services.evaluator import evaluate_mcq_response
 
 router = APIRouter()
@@ -208,10 +211,10 @@ async def start_session(
 ):
     """
     1. Validate difficulty
-    2. Fetch candidate profile from Supabase
-    3. Generate num_questions questions via Groq
+    2. Assemble full candidate context (Phase 1)
+    3. Generate ONLY the first question — adaptive engine generates subsequent ones
     4. Persist session to Supabase
-    5. Return { session_id, first_question, questions }
+    5. Return { session_id, first_question, questions: [first_question] }
     """
     difficulty = _DIFFICULTY_MAP.get(body.difficulty.lower())
     if not difficulty:
@@ -256,27 +259,28 @@ async def start_session(
     )
     context["session_label"] = session_label
 
-    # resume_data alias kept for generate_questions() compat below
-    resume_data = context
-
-    # ── Generate questions ─────────────────────────────────────────────────
+    # ── Generate only the first question — adaptive engine generates the rest ──
     try:
-        questions = await generate_questions(
-            resume_data=resume_data,
+        first_q = await generate_first_question(
+            profile=context,
             round_type=round_type,
             difficulty=difficulty,
-            num_questions=body.num_questions,
         )
     except Exception as e:
-        return _err(f"Failed to generate questions: {str(e)}", status=500)
+        err_str = str(e)
+        if "rate_limit_exceeded" in err_str or "429" in err_str:
+            return _err(
+                "AI service is temporarily rate-limited. Please wait a few minutes and try again.",
+                status=429,
+            )
+        return _err(f"Failed to generate first question: {err_str}", status=500)
 
-    # Attach stable IDs and time limits to each question
     time_limit = _resolve_question_time_limit(round_type, difficulty)
-    for i, q in enumerate(questions):
-        q["id"]          = str(uuid.uuid4())
-        q["order_index"] = i
-        q["type"]        = _resolve_question_type(round_type)
-        q["time_limit_secs"] = time_limit
+    first_q["id"]             = str(uuid.uuid4())
+    first_q["order_index"]    = 0
+    first_q["type"]           = _resolve_question_type(round_type)
+    first_q["time_limit_secs"] = time_limit
+    questions = [first_q]
 
     # ── Save session ───────────────────────────────────────────────────────
     session_data = {
@@ -316,7 +320,7 @@ async def start_session(
                 "options":         first_question.get("options", []),
                 "explanation":     first_question.get("explanation", ""),
             },
-            "questions": questions,          # all questions — frontend stores in sessionStorage
+            "questions": questions,          # only first question — rest generated adaptively via /answer
             "timer_mins":    body.timer_mins,
             "round_type":    round_type,
             "difficulty":    difficulty,
@@ -1076,4 +1080,100 @@ async def end_session(
         # Frontend route only. Do not treat this as a backend URL.
         "report_route": f"/report/{body.session_id}",
         "message":    "Session ended. Report is being generated in the background.",
+    })
+
+
+# ── Checkpoint / Resume endpoints ─────────────────────────────────────────────
+
+class CheckpointBody(BaseModel):
+    current_question_index: Optional[int]        = None
+    conversation_history:   Optional[list]        = None
+    scores:                 Optional[list]        = None
+    transcript:             Optional[list]        = None
+    detected_weaknesses:    Optional[list]        = None
+    avoided_topics:         Optional[list]        = None
+    timer_remaining_secs:   Optional[int]         = None
+
+
+@router.post("/{session_id}/checkpoint")
+async def save_session_checkpoint(
+    session_id: str,
+    body: CheckpointBody,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Persist a mid-session snapshot so the candidate can resume later.
+    Only saves fields that are explicitly provided in the request body.
+    """
+    state = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not state:
+        return _err("No checkpoint fields provided.", status=400)
+
+    try:
+        ok = save_checkpoint(session_id, user["user_id"], state)
+    except RuntimeError as e:
+        return _err(str(e), status=503)
+    except Exception as e:
+        return _err(f"Checkpoint failed: {e}", status=500)
+
+    if not ok:
+        return _err("Session not found or access denied.", status=404)
+
+    return _ok(data={"session_id": session_id, "checkpointed": True})
+
+
+@router.get("/active")
+async def list_active_sessions(
+    user: dict = Depends(get_current_user),
+):
+    """
+    Return all incomplete sessions for the current user (newest first).
+    Used by the frontend to offer a 'Resume interview?' prompt.
+    """
+    try:
+        sessions = get_active_sessions(user["user_id"])
+    except RuntimeError as e:
+        return _err(str(e), status=503)
+    except Exception as e:
+        return _err(f"Could not fetch active sessions: {e}", status=500)
+
+    return _ok(data={"sessions": sessions})
+
+
+@router.get("/{session_id}/resume")
+async def resume_session(
+    session_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Fetch a session's full state for resuming.
+    Returns 404 if session doesn't belong to this user or is already completed.
+    """
+    try:
+        session = get_session_with_auth(session_id, user["user_id"])
+    except RuntimeError as e:
+        return _err(str(e), status=503)
+    except Exception as e:
+        return _err(f"Could not fetch session: {e}", status=500)
+
+    if not session:
+        return _err("Session not found or access denied.", status=404)
+
+    if session.get("status") == "completed":
+        return _err("Session already completed. View the report instead.", status=409)
+
+    return _ok(data={
+        "session_id":             session["id"],
+        "round_type":             session.get("round_type"),
+        "difficulty":             session.get("difficulty"),
+        "current_question_index": session.get("current_question_index", 0),
+        "questions":              session.get("questions", []),
+        "transcript":             session.get("transcript", []),
+        "scores":                 session.get("scores", []),
+        "conversation_history":   session.get("conversation_history", []),
+        "detected_weaknesses":    session.get("detected_weaknesses", []),
+        "avoided_topics":         session.get("avoided_topics", []),
+        "timer_remaining_secs":   session.get("timer_remaining_secs"),
+        "last_checkpoint_at":     session.get("last_checkpoint_at"),
+        "context_bundle":         session.get("context_bundle", {}),
     })

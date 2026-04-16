@@ -25,7 +25,8 @@ import { submitAnswerStreaming }      from '../hooks/useSSE'
 import tts                           from '../services/tts'
 import {
   transcribeSession, submitSessionAnswer,
-  skipQuestion as apiSkip, endSession as apiEnd, generateReport
+  skipQuestion as apiSkip, endSession as apiEnd, generateReport,
+  checkpointSession,
 } from '../lib/api'
 import { getReportRoute } from '../lib/routes'
 
@@ -181,6 +182,19 @@ export default function InterviewRoom() {
     return () => clearInterval(interval)
   }, [qStartTime])
 
+  // ── Auto-checkpoint every 60 s (best-effort, never blocks the UI) ─────────
+  useEffect(() => {
+    if (!sessionId || status === 'done') return
+    const interval = setInterval(() => {
+      checkpointSession(sessionId, {
+        current_question_index: qIndex,
+        scores,
+        timer_remaining_secs: timeLeft ?? undefined,
+      })
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [sessionId, qIndex, scores, timeLeft, status])
+
   // ── Load session from sessionStorage ──────────────────────────────────────
   useEffect(() => {
     const raw = sessionStorage.getItem(`session_${sessionId}`)
@@ -188,7 +202,7 @@ export default function InterviewRoom() {
       try {
         const s = JSON.parse(raw)
         setSession(s)
-        setTotal(s.questions?.length || 0)
+        setTotal(s.num_questions || s.questions?.length || 0)
         setRoundType(s.round_type || 'technical')
         setDifficulty(s.difficulty || 'medium')
         const first = s.questions?.[0] || null
@@ -368,7 +382,7 @@ export default function InterviewRoom() {
           endInterview()
           return
         }
-        const next = inner?.next_question || session?.questions?.[qIndex + 1]
+        const next = inner?.next_question
         if (next) {
           applyNextQuestion(next)
         }

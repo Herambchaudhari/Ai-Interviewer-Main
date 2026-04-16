@@ -13,16 +13,24 @@ GET  /api/v1/report/:session_id/cached  → return cached report only (no genera
 Stages 1+2 run in parallel. Stages 3+4 run in parallel after 1+2 complete.
 Company Fit + Cross-Session analyses run concurrently with stages 1+2.
 """
+import os
 import json
 import asyncio
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from auth import get_current_user
-from services.groq_service import _achat, _clean, _gen_core, _gen_cv_audit
+
+_DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
+from services.groq_service import _achat, _clean, _gen_core, _gen_cv_audit, _gen_code_quality_analysis
 from services.db_service import (
     get_session, get_report, save_report, get_profile,
     compute_improvement_vs_last, get_past_reports_for_analysis, update_session,
+    save_benchmark, save_checklist, get_benchmarks,
 )
+from services.benchmarking_service import compute_peer_comparison
+from services.spaced_repetition_service import build_study_schedule
+from services.checklist_service import generate_checklist
+from services.code_runner import analyze_code_quality, aggregate_code_quality
 from services.web_researcher import search_company_trends
 from services.company_intelligence import analyze_company_fit
 from services.session_history_analyzer import analyze_cross_session
@@ -89,6 +97,45 @@ def _merge_per_question_analysis(question_scores: list, per_question_analysis: l
         merged.append(payload)
 
     return merged
+
+
+def _build_mcq_category_breakdown(transcript: list) -> list:
+    """
+    Aggregate MCQ transcript entries by category.
+    Returns a list of {category, correct, total, accuracy, avg_score, score, verdict, comment}
+    so the shape is identical to what the LLM produces for non-MCQ rounds.
+    Only includes entries where question_type == 'mcq'.
+    """
+    from collections import defaultdict
+    buckets: dict = defaultdict(lambda: {"correct": 0, "total": 0, "score_sum": 0.0})
+    for entry in (transcript or []):
+        if entry.get("question_type") != "mcq":
+            continue
+        cat = (entry.get("category") or entry.get("topic") or "Uncategorized").strip()
+        buckets[cat]["total"] += 1
+        buckets[cat]["score_sum"] += float(entry.get("score") or 0)
+        if entry.get("is_correct"):
+            buckets[cat]["correct"] += 1
+
+    result = []
+    for cat, data in buckets.items():
+        total = data["total"]
+        accuracy = round(data["correct"] / total * 100, 1) if total else 0.0
+        avg_score = round(data["score_sum"] / total, 1) if total else 0.0
+        result.append({
+            "category":  cat,
+            "correct":   data["correct"],
+            "total":     total,
+            "accuracy":  accuracy,
+            "avg_score": avg_score,
+            # Unified fields so frontend can render both MCQ and non-MCQ the same way
+            "score":     round(avg_score * 10),
+            "verdict":   "Strong" if accuracy >= 80 else "Needs Work" if accuracy >= 50 else "Weak",
+            "comment":   f"{data['correct']}/{total} correct ({accuracy}%)",
+        })
+    # Sort by accuracy descending so best categories appear first
+    result.sort(key=lambda x: x["accuracy"], reverse=True)
+    return result
 
 
 def _build_session_label(round_type: str, target_company: str = "", job_role: str = "") -> str:
@@ -231,6 +278,7 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
         "proctoring_summary": None,
         "interview_integrity": None,
         "is_mock": True,
+        "_debug_mock": True,
     }
 
 
@@ -416,6 +464,46 @@ async def _generate_report_sse(session_id: str, user_id: str):
     filler_heatmap      = voice_result.get("filler_heatmap")
     transcript_annotated = voice_result.get("transcript_annotated")
 
+    # ── DSA Pre-Stage: code quality analysis (DSA rounds only) ───────────────
+    code_quality_metrics = None
+    if round_type == "dsa":
+        try:
+            raw_code_results = session.get("code_execution_results") or []
+            if raw_code_results:
+                per_q_metrics = []
+                cq_tasks = []
+                for cr in raw_code_results:
+                    static_m = analyze_code_quality(
+                        code=cr.get("code", ""),
+                        language=cr.get("language", "python"),
+                        execution_result=cr.get("execution", {}),
+                    )
+                    cq_tasks.append(
+                        _gen_code_quality_analysis(
+                            code=cr.get("code", ""),
+                            language=cr.get("language", "python"),
+                            static_metrics=static_m,
+                            question_text=cr.get("question_text", ""),
+                        )
+                    )
+                    per_q_metrics.append(static_m)
+
+                llm_cq_results = await asyncio.gather(*cq_tasks, return_exceptions=True)
+
+                # Merge static metrics + LLM analysis per question
+                merged_per_q = []
+                for i, llm_r in enumerate(llm_cq_results):
+                    entry = dict(per_q_metrics[i]) if i < len(per_q_metrics) else {}
+                    if isinstance(llm_r, dict):
+                        entry.update(llm_r)
+                    entry["question_id"] = raw_code_results[i].get("question_id", f"Q{i+1}")
+                    entry["question_text"] = raw_code_results[i].get("question_text", "")
+                    merged_per_q.append(entry)
+
+                code_quality_metrics = aggregate_code_quality(merged_per_q)
+        except Exception as _cq_err:
+            print(f"[report/sse] DSA code quality pre-stage failed: {_cq_err}")
+
     # ── Stage 1+2: core + cv_audit + market + company_fit + cross-session ────
     yield _sse({"stage": "core_analysis", "progress": 10, "label": "Scoring your answers..."})
 
@@ -435,7 +523,7 @@ async def _generate_report_sse(session_id: str, user_id: str):
         pass
 
     # Fire Stage 1 + Stage 2 + company_fit in parallel
-    core_task    = _gen_core(round_type, question_scores, overall_raw, session, profile_parsed, market_context)
+    core_task    = _gen_core(round_type, question_scores, overall_raw, session, profile_parsed, market_context, code_quality_metrics)
     cv_task      = _gen_cv_audit(profile_parsed, question_scores)
     company_task = analyze_company_fit(
         candidate_score=overall_pct,
@@ -544,6 +632,54 @@ async def _generate_report_sse(session_id: str, user_id: str):
 
     yield _sse({"stage": "playbook_generation", "progress": 85, "label": "Building your 30-day plan..."})
 
+    # ── Preparation Checklist ─────────────────────────────────────────────────
+    checklist_items = []
+    try:
+        checklist_items = generate_checklist(
+            weak_areas=core_result.get("weak_areas", []),
+            skills_to_work_on=playbook_result.get("skills_to_work_on", []),
+            thirty_day_plan=playbook_result.get("thirty_day_plan", {}),
+            round_type=round_type,
+            target_company=target_company,
+        )
+        if checklist_items:
+            save_checklist(
+                user_id=user_id,
+                session_id=session_id,
+                items=checklist_items,
+            )
+    except Exception as _cl_e:
+        print(f"[report/sse] Checklist generation failed: {_cl_e}")
+
+    # ── Adaptive Study Schedule (Spaced Repetition) ──────────────────────────
+    study_schedule = None
+    try:
+        target_date = session.get("target_interview_date") or ""
+        study_schedule = build_study_schedule(
+            weak_areas=core_result.get("weak_areas", []),
+            past_reports=past_reports,
+            target_date_iso=target_date,
+            round_type=round_type,
+        )
+    except Exception as _sr_e:
+        print(f"[report/sse] Study schedule failed: {_sr_e}")
+
+    # ── Peer comparison (Industry Benchmarking) ──────────────────────────────
+    peer_comparison = None
+    try:
+        benchmark_rows = get_benchmarks(
+            round_type=round_type,
+            difficulty=difficulty,
+            target_company=target_company,
+        )
+        peer_comparison = compute_peer_comparison(
+            user_overall=overall_pct,
+            user_radar=radar_scores,
+            benchmarks=benchmark_rows,
+        )
+    except Exception as _bm_e:
+        print(f"[report/sse] Peer comparison failed: {_bm_e}")
+
     # ── Market intelligence payload ───────────────────────────────────────────
     market_intel = None
     if target_company and market_context:
@@ -575,7 +711,14 @@ async def _generate_report_sse(session_id: str, user_id: str):
 
         # Charts
         "radar_scores":         radar_scores,
-        "category_breakdown":   core_result.get("category_breakdown", []),
+        # For MCQ rounds, compute category breakdown deterministically from
+        # the transcript (is_correct + category per entry).  For other round
+        # types keep whatever the LLM core stage produced.
+        "category_breakdown":   (
+            _build_mcq_category_breakdown(transcript)
+            if round_type == "mcq_practice"
+            else core_result.get("category_breakdown", [])
+        ),
 
         # Strong / Weak
         "strong_areas":         core_result.get("strong_areas", []),
@@ -639,6 +782,18 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "follow_up_questions":     playbook_result.get("follow_up_questions", []),
         "next_interview_blueprint": playbook_result.get("next_interview_blueprint"),
 
+        # ── NEW: Code Quality Metrics (DSA rounds) ──
+        "code_quality_metrics": code_quality_metrics,
+
+        # ── NEW: Peer Comparison / Industry Benchmarking ──
+        "peer_comparison": peer_comparison,
+
+        # ── NEW: Adaptive Study Schedule (Spaced Repetition) ──
+        "study_schedule": study_schedule,
+
+        # ── NEW: Preparation Checklist ──
+        "checklist": checklist_items,
+
         # Meta
         "confidence_score": 85,
     }
@@ -649,6 +804,21 @@ async def _generate_report_sse(session_id: str, user_id: str):
         update_session(session_id, {"status": "completed"})
     except Exception as e:
         print(f"[report/sse] Persist failed: {e}")
+
+    # ── Fire-and-forget: save anonymised benchmark row ────────────────────────
+    try:
+        save_benchmark(
+            round_type=round_type,
+            difficulty=difficulty,
+            overall_score=overall_pct,
+            radar_scores=radar_scores,
+            grade=core_result.get("grade", ""),
+            hire_recommendation=core_result.get("hire_recommendation", ""),
+            target_company=target_company,
+            job_role=job_role,
+        )
+    except Exception as _bm_err:
+        print(f"[report/sse] Benchmark save failed: {_bm_err}")
 
     yield _sse({"stage": "complete", "progress": 100, "report": report_payload})
 
@@ -670,7 +840,9 @@ async def get_or_generate_report(
         if cached and _is_complete_report(cached):
             return _ok(data=cached)
     except RuntimeError:
-        return _ok(data=_mock_report(session_id))
+        if _DEBUG:
+            return _ok(data=_mock_report(session_id))
+        return _err("Database not configured. Set SUPABASE_URL and SUPABASE_KEY.", status=503)
     except Exception:
         pass
 
@@ -682,7 +854,9 @@ async def get_or_generate_report(
         if session.get("user_id") != user["user_id"]:
             return _err("Access denied.", status=403)
     except RuntimeError:
-        return _ok(data=_mock_report(session_id))
+        if _DEBUG:
+            return _ok(data=_mock_report(session_id))
+        return _err("Database not configured. Set SUPABASE_URL and SUPABASE_KEY.", status=503)
     except Exception as e:
         return _err(str(e), status=500)
 
@@ -714,6 +888,8 @@ async def get_cached_report(
                 return _err("Access denied.", status=403)
         return _ok(data=cached)
     except RuntimeError:
-        return _ok(data=_mock_report(session_id))
+        if _DEBUG:
+            return _ok(data=_mock_report(session_id))
+        return _err("Database not configured. Set SUPABASE_URL and SUPABASE_KEY.", status=503)
     except Exception as e:
         return _err(str(e), status=500)

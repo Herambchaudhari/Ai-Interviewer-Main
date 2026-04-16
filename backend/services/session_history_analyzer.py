@@ -5,9 +5,19 @@ Analyzes a user's historical report data to produce:
   - skill_decay:        Skills that have dropped since the previous session
   - repeated_offenders: Issues that appear across multiple sessions (≥2)
   - growth_trajectory:  Score trend, direction, prediction, milestones
+  - skill_velocity:     Rate of change per skill over recent sessions
+  - persistent_gaps:    Weak areas across ≥3 sessions
+  - progress_timeline:  Ordered list of session scores for charting
 """
 import json
 from typing import Any, Optional
+
+from .progress_service import (
+    compute_skill_velocity,
+    compute_progress_timeline,
+    compute_persistent_gaps,
+    compute_strongest_skills,
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -288,7 +298,7 @@ def analyze_cross_session(
     target_score: float = 80.0,
 ) -> dict[str, Any]:
     """
-    Run all three cross-session analyses and return combined result.
+    Run all cross-session analyses and return combined result.
 
     Args:
         current_score:      overall_score of the current report (0-100)
@@ -302,14 +312,28 @@ def analyze_cross_session(
             skill_decay:         [...],
             repeated_offenders:  [...],
             growth_trajectory:   {...},
+            skill_velocity:      [...],
+            persistent_gaps:     [...],
+            progress_timeline:   [...],
+            strongest_skills:    [...],
         }
     """
-    skill_decay = compute_skill_decay(current_radar, past_reports)
+    skill_decay        = compute_skill_decay(current_radar, past_reports)
     repeated_offenders = compute_repeated_offenders(current_weak_areas, past_reports)
-    growth_trajectory = compute_growth_trajectory(past_reports, current_score, target_score)
+    growth_trajectory  = compute_growth_trajectory(past_reports, current_score, target_score)
+
+    # Progress tracking analytics (Phase 3)
+    skill_velocity   = compute_skill_velocity(past_reports)
+    persistent_gaps  = compute_persistent_gaps(past_reports)
+    progress_timeline = compute_progress_timeline(past_reports)
+    strongest_skills  = compute_strongest_skills(past_reports)
 
     return {
         "skill_decay":        skill_decay,
         "repeated_offenders": repeated_offenders,
         "growth_trajectory":  growth_trajectory,
+        "skill_velocity":     skill_velocity,
+        "persistent_gaps":    persistent_gaps,
+        "progress_timeline":  progress_timeline,
+        "strongest_skills":   strongest_skills,
     }

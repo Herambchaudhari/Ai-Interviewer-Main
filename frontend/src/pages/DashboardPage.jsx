@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuthContext } from '../context/AuthContext'
-import { getProfile, getUserReports, getMarketNews } from '../lib/api'
+import { getProfile, getUserReports, getMarketNews, getUserChecklists, getActiveSessions } from '../lib/api'
 import RoundCards from '../components/RoundCards'
 import SessionConfig from '../components/SessionConfig'
 import { COMPANY_SECTORS } from '../constants/companies'
@@ -9,7 +9,7 @@ import {
   CalendarDays, TrendingUp, ChevronRight,
   BarChart2, RefreshCcw, Trophy, Clock,
   GraduationCap, Settings, Building2, Star, Layers,
-  Globe, ExternalLink, Activity, Loader2
+  Globe, ExternalLink, Activity, Loader2, CheckSquare, CheckCircle,
 } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { getReportRoute } from '../lib/routes'
@@ -50,6 +50,19 @@ export default function DashboardPage() {
   const [loadingNews, setLoadingNews]       = useState(true)
   const [reloadsLeft, setReloadsLeft]       = useState(5)   // max 5 per day
   const DAILY_LIMIT                         = 5
+
+  const [latestChecklist, setLatestChecklist] = useState(null)
+  const [activeSessions, setActiveSessions]   = useState([])
+
+  useEffect(() => {
+    if (!user?.id) return
+    getUserChecklists(1)
+      .then(res => {
+        const list = res?.data?.checklists?.[0]
+        if (list) setLatestChecklist(list)
+      })
+      .catch(() => {})
+  }, [user?.id])
 
   const fetchNews = (forceRefresh = false) => {
     setLoadingNews(true)
@@ -108,8 +121,13 @@ export default function DashboardPage() {
     getUserReports(user.id)
       .then(res => setReports(res.data?.reports || []))
       .catch(() => {}) // fail silently — reports are optional
-      
+
     fetchNews()
+
+    // Check for unfinished sessions to offer resume
+    getActiveSessions()
+      .then(res => setActiveSessions(res?.sessions || []))
+      .catch(() => {})
   }, [user])
 
   const today = new Date().toLocaleDateString('en-IN', {
@@ -122,6 +140,37 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen pt-24 pb-16 px-4">
       <div className="max-w-5xl mx-auto">
+
+        {/* ── Resume banner ─────────────────────────────────────────────── */}
+        {activeSessions.length > 0 && (
+          <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 flex items-center justify-between gap-4 animate-fade-in-up">
+            <div className="flex items-center gap-3">
+              <Clock size={18} className="text-amber-400 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-300">You have an unfinished interview</p>
+                <p className="text-xs text-muted mt-0.5">
+                  {ROUND_LABELS[activeSessions[0].round_type] || activeSessions[0].round_type}
+                  {activeSessions[0].target_company ? ` · ${activeSessions[0].target_company}` : ''}
+                  {' · '}Question {(activeSessions[0].current_question_index ?? 0) + 1}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => navigate(`/interview/${activeSessions[0].id}`)}
+                className="btn-primary text-xs py-1.5 px-3"
+              >
+                Resume
+              </button>
+              <button
+                onClick={() => setActiveSessions([])}
+                className="btn-secondary text-xs py-1.5 px-3"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── Greeting ───────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between mb-6 animate-fade-in-up">
@@ -315,6 +364,44 @@ export default function DashboardPage() {
           )}
         </div>
         )}
+
+        {/* ── Preparation Checklist Widget ───────────────────────────────── */}
+        {latestChecklist?.items?.length > 0 && (() => {
+          const items = Array.isArray(latestChecklist.items) ? latestChecklist.items : []
+          const done  = items.filter(i => i.checked).length
+          const total = items.length
+          const pct   = Math.round((done / total) * 100)
+          const pending = items.filter(i => !i.checked).slice(0, 3)
+          return (
+            <div className="glass p-5 animate-fade-in-up delay-200">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-bold text-base flex items-center gap-2">
+                  <CheckSquare size={16} style={{ color: '#4ade80' }} />
+                  Prep Checklist
+                </h2>
+                <span className="text-xs text-muted">{done}/{total} done</span>
+              </div>
+              {/* Progress bar */}
+              <div className="h-1.5 rounded-full mb-3" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                <div className="h-1.5 rounded-full transition-all" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #4ade80, #22d3ee)' }} />
+              </div>
+              {/* Top 3 pending */}
+              <div className="space-y-1.5">
+                {pending.map(item => (
+                  <div key={item.id} className="flex items-center gap-2 text-sm">
+                    <div className="w-3.5 h-3.5 rounded flex-shrink-0"
+                      style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }} />
+                    <span className="text-muted truncate">{item.title}</span>
+                  </div>
+                ))}
+              </div>
+              <Link to="/context-hub" className="text-xs font-semibold mt-3 flex items-center gap-1"
+                style={{ color: '#4ade80' }}>
+                View full checklist in Hub <ChevronRight size={12} />
+              </Link>
+            </div>
+          )
+        })()}
 
         {/* ── Past Reports ───────────────────────────────────────────────── */}
         <div className="animate-fade-in-up delay-300">

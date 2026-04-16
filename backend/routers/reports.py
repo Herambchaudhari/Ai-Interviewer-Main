@@ -96,11 +96,10 @@ def _parse_report_json(raw: str) -> Optional[dict]:
 
 async def _call_groq(prompt: str, transcript_qa: str, max_tokens: int = 3000) -> str:
     """Call Groq with the report prompt."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     def _sync():
-        from groq import Groq
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        return client.chat.completions.create(
+        from services.api_manager import create_chat_completion
+        return create_chat_completion(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": prompt},

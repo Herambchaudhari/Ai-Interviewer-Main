@@ -21,20 +21,20 @@
  * 16. Next Interview Blueprint CTA
  * 17. Study Recommendations (legacy)
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
   BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
-import { getReportWithSSE } from '../lib/api'
+import { getReportWithSSE, generateShareLink } from '../lib/api'
 import {
   Trophy, TrendingUp, TrendingDown, BookOpen, ChevronRight,
   Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
   Target, Zap, Brain, ArrowUp, ArrowDown, Minus, Shield,
   MessageSquare, BarChart2, Compass, Clock, Flame, Eye,
-  Share2, Download, Play, Pause, Volume2, X, Copy, Check,
+  Share2, Download, Play, Pause, Volume2, X, Copy, Check, Users,
 } from 'lucide-react'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -153,7 +153,13 @@ function AudioClipPlayer({ audioUrl, startSec, label }) {
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
 
-  if (!audioUrl) return null
+  if (!audioUrl) return (
+    <div className="flex items-center gap-1.5 mt-2 text-xs"
+      style={{ color: 'var(--color-muted)', opacity: 0.5 }}>
+      <Volume2 size={11} />
+      <span>Audio not recorded for this session</span>
+    </div>
+  )
 
   const toggle = () => {
     const el = audioRef.current
@@ -204,8 +210,12 @@ function AudioClipPlayer({ audioUrl, startSec, label }) {
 
 // ── Share / PDF Modal ─────────────────────────────────────────────────────────
 
-function ShareModal({ report, onClose }) {
-  const [copied, setCopied] = useState(false)
+function ShareModal({ report, sessionId, onClose }) {
+  const [copied,        setCopied]        = useState(false)
+  const [shareUrl,      setShareUrl]      = useState('')
+  const [shareLoading,  setShareLoading]  = useState(false)
+  const [shareError,    setShareError]    = useState('')
+  const [urlCopied,     setUrlCopied]     = useState(false)
   const cardRef = useRef(null)
 
   const {
@@ -216,31 +226,63 @@ function ShareModal({ report, onClose }) {
   const scoreCol = scoreColor(+overall_score)
   const ROUND_LABELS_SHORT = { technical: 'Technical', hr: 'HR', dsa: 'DSA', mcq_practice: 'MCQ', system_design: 'Legacy SD' }
 
+  // Generate a backend share link
+  const handleGenerateLink = async () => {
+    if (!sessionId) return
+    setShareLoading(true)
+    setShareError('')
+    try {
+      const res = await generateShareLink(sessionId)
+      if (res?.data?.share_url) {
+        setShareUrl(res.data.share_url)
+      } else {
+        setShareError('Could not generate link. Try again.')
+      }
+    } catch (e) {
+      setShareError(e?.response?.data?.detail || 'Failed to generate share link.')
+    } finally {
+      setShareLoading(false)
+    }
+  }
+
+  const copyShareUrl = async () => {
+    if (!shareUrl) return
+    await navigator.clipboard.writeText(shareUrl)
+    setUrlCopied(true)
+    setTimeout(() => setUrlCopied(false), 2000)
+  }
+
   const copyLink = async () => {
     await navigator.clipboard.writeText(window.location.href)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const printCard = () => {
-    // Insert print-specific CSS, print, then remove
-    const style = document.createElement('style')
-    style.id = '__report_print_style'
-    style.textContent = `
-      @media print {
-        body > *:not(#__report_print_root) { display: none !important; }
-        #__report_print_root { display: block !important; position: fixed; top: 0; left: 0; width: 100%; }
-        @page { size: A4 landscape; margin: 0; }
-      }
-    `
-    document.head.appendChild(style)
+  const [exporting, setExporting] = useState(false)
+
+  const printCard = async () => {
     const el = cardRef.current
-    if (el) {
-      el.id = '__report_print_root'
+    if (!el) return
+    setExporting(true)
+    try {
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ])
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#0a0014' })
+      const imgData = canvas.toDataURL('image/png')
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+      const pdfW = pdf.internal.pageSize.getWidth()
+      const pdfH = (canvas.height * pdfW) / canvas.width
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH)
+      const name = report.candidate_name ? report.candidate_name.replace(/\s+/g, '_') : 'Candidate'
+      pdf.save(`AI_Interview_Report_${name}.pdf`)
+    } catch (e) {
+      console.error('PDF export failed:', e)
       window.print()
-      el.removeAttribute('id')
+    } finally {
+      setExporting(false)
     }
-    document.head.removeChild(style)
   }
 
   const strongList = strong_areas.slice(0, 3).map(a => {
@@ -322,18 +364,66 @@ function ShareModal({ report, onClose }) {
           </p>
         </div>
 
+        {/* ── Public Shareable Link ───────────────────────────────────────── */}
+        <div className="rounded-xl p-4 space-y-3"
+          style={{ background: 'rgba(91,94,246,0.08)', border: '1px solid rgba(91,94,246,0.2)' }}>
+          <p className="text-xs font-semibold text-muted uppercase tracking-wide flex items-center gap-1.5">
+            <Users size={12} /> Public Share Link
+          </p>
+          {!shareUrl ? (
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-muted flex-1">
+                Anyone with the link can view a summary of this report — no login needed.
+              </p>
+              <button
+                onClick={handleGenerateLink}
+                disabled={shareLoading}
+                className="btn-primary text-xs py-1.5 px-3 flex-shrink-0 flex items-center gap-1.5"
+                style={{ opacity: shareLoading ? 0.7 : 1 }}>
+                {shareLoading ? 'Generating…' : 'Generate Link'}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <input
+                readOnly
+                value={shareUrl}
+                className="flex-1 text-xs px-3 py-2 rounded-lg font-mono truncate"
+                style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  color: 'var(--color-text)',
+                }}
+              />
+              <button
+                onClick={copyShareUrl}
+                className="flex items-center gap-1.5 text-xs py-2 px-3 rounded-lg transition-all"
+                style={{
+                  background: urlCopied ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.07)',
+                  border: `1px solid ${urlCopied ? '#4ade80' : 'rgba(255,255,255,0.12)'}`,
+                  color: urlCopied ? '#4ade80' : 'var(--color-muted)',
+                }}>
+                {urlCopied ? <Check size={13} /> : <Copy size={13} />}
+                {urlCopied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          )}
+          {shareError && <p className="text-xs" style={{ color: 'var(--color-error)' }}>{shareError}</p>}
+        </div>
+
         {/* Actions */}
         <div className="flex gap-3">
           <button onClick={copyLink}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all"
             style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
             {copied ? <Check size={14} style={{ color: '#4ade80' }} /> : <Copy size={14} />}
-            {copied ? 'Copied!' : 'Copy Link'}
+            {copied ? 'Copied!' : 'Copy Page URL'}
           </button>
-          <button onClick={printCard}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all btn-primary">
+          <button onClick={printCard} disabled={exporting}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all btn-primary"
+            style={{ opacity: exporting ? 0.7 : 1 }}>
             <Download size={14} />
-            Export PDF
+            {exporting ? 'Exporting…' : 'Export PDF'}
           </button>
         </div>
       </div>
@@ -485,6 +575,18 @@ export default function ReportPage() {
     auto_resources = [], follow_up_questions = [],
     proctoring_summary = {}, interview_integrity = null,
     next_interview_blueprint,
+    // Phase 2: Code quality
+    code_quality_metrics = null,
+    // Phase 4: Peer comparison
+    peer_comparison = null,
+    // Phase 5: Adaptive study schedule
+    study_schedule = null,
+    // Phase 6: Preparation checklist
+    checklist: reportChecklist = [],
+    // Phase 2 MCQ: per-category accuracy breakdown (always an array)
+    category_breakdown = [],
+    // Debug mode flag — set by backend when GROQ_API_KEY is missing
+    _debug_mock = false,
   } = report
 
   const overall = +Number(overall_score).toFixed(1)
@@ -511,9 +613,34 @@ export default function ReportPage() {
     q: `Q${i + 1}`, confidence: v,
   }))
 
+  // MCQ category breakdown chart data — always an array from backend now
+  const mcqCategoryData = (Array.isArray(category_breakdown) ? category_breakdown : []).map(d => ({
+    category: d.category || 'Uncategorized',
+    accuracy: d.accuracy ?? 0,
+    correct:  d.correct  ?? 0,
+    total:    d.total    ?? 1,
+  }))
+
   return (
     <div className="min-h-screen pt-20 pb-16 px-4">
       <div className="max-w-5xl mx-auto space-y-6">
+
+        {/* ── Debug Mode Banner ───────────────────────────────────────────── */}
+        {_debug_mock && (
+          <div className="rounded-2xl p-4 flex items-start gap-3"
+            style={{ background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.4)' }}>
+            <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" style={{ color: '#eab308' }} />
+            <div>
+              <p className="font-semibold text-sm" style={{ color: '#eab308' }}>
+                DEBUG MODE — Simulated Report
+              </p>
+              <p className="text-xs text-muted mt-0.5">
+                This is fake data. Connect a <code className="text-yellow-400">GROQ_API_KEY</code> in your backend
+                environment to generate real AI-powered reports.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Nav ─────────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between">
@@ -543,7 +670,7 @@ export default function ReportPage() {
 
         {/* Share Modal */}
         {shareOpen && report && (
-          <ShareModal report={report} onClose={() => setShareOpen(false)} />
+          <ShareModal report={report} sessionId={sessionId} onClose={() => setShareOpen(false)} />
         )}
 
         {/* ── What Went Wrong callout ─────────────────────────────────────── */}
@@ -714,6 +841,74 @@ export default function ReportPage() {
           </div>
         )}
 
+        {/* ── MCQ Category Breakdown (mcq_practice rounds only) ───────────── */}
+        {round_type === 'mcq_practice' && mcqCategoryData.length > 0 && (
+          <SectionCard icon={<BarChart2 size={16}/>} title="MCQ Category Breakdown" color="#f59e0b">
+            <p className="text-xs text-muted mb-3">
+              Accuracy per topic — highlights which concept areas need the most revision.
+            </p>
+            <ResponsiveContainer width="100%" height={Math.max(180, mcqCategoryData.length * 42)}>
+              <BarChart
+                data={mcqCategoryData}
+                layout="vertical"
+                margin={{ top: 4, right: 40, bottom: 4, left: 8 }}
+              >
+                <XAxis
+                  type="number"
+                  domain={[0, 100]}
+                  tick={{ fill: '#94a3b8', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => `${v}%`}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="category"
+                  width={90}
+                  tick={{ fill: '#e2e8f0', fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  cursor={{ fill: 'rgba(245,158,11,0.08)' }}
+                  contentStyle={{ background: '#1e1e2e', border: '1px solid #f59e0b40', borderRadius: 8, fontSize: 12 }}
+                  formatter={(value, name, props) => [
+                    `${value}%  (${props.payload.correct}/${props.payload.total} correct)`,
+                    'Accuracy',
+                  ]}
+                />
+                <Bar dataKey="accuracy" radius={[0, 6, 6, 0]} maxBarSize={22}>
+                  {mcqCategoryData.map((entry, i) => (
+                    <Cell
+                      key={i}
+                      fill={
+                        entry.accuracy >= 80 ? '#4ade80'
+                        : entry.accuracy >= 50 ? '#f59e0b'
+                        : '#f87171'
+                      }
+                      opacity={0.85}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            {/* Summary row: overall MCQ accuracy */}
+            {(() => {
+              const totalQ  = mcqCategoryData.reduce((s, d) => s + d.total, 0)
+              const totalC  = mcqCategoryData.reduce((s, d) => s + d.correct, 0)
+              const overall = totalQ > 0 ? Math.round(totalC / totalQ * 100) : 0
+              return (
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/10 text-xs text-muted">
+                  <span>Overall MCQ accuracy</span>
+                  <span className="font-semibold" style={{ color: overall >= 80 ? '#4ade80' : overall >= 50 ? '#f59e0b' : '#f87171' }}>
+                    {totalC}/{totalQ} &nbsp;·&nbsp; {overall}%
+                  </span>
+                </div>
+              )
+            })()}
+          </SectionCard>
+        )}
+
         {/* ── Filler & Hesitation Heatmap ─────────────────────────────────── */}
         {fillerData.length > 0 && (
           <SectionCard icon={<BarChart2 size={16}/>} title="Filler Word Heatmap" color="#fb923c">
@@ -830,6 +1025,173 @@ export default function ReportPage() {
               ))}
             </div>
           </div>
+        )}
+
+        {/* ── Code Quality Analysis (DSA rounds only) ─────────────────────── */}
+        {round_type === 'dsa' && code_quality_metrics && (
+          <SectionCard icon={<BarChart2 size={16}/>} title="Code Quality Analysis" color="#a78bfa">
+            {/* Aggregate stats row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+              {[
+                { label: 'Test Pass Rate', value: `${Math.round((code_quality_metrics.test_pass_rate || 0) * 100)}%` },
+                { label: 'Avg Exec Time', value: `${code_quality_metrics.execution_time_ms || 0} ms` },
+                { label: 'Avg Memory', value: `${code_quality_metrics.memory_kb || 0} KB` },
+                { label: 'Naming Score', value: `${code_quality_metrics.variable_naming_score || 0}/100` },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded-lg p-3 text-center" style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)' }}>
+                  <p className="text-xs text-muted mb-1">{label}</p>
+                  <p className="font-bold text-lg" style={{ color: '#a78bfa' }}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Per-question code quality radar */}
+            {(() => {
+              const perQ = code_quality_metrics.per_question || []
+              const firstRadar = perQ[0]?.code_quality_radar
+              if (!firstRadar) return null
+              // Aggregate radar across all questions
+              const axes = Object.keys(firstRadar)
+              const avgRadar = axes.map(axis => ({
+                subject: axis,
+                A: Math.round(perQ.reduce((sum, q) => sum + (q.code_quality_radar?.[axis] || 0), 0) / perQ.length),
+                fullMark: 100,
+              }))
+              return (
+                <div className="mb-5">
+                  <p className="text-sm text-muted mb-3">Averaged across {perQ.length} question(s)</p>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <RadarChart data={avgRadar}>
+                      <PolarGrid stroke="rgba(255,255,255,0.1)"/>
+                      <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                      <Radar dataKey="A" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.25}/>
+                      <Tooltip formatter={v => [`${v}/100`]} contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40' }}/>
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+              )
+            })()}
+
+            {/* Per-question expandable cards */}
+            <div className="space-y-3">
+              {(code_quality_metrics.per_question || []).map((q, i) => (
+                <details key={i} className="rounded-lg overflow-hidden" style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                  <summary className="px-4 py-3 cursor-pointer text-sm font-medium flex items-center justify-between">
+                    <span>{q.question_text ? q.question_text.slice(0, 60) + '…' : `Question ${i + 1}`}</span>
+                    <span className="text-xs" style={{ color: q.test_pass_rate === 1 ? '#4ade80' : '#f87171' }}>
+                      {q.test_pass_rate === 1 ? 'Accepted' : q.status || 'Not Accepted'}
+                    </span>
+                  </summary>
+                  <div className="px-4 pb-4">
+                    {q.code_review_notes?.length > 0 && (
+                      <div className="mb-2">
+                        <p className="text-xs font-semibold text-muted mb-1">Review Notes</p>
+                        <ul className="list-disc list-inside space-y-1">
+                          {q.code_review_notes.map((note, ni) => <li key={ni} className="text-sm">{note}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {q.optimization_suggestions?.length > 0 && (
+                      <div className="mb-2">
+                        <p className="text-xs font-semibold text-muted mb-1">Optimizations</p>
+                        <ul className="list-disc list-inside space-y-1">
+                          {q.optimization_suggestions.map((s, si) => <li key={si} className="text-sm text-yellow-300">{s}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {q.complexity_analysis && (
+                      <div className="flex gap-4 mt-2">
+                        <span className="text-xs px-2 py-1 rounded" style={{ background: 'rgba(74,222,128,0.1)', color: '#4ade80' }}>
+                          Time: {q.complexity_analysis.time}
+                        </span>
+                        <span className="text-xs px-2 py-1 rounded" style={{ background: 'rgba(251,146,60,0.1)', color: '#fb923c' }}>
+                          Space: {q.complexity_analysis.space}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Peer Comparison ──────────────────────────────────────────────── */}
+        {peer_comparison && (
+          <SectionCard icon={<Users size={16}/>} title="Peer Comparison" color="#06b6d4">
+            {peer_comparison.sample_size > 0 ? (
+              <>
+                {/* Summary strip */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                  {[
+                    { label: 'Your Score',    val: `${overall}`,    color: scoreColor(overall) },
+                    { label: 'Peer Avg',      val: peer_comparison.avg_peer_score != null ? `${peer_comparison.avg_peer_score}` : '—', color: '#94a3b8' },
+                    { label: 'Percentile',    val: peer_comparison.overall_percentile != null ? `${peer_comparison.overall_percentile}th` : '—', color: '#06b6d4' },
+                    { label: 'Peer Hire Rate',val: peer_comparison.hire_rate != null ? `${peer_comparison.hire_rate}%` : '—', color: '#4ade80' },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} className="glass p-3 text-center rounded-xl">
+                      <p className="text-xl font-bold" style={{ color }}>{val}</p>
+                      <p className="text-xs text-muted mt-0.5">{label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Insight */}
+                {peer_comparison.insight && (
+                  <p className="text-sm text-muted mb-4 italic">{peer_comparison.insight}</p>
+                )}
+
+                {/* Radar comparison bar chart */}
+                {peer_comparison.radar_comparison?.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-xs text-muted uppercase tracking-widest mb-2">Axis-by-Axis vs Peers</p>
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart
+                        data={peer_comparison.radar_comparison}
+                        margin={{ top: 5, right: 10, bottom: 5, left: -20 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis dataKey="axis" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
+                        <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
+                        <Tooltip
+                          contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12 }}
+                          formatter={(v, name) => [v, name === 'user_score' ? 'You' : 'Peer Avg']}
+                        />
+                        <Bar dataKey="user_score" name="you" fill="#06b6d4" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="peer_avg"   name="peer_avg" fill="rgba(148,163,184,0.4)" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
+                {/* Grade distribution */}
+                {Object.keys(peer_comparison.grade_distribution || {}).length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted uppercase tracking-widest mb-2">Grade Distribution (peers)</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {Object.entries(peer_comparison.grade_distribution).map(([g, pct]) => {
+                        const isUser = g === peer_comparison.user_grade
+                        return (
+                          <div key={g}
+                            className="flex flex-col items-center px-3 py-2 rounded-xl text-xs"
+                            style={{
+                              background: isUser ? 'rgba(6,182,212,0.15)' : 'rgba(255,255,255,0.04)',
+                              border: isUser ? '1px solid rgba(6,182,212,0.5)' : '1px solid rgba(255,255,255,0.08)',
+                            }}>
+                            <span className="font-bold text-base" style={{ color: isUser ? '#06b6d4' : '#94a3b8' }}>{g}</span>
+                            <span style={{ color: isUser ? '#06b6d4' : '#64748b' }}>{pct}%</span>
+                            {isUser && <span className="text-[10px] text-cyan-400 mt-0.5">you</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted">{peer_comparison.insight || 'Not enough peer data yet.'}</p>
+            )}
+          </SectionCard>
         )}
 
         {/* ── Company Fit ─────────────────────────────────────────────────── */}
@@ -1123,6 +1485,132 @@ export default function ReportPage() {
               ))}
             </div>
           </div>
+        )}
+
+        {/* ── Adaptive Study Schedule ─────────────────────────────────────── */}
+        {study_schedule?.topics?.length > 0 && (
+          <SectionCard icon={<BookOpen size={16}/>} title="Adaptive Study Schedule" color="#4ade80">
+            {/* Summary line */}
+            <div className="flex flex-wrap gap-4 mb-5 text-sm">
+              <span className="text-muted">
+                <span className="font-semibold text-white">{study_schedule.topics.length}</span> topics tracked
+              </span>
+              {study_schedule.days_until_target != null && (
+                <span className="text-muted">
+                  <span className="font-semibold text-white">{study_schedule.days_until_target}</span> days to interview
+                </span>
+              )}
+              <span className="text-muted">
+                <span className="font-semibold text-white">{study_schedule.schedule_horizon}</span>-day horizon
+              </span>
+            </div>
+
+            {/* Topic cards */}
+            <div className="space-y-3">
+              {study_schedule.topics.map(t => {
+                const pColor = t.priority === 'Critical' ? '#f87171'
+                  : t.priority === 'High'     ? '#fb923c'
+                  : t.priority === 'Medium'   ? '#facc15'
+                  : '#4ade80'
+                return (
+                  <div key={t.topic}
+                    className="glass p-4 rounded-xl"
+                    style={{ borderLeft: `3px solid ${pColor}` }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-semibold text-sm text-white">{t.topic}</p>
+                      <div className="flex items-center gap-2">
+                        {t.score != null && (
+                          <span className="text-xs text-muted">Score: <span className="font-bold text-white">{t.score}</span></span>
+                        )}
+                        <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                          style={{ background: `${pColor}20`, color: pColor }}>
+                          {t.priority}
+                        </span>
+                      </div>
+                    </div>
+                    {/* Review timeline */}
+                    <div className="flex flex-wrap gap-2">
+                      {t.reviews.map((r, i) => (
+                        <div key={i}
+                          className="text-xs px-2.5 py-1 rounded-lg text-center"
+                          style={{ background: 'rgba(255,255,255,0.05)', minWidth: 80 }}>
+                          <p className="font-medium text-white">{r.session_type}</p>
+                          <p className="text-muted">{r.date}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Next 7 days quick view */}
+            {(() => {
+              const today = new Date()
+              const next7 = Object.entries(study_schedule.daily_plan || {})
+                .filter(([d]) => {
+                  const diff = (new Date(d) - today) / 86400000
+                  return diff >= 0 && diff < 7
+                })
+                .slice(0, 7)
+              if (!next7.length) return null
+              return (
+                <div className="mt-5">
+                  <p className="text-xs text-muted uppercase tracking-widest mb-2">Next 7 Days</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                    {next7.map(([d, topics]) => (
+                      <div key={d} className="glass p-2.5 rounded-xl text-xs">
+                        <p className="font-semibold text-white mb-1">{new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</p>
+                        {topics.map(tp => (
+                          <p key={tp} className="text-muted truncate">· {tp}</p>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+          </SectionCard>
+        )}
+
+        {/* ── Preparation Checklist ──────────────────────────────────────── */}
+        {reportChecklist?.length > 0 && (
+          <SectionCard icon={<CheckCircle size={16}/>} title="Preparation Checklist" color="#4ade80">
+            <p className="text-xs text-muted mb-4">
+              {reportChecklist.filter(i => i.checked).length} / {reportChecklist.length} completed
+            </p>
+            <div className="space-y-2">
+              {reportChecklist.map((item) => {
+                const catColor = {
+                  'Weak Area Fix':    '#f87171',
+                  'Practice':         '#06b6d4',
+                  'Concept Review':   '#7c3aed',
+                  'Resource':         '#f59e0b',
+                  'Mock Interview':   '#4ade80',
+                  'Company Research': '#a78bfa',
+                }[item.category] || '#94a3b8'
+                const priorityColor = item.priority === 'High' ? '#f87171' : item.priority === 'Medium' ? '#facc15' : '#4ade80'
+                return (
+                  <div key={item.id}
+                    className="flex items-start gap-3 p-3 rounded-xl"
+                    style={{ background: 'rgba(255,255,255,0.03)', opacity: item.checked ? 0.5 : 1 }}>
+                    <div className="w-4 h-4 rounded mt-0.5 flex-shrink-0"
+                      style={{ background: item.checked ? '#4ade80' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+                      {item.checked && <Check size={12} style={{ color: '#0f172a', margin: 1 }} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-white" style={{ textDecoration: item.checked ? 'line-through' : 'none' }}>{item.title}</p>
+                      {item.details && <p className="text-xs text-muted mt-0.5 truncate">{item.details}</p>}
+                    </div>
+                    <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: `${catColor}20`, color: catColor }}>{item.category}</span>
+                      <span className="text-xs" style={{ color: priorityColor }}>{item.priority}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </SectionCard>
         )}
 
         {/* ── Study Recommendations (legacy) ──────────────────────────────── */}

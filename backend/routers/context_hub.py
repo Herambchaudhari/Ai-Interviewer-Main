@@ -33,6 +33,8 @@ from services.db_service import (
     delete_application,
     get_resume_versions,
     activate_resume,
+    get_user_checklists,
+    update_checklist_item,
 )
 
 router = APIRouter()
@@ -306,6 +308,46 @@ async def activate_resume_endpoint(
         if not ok:
             return _err("Profile not found or access denied.", status=404)
         return _ok({"profile_id": profile_id, "is_active": True})
+    except RuntimeError:
+        return _err("Database unavailable", status=503)
+    except Exception as e:
+        return _err(str(e), status=500)
+
+
+# ── Preparation Checklists ─────────────────────────────────────────────────────
+
+@router.get("/checklists")
+async def list_checklists(
+    limit: int = 5,
+    user: dict = Depends(get_current_user),
+):
+    """Return the most recent preparation checklists for the authenticated user."""
+    try:
+        checklists = get_user_checklists(user["user_id"], limit=limit)
+        return _ok({"checklists": checklists})
+    except RuntimeError:
+        return _ok({"checklists": []})
+    except Exception as e:
+        return _err(str(e), status=500)
+
+
+class ChecklistItemToggle(BaseModel):
+    item_id: str
+    checked: bool
+
+
+@router.patch("/checklists/{checklist_id}/items")
+async def toggle_checklist_item(
+    checklist_id: str,
+    body: ChecklistItemToggle,
+    user: dict = Depends(get_current_user),
+):
+    """Toggle checked state of a single checklist item."""
+    try:
+        ok = update_checklist_item(checklist_id, body.item_id, body.checked)
+        if not ok:
+            return _err("Checklist or item not found.", status=404)
+        return _ok({"checklist_id": checklist_id, "item_id": body.item_id, "checked": body.checked})
     except RuntimeError:
         return _err("Database unavailable", status=503)
     except Exception as e:

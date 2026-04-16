@@ -8,9 +8,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
-from routers import resume, interview, transcribe, report, reports, session, context_hub, portfolio, news
+from routers import resume, interview, transcribe, report, reports, session, context_hub, portfolio, news, progress, share
 
 app = FastAPI(
     title="AI Interviewer API",
@@ -41,7 +41,9 @@ app.include_router(report.router,     prefix=f"{API_PREFIX}/report",     tags=["
 app.include_router(reports.router,    prefix=f"{API_PREFIX}/reports",    tags=["Reports"])
 app.include_router(context_hub.router, prefix=f"{API_PREFIX}/context-hub", tags=["Context Hub"])
 app.include_router(portfolio.router, prefix=f"{API_PREFIX}/portfolio", tags=["Portfolio"])
-app.include_router(news.router, prefix=f"{API_PREFIX}/news", tags=["News"])
+app.include_router(news.router,      prefix=f"{API_PREFIX}/news",      tags=["News"])
+app.include_router(progress.router,  prefix=f"{API_PREFIX}/progress",  tags=["Progress"])
+app.include_router(share.router,     prefix=f"{API_PREFIX}/share",     tags=["Share"])
 # ── Standard Response Helpers ─────────────────────────────────────────────────
 def success_response(data=None, message: str = "Success") -> dict:
     return {"success": True, "data": data, "error": None, "message": message}

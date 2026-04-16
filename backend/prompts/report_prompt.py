@@ -19,8 +19,9 @@ _RADAR_AXES = {
         "Leadership", "Culture Fit", "Situational Judgment"
     ],
     "dsa": [
-        "Problem Understanding", "Algorithm Design", "Code Quality",
-        "Time Complexity", "Edge Cases", "Optimization"
+        "Algorithm Design", "Code Readability",
+        "Time Efficiency", "Space Efficiency",
+        "Edge Case Coverage", "Code Style"
     ],
     "mcq_practice": [
         "Company Alignment", "Core CS",
@@ -53,11 +54,13 @@ def build_core_analysis_prompt(
     question_scores: list,
     overall_score: float,
     market_context: str = "",
+    code_quality_metrics: dict = None,
 ) -> str:
     """
     Builds the prompt for the core report analysis.
     Outputs: grade, hire_recommendation, summary, radar, categories,
              strong/weak areas, per-question, hire_signal, failure_patterns.
+    For DSA rounds, code_quality_metrics seeds the radar scores.
     """
     round_type = session.get("round_type", "technical")
     difficulty = session.get("difficulty", "medium")
@@ -71,8 +74,23 @@ def build_core_analysis_prompt(
     qa_block = _format_qa(question_scores)
 
     market_block = ""
-    if market_context.strip():
+    if market_context and market_context.strip():
         market_block = f"\nLIVE MARKET CONTEXT (use this to colour your recommendations):\n{market_context[:600]}\n"
+
+    # For DSA rounds, inject aggregated code execution data as additional context
+    code_block = ""
+    if round_type == "dsa" and code_quality_metrics:
+        avg_pass = code_quality_metrics.get("test_pass_rate", 0)
+        avg_time = code_quality_metrics.get("execution_time_ms", 0)
+        avg_mem  = code_quality_metrics.get("memory_kb", 0)
+        naming   = code_quality_metrics.get("variable_naming_score", 0)
+        code_block = (
+            f"\nCODE EXECUTION SUMMARY (use to inform radar scores):\n"
+            f"- Avg test pass rate: {avg_pass * 100:.0f}%\n"
+            f"- Avg execution time: {avg_time} ms\n"
+            f"- Avg memory usage: {avg_mem} KB\n"
+            f"- Variable naming score: {naming}/100\n"
+        )
 
     return f"""You are a senior talent evaluation expert with 15+ years of technical recruiting experience at top-tier companies.
 Analyze the complete interview transcript below and generate a brutally honest, highly specific, actionable report.
@@ -83,7 +101,7 @@ TARGET COMPANY: {target_co}
 SKILLS ON RESUME: {skills}
 INTERVIEW TYPE: {round_type.upper()} | {difficulty.upper()} difficulty
 OVERALL SCORE: {overall_score:.1f}/10
-{market_block}
+{market_block}{code_block}
 FULL TRANSCRIPT:
 {qa_block}
 

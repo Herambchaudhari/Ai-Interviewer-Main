@@ -8,28 +8,11 @@ import re
 from typing import Optional
 import pdfplumber
 from dotenv import load_dotenv
-from groq import Groq
+from services.api_manager import create_chat_completion
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-_client = None
-
-
-def _require_env(name: str) -> str:
-    value = os.getenv(name)
-    if value:
-        return value
-    raise RuntimeError(
-        f"Missing required environment variable: {name}. "
-        "Make sure backend/.env exists and restart the backend."
-    )
-
-
-def _get_client() -> Groq:
-    global _client
-    if _client is None:
-        _client = Groq(api_key=_require_env("GROQ_API_KEY"))
-    return _client
+# _client global replaced by global api_manager
 
 
 # ── System prompt (exact as specified) ────────────────────────────────────────
@@ -121,10 +104,10 @@ def parse_resume_with_groq(raw_text: str) -> dict:
 
     Raises RuntimeError if parsing fails after retry.
     """
-    client = _get_client()
+    # client rotation managed by create_chat_completion
 
     def _call(system: str, user: str) -> str:
-        response = client.chat.completions.create(
+        response = create_chat_completion(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system},
