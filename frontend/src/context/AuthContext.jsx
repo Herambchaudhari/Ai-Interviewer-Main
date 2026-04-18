@@ -1,38 +1,21 @@
 /**
  * AuthContext — global auth state via React Context.
- *
- * [AUTH DISABLED] — Supabase OAuth/login is temporarily disabled.
- * This provider now returns a mock "always-authenticated" user so the
- * rest of the application works without any Supabase configuration.
- *
- * To re-enable: restore the original Supabase-backed implementation
- * from git history and set VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY.
+ * Wraps Supabase auth + JWT storage for the axios interceptor.
  */
-import { createContext, useContext, useState } from 'react'
-
-// ── Original Supabase import (commented out) ──
-// import { supabase } from '../lib/supabase'
+import { createContext, useContext, useState, useEffect } from 'react'
+// import { supabase } from '../lib/supabase'  // AUTH DISABLED
 
 const AuthContext = createContext(null)
 
-/** Mock user object that satisfies every component that reads user.id / user.email */
-const MOCK_USER = {
-  id: 'dev-user',
-  email: 'dev@localhost',
-  user_metadata: { full_name: 'Developer' },
-}
+// AUTH DISABLED — mock user so all pages work without login
+const MOCK_USER = { id: 'dev-user', email: 'dev@localhost', user_metadata: { full_name: 'Dev User' } }
 
 export function AuthProvider({ children }) {
-  // Always authenticated with the mock user — no loading state needed
-  const [user]    = useState(MOCK_USER)
-  const [session] = useState({ access_token: 'dev-token' })
-  const loading   = false
+  const [user, setUser]       = useState(MOCK_USER)   // AUTH DISABLED: was null
+  const [session, setSession] = useState(null)
+  const [loading, setLoading] = useState(false)        // AUTH DISABLED: was true
 
-  // ── Original Supabase auth logic (commented out) ──────────────────────────
-  // const [user, setUser]       = useState(null)
-  // const [session, setSession] = useState(null)
-  // const [loading, setLoading] = useState(true)
-  //
+  // AUTH DISABLED — Supabase auth listener commented out
   // useEffect(() => {
   //   const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
   //     setSession(s)
@@ -46,21 +29,12 @@ export function AuthProvider({ children }) {
   //   })
   //   return () => subscription.unsubscribe()
   // }, [])
-  // ──────────────────────────────────────────────────────────────────────────
 
-  // ── Stubbed auth methods (no-ops) ─────────────────────────────────────────
-  const signInWithEmail = async () => { /* no-op: auth disabled */ }
-  const signUpWithEmail = async () => { /* no-op: auth disabled */ }
-  const signInWithGoogle = async () => { /* no-op: auth disabled */ }
-  const signOut = async () => {
-    // Clear local caches so the Upload page acts like a fresh start
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('profile_id')
-    localStorage.removeItem('parsed_profile')
-    localStorage.removeItem('student_meta')
-  }
+  // AUTH DISABLED — stub implementations
+  const signInWithEmail = async (_email, _password) => { return { user: MOCK_USER } }
+  const signUpWithEmail = async (_email, _password, _name = '') => { return { user: MOCK_USER } }
 
-  // ── Original Supabase auth methods (commented out) ────────────────────────
+  // AUTH DISABLED — original implementations commented out
   // const signInWithEmail = async (email, password) => {
   //   const { data, error } = await supabase.auth.signInWithPassword({ email, password })
   //   if (error) throw error
@@ -68,12 +42,13 @@ export function AuthProvider({ children }) {
   // }
   // const signUpWithEmail = async (email, password, name = '') => {
   //   const { data, error } = await supabase.auth.signUp({
-  //     email, password,
-  //     options: { data: { full_name: name } },
+  //     email, password, options: { data: { full_name: name } },
   //   })
   //   if (error) throw error
   //   return data
   // }
+
+  // OAuth disabled — re-enable when Google OAuth is configured in Supabase
   // const signInWithGoogle = async () => {
   //   const { data, error } = await supabase.auth.signInWithOAuth({
   //     provider: 'google',
@@ -82,20 +57,21 @@ export function AuthProvider({ children }) {
   //   if (error) throw error
   //   return data
   // }
-  // const signOut = async () => {
-  //   await supabase.auth.signOut()
-  //   localStorage.removeItem('access_token')
-  //   localStorage.removeItem('profile_id')
-  //   localStorage.removeItem('parsed_profile')
-  //   localStorage.removeItem('student_meta')
-  //   setUser(null)
-  //   setSession(null)
-  // }
-  // ──────────────────────────────────────────────────────────────────────────
+
+  const signOut = async () => {
+    // AUTH DISABLED — original sign-out commented out
+    // await supabase.auth.signOut()
+    // localStorage.removeItem('access_token')
+    // localStorage.removeItem('profile_id')
+    // localStorage.removeItem('parsed_profile')
+    // localStorage.removeItem('student_meta')
+    // setUser(null)
+    // setSession(null)
+  }
 
   const value = {
     user, session, loading,
-    signInWithEmail, signUpWithEmail, signInWithGoogle, signOut,
+    signInWithEmail, signUpWithEmail, signOut,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -3,19 +3,16 @@ Parser service — PDF text extraction + Groq-powered resume parsing.
 """
 import json
 import os
+from pathlib import Path
 import re
 from typing import Optional
 import pdfplumber
-from groq import Groq
+from dotenv import load_dotenv
+from services.api_manager import create_chat_completion
 
-_client = None
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-
-def _get_client() -> Groq:
-    global _client
-    if _client is None:
-        _client = Groq(api_key=os.environ["GROQ_API_KEY"])
-    return _client
+# _client global replaced by global api_manager
 
 
 # ── System prompt (exact as specified) ────────────────────────────────────────
@@ -107,10 +104,10 @@ def parse_resume_with_groq(raw_text: str) -> dict:
 
     Raises RuntimeError if parsing fails after retry.
     """
-    client = _get_client()
+    # client rotation managed by create_chat_completion
 
     def _call(system: str, user: str) -> str:
-        response = client.chat.completions.create(
+        response = create_chat_completion(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system},

@@ -61,7 +61,7 @@ class RoundType(str, Enum):
     technical = "technical"
     hr = "hr"
     dsa = "dsa"
-    system_design = "system_design"
+    mcq_practice = "mcq_practice"
 
 
 class Difficulty(str, Enum):

@@ -4,23 +4,15 @@ Used by session router /answer endpoint.
 """
 import json
 import asyncio
-from groq import Groq
-import os
+from services.api_manager import create_chat_completion
 
-_client = None
-
-
-def _get_client() -> Groq:
-    global _client
-    if _client is None:
-        _client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-    return _client
+# _client caching removed, handled by api_manager
 
 
 async def _achat(messages: list, temperature: float = 0.2, max_tokens: int = 1200) -> str:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     def _call():
-        return _get_client().chat.completions.create(
+        return create_chat_completion(
             model="llama-3.3-70b-versatile",
             messages=messages,
             temperature=temperature,
@@ -35,6 +27,179 @@ def _parse_json(raw: str, fallback: dict) -> dict:
         return json.loads(cleaned)
     except Exception:
         return fallback
+
+
+def _fallback_code_evaluation(code: str) -> dict:
+    non_empty_lines = [line for line in (code or "").splitlines() if line.strip()]
+    has_structure = any(
+        token in (code or "")
+        for token in ("def ", "class ", "for ", "while ", "if ", "return ", "function ", "public ")
+    )
+    score = 6 if has_structure and len(non_empty_lines) >= 4 else 4 if code.strip() else 0
+    verdict = "partially_correct" if score >= 4 else "incorrect"
+    return {
+        "verdict": verdict,
+        "score": score,
+        "time_complexity": "Needs manual review",
+        "space_complexity": "Needs manual review",
+        "correctness_analysis": "AI code evaluation is temporarily unavailable, so this is a conservative fallback assessment based on the submitted structure.",
+        "code_quality": {
+            "score": score,
+            "issues": [] if score >= 4 else ["The submission is too incomplete to assess confidently."],
+            "positives": ["A structured implementation was submitted."] if has_structure else [],
+        },
+        "edge_cases_missed": [],
+        "optimization_hints": ["Re-run this submission later for a deeper AI evaluation once model capacity is available."],
+        "follow_up_question": "Can you explain the algorithm, complexity, and edge cases you considered?",
+    }
+
+
+def _fallback_verbal_evaluation(transcript: str) -> dict:
+    text = (transcript or "").strip()
+    word_count = len(text.split())
+    score = 7 if word_count >= 45 else 6 if word_count >= 25 else 5 if word_count >= 12 else 3
+    verdict = "Good" if score >= 7 else "Satisfactory" if score >= 5 else "Needs Improvement"
+    missing = [] if word_count >= 25 else ["Add more concrete technical depth and examples."]
+    return {
+        "score": score,
+        "communication_score": min(8, max(4, score + 1)),
+        "confidence_score": min(7, max(4, score)),
+        "strong_points": ["Provided a relevant answer."] if text else [],
+        "weak_points": missing,
+        "missing_concepts": missing,
+        "dimension_scores": {
+            "technical_accuracy": score,
+            "depth_completeness": max(3, score - 1),
+            "communication_clarity": min(8, max(4, score + 1)),
+            "confidence_delivery": min(7, max(4, score)),
+            "relevance": score,
+            "example_quality": max(3, score - 1),
+        },
+        "answer_structure": "good" if word_count >= 25 else "too_brief",
+        "follow_up_needed": word_count < 35,
+        "follow_up_question": "Can you add one concrete example or implementation detail to strengthen that answer?" if word_count < 35 else None,
+        "key_concept_missed": missing[0] if missing else "",
+        "verdict": verdict,
+        "answer_summary": text[:180] if text else "Fallback evaluation used because AI scoring was temporarily unavailable.",
+        "red_flag_detected": "",
+        "feedback": "AI answer scoring was temporarily unavailable, so this is a conservative fallback evaluation based on answer completeness and relevance.",
+    }
+
+
+def evaluate_mcq_response(
+    question: dict,
+    selected_option_index: int | None = None,
+    selected_option_text: str | None = None,
+) -> dict:
+    """
+    Deterministically evaluate an MCQ response using the question's stored answer key.
+    Returns a report-compatible evaluation payload.
+    """
+    options = question.get("options") or []
+    explanation = str(question.get("explanation") or "").strip()
+    category = question.get("category") or question.get("topic") or "MCQ Practice"
+
+    correct_index = question.get("correct_option_index")
+    if correct_index is None and question.get("correct_answer_index") is not None:
+        correct_index = question.get("correct_answer_index")
+
+    try:
+        correct_index = int(correct_index) if correct_index is not None else None
+    except Exception:
+        correct_index = None
+
+    correct_text = str(question.get("correct_option") or "").strip()
+    if not correct_text and correct_index is not None and 0 <= correct_index < len(options):
+        correct_text = str(options[correct_index]).strip()
+
+    selected_text = str(selected_option_text or "").strip()
+    try:
+        parsed_selected_index = int(selected_option_index) if selected_option_index is not None else None
+    except Exception:
+        parsed_selected_index = None
+
+    is_correct = False
+    if parsed_selected_index is not None and correct_index is not None:
+        is_correct = parsed_selected_index == correct_index
+    elif selected_text and correct_text:
+        is_correct = selected_text.lower() == correct_text.lower()
+
+    if parsed_selected_index is not None and not selected_text and 0 <= parsed_selected_index < len(options):
+        selected_text = str(options[parsed_selected_index]).strip()
+
+    if not selected_text:
+        return {
+            "score": 0,
+            "verdict": "Poor",
+            "feedback": f"No option was selected. The correct answer was: {correct_text or 'Unavailable'}."
+                        + (f" {explanation}" if explanation else ""),
+            "strengths": [],
+            "improvements": ["Answer within the time limit and eliminate clearly wrong options first."],
+            "dimension_scores": {
+                "technical_accuracy": 0,
+                "depth_completeness": 0,
+                "communication_clarity": 0,
+                "confidence_delivery": 0,
+                "relevance": 0,
+                "example_quality": 0,
+            },
+            "missing_concepts": [category],
+            "communication_score": 0,
+            "confidence_score": 0,
+            "answer_structure": "too_brief",
+            "follow_up_needed": False,
+            "follow_up_question": None,
+            "key_concept_missed": correct_text or category,
+            "red_flag_detected": "",
+            "answer_summary": "No option selected.",
+            "strong_points": [],
+            "weak_points": ["No answer selected."],
+            "selected_option": "",
+            "selected_option_index": parsed_selected_index,
+            "correct_option": correct_text,
+            "correct_option_index": correct_index,
+            "is_correct": False,
+        }
+
+    score = 10 if is_correct else 0
+    verdict = "Excellent" if is_correct else "Needs Improvement"
+    feedback = (
+        f"Correct. {explanation}" if is_correct else
+        f"Incorrect. You selected '{selected_text}', but the correct answer was '{correct_text}'."
+        + (f" {explanation}" if explanation else "")
+    )
+
+    return {
+        "score": score,
+        "verdict": verdict,
+        "feedback": feedback.strip(),
+        "strengths": ["Selected the correct option quickly and accurately."] if is_correct else [],
+        "improvements": [] if is_correct else [f"Review the concept behind this {category.lower()} question."],
+        "dimension_scores": {
+            "technical_accuracy": score,
+            "depth_completeness": score,
+            "communication_clarity": score,
+            "confidence_delivery": score,
+            "relevance": score,
+            "example_quality": score,
+        },
+        "missing_concepts": [] if is_correct else [correct_text or category],
+        "communication_score": score,
+        "confidence_score": score,
+        "answer_structure": "excellent" if is_correct else "too_brief",
+        "follow_up_needed": False,
+        "follow_up_question": None,
+        "key_concept_missed": "" if is_correct else (correct_text or category),
+        "red_flag_detected": "",
+        "answer_summary": f"Selected option: {selected_text}.",
+        "strong_points": ["Picked the right option."] if is_correct else [],
+        "weak_points": [] if is_correct else [f"The correct choice was '{correct_text}'."],
+        "selected_option": selected_text,
+        "selected_option_index": parsed_selected_index,
+        "correct_option": correct_text,
+        "correct_option_index": correct_index,
+        "is_correct": is_correct,
+    }
 
 
 # ── Code Evaluation ───────────────────────────────────────────────────────────
@@ -106,19 +271,23 @@ Return ONLY valid JSON with this exact structure:
   "follow_up_question": "<probing follow-up about approach>"
 }}"""
 
-    raw = await _achat([
-        {"role": "system", "content": system_msg},
-        {"role": "user",   "content": user_msg},
-    ], temperature=0.2, max_tokens=1400)
-
-    return _parse_json(raw, {
+    fallback = {
         "verdict": "partially_correct", "score": 5,
         "time_complexity": "Unknown", "space_complexity": "Unknown",
         "correctness_analysis": "Evaluation incomplete.",
         "code_quality": {"score": 5, "issues": [], "positives": []},
         "edge_cases_missed": [], "optimization_hints": [],
         "follow_up_question": "Walk me through your approach.",
-    })
+    }
+    try:
+        raw = await _achat([
+            {"role": "system", "content": system_msg},
+            {"role": "user",   "content": user_msg},
+        ], temperature=0.2, max_tokens=1400)
+        return _parse_json(raw, fallback)
+    except Exception as e:
+        print(f"[evaluate_code] fallback evaluator used: {e}")
+        return _fallback_code_evaluation(code)
 
 
 # ── Prompt builders (also used by streaming endpoint) ────────────────────────
@@ -236,16 +405,20 @@ async def evaluate_answer(
     system_msg = _build_eval_system_prompt(round_type)
     user_msg   = _build_eval_user_prompt(q_text, transcript, round_type, scoring_context)
 
-    raw = await _achat([
-        {"role": "system", "content": system_msg},
-        {"role": "user",   "content": user_msg},
-    ], temperature=0.3, max_tokens=1200)
-
-    return _parse_json(raw, {
+    fallback = {
         "score": 5, "communication_score": 6, "confidence_score": 5,
         "strong_points": [], "weak_points": [], "missing_concepts": [],
         "dimension_scores": {}, "answer_structure": "good",
         "follow_up_needed": False, "follow_up_question": None,
         "key_concept_missed": "", "verdict": "Satisfactory",
         "answer_summary": "", "red_flag_detected": "",
-    })
+    }
+    try:
+        raw = await _achat([
+            {"role": "system", "content": system_msg},
+            {"role": "user",   "content": user_msg},
+        ], temperature=0.3, max_tokens=1200)
+        return _parse_json(raw, fallback)
+    except Exception as e:
+        print(f"[evaluate_answer] fallback evaluator used: {e}")
+        return _fallback_verbal_evaluation(transcript)

@@ -1,49 +1,38 @@
 /**
- * Navbar — visible on all pages except during interviews.
- *
- * [AUTH DISABLED] — Sign-out button and user email are hidden.
- * Shows logo, dashboard link, and navigation with theme toggle.
- * To re-enable auth UI: restore from git history.
+ * Navbar — visible on all pages except /auth and during interviews.
+ * Shows logo, user email, dashboard link, sign out.
  */
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../context/ThemeContext'
-import { Brain, LayoutDashboard, Upload, Settings, Layers, Sun, Moon } from 'lucide-react'
-
-// ── Original auth imports (commented out) ───────────────────────────────────
-// import { useNavigate } from 'react-router-dom'
-// import { useAuth } from '../hooks/useAuth'
-// import { LogOut } from 'lucide-react'
-// import toast from 'react-hot-toast'
-// ─────────────────────────────────────────────────────────────────────────────
+import { Brain, LogOut, LayoutDashboard, Upload, Settings, Layers, Sun, Moon } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 export default function Navbar() {
+  const { user, signOut } = useAuth()
   const { isDark, toggleTheme } = useTheme()
+  const navigate  = useNavigate()
   const location  = useLocation()
   const path      = location.pathname
 
-  // ── Original auth-aware visibility logic (commented out) ──────────────────
-  // const { user, signOut } = useAuth()
-  // const navigate  = useNavigate()
-  // const hidden = !user
-  //   || path === '/auth'
-  //   || path.startsWith('/interview/')
-  //   || path.startsWith('/coding/')
-  // if (hidden) return null
-  //
-  // const handleSignOut = async () => {
-  //   try {
-  //     await signOut()
-  //     toast.success('Signed out successfully')
-  //     navigate('/auth')
-  //   } catch {
-  //     toast.error('Sign out failed')
-  //   }
-  // }
-  // ──────────────────────────────────────────────────────────────────────────
-
-  // Hide during active interview/coding sessions (auth page no longer exists)
-  const hidden = path.startsWith('/interview/') || path.startsWith('/coding/')
+  // Hide during active interview/coding sessions
+  // AUTH DISABLED — removed !user and path === '/auth' conditions
+  const hidden = // !user ||           // AUTH DISABLED
+    // path === '/auth' ||              // AUTH DISABLED
+    path.startsWith('/interview/')
+    || path.startsWith('/coding/')
   if (hidden) return null
+
+  // AUTH DISABLED — sign-out is a no-op; navigate to / instead of /auth
+  const handleSignOut = async () => {
+    try {
+      await signOut()
+      toast.success('Signed out')
+      navigate('/')
+    } catch {
+      toast.error('Sign out failed')
+    }
+  }
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-3 no-print"
@@ -66,6 +55,10 @@ export default function Navbar() {
 
       {/* Right side */}
       <div className="flex items-center gap-2">
+        <span className="text-muted text-xs hidden md:block mr-1 max-w-[180px] truncate">
+          {user.email}
+        </span>
+
         <Link to="/" className="btn-secondary text-xs py-2 px-3 hidden sm:flex items-center gap-1.5"
           title="Upload Resume">
           <Upload size={14} /> Upload
@@ -98,13 +91,12 @@ export default function Navbar() {
           <span className="hidden sm:inline">{isDark ? 'Light' : 'Dark'}</span>
         </button>
 
-        {/* ── Original Sign-Out button (commented out) ───────────────────── */}
-        {/* <button onClick={handleSignOut}
+        <button onClick={handleSignOut}
           className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
           title="Sign Out">
           <LogOut size={14} />
           <span className="hidden sm:inline">Sign Out</span>
-        </button> */}
+        </button>
       </div>
     </nav>
   )

@@ -5,9 +5,7 @@ import { ThemeProvider } from './context/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
-// ── AuthPage import (commented out — auth disabled) ──
-// import AuthPage from './pages/AuthPage'
-
+// import AuthPage from './pages/AuthPage'  // AUTH DISABLED
 import UploadPage from './pages/Upload'
 import OnboardingPage from './pages/OnboardingPage'
 import DashboardPage from './pages/DashboardPage'
@@ -41,17 +39,12 @@ export default function App() {
       />
       <Navbar />
       <Routes>
-        {/* Auth route — redirect to home since login is disabled */}
+        {/* AUTH DISABLED — /auth redirects to home */}
+        {/* <Route path="/auth" element={<AuthPage />} /> */}
         <Route path="/auth" element={<Navigate to="/" replace />} />
-
-        {/* ── Original auth route (commented out) ──
-        <Route path="/auth" element={<AuthPage />} />
-        */}
-
-        {/* Public */}
         <Route path="/share/:token" element={<SharedReportPage />} />
 
-        {/* Protected (ProtectedRoute is currently a passthrough) */}
+        {/* Protected */}
         <Route path="/" element={
           <ProtectedRoute><UploadPage /></ProtectedRoute>
         } />

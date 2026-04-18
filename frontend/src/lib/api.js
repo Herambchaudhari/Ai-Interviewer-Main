@@ -1,7 +1,5 @@
 import axios from 'axios'
-
-// ── Original Supabase import (commented out — auth disabled) ──
-// import { supabase } from './supabase'
+// import { supabase } from './supabase'  // AUTH DISABLED
 
 // BASE_URL: empty string = use Vite proxy (relative URLs); fallback only if env is completely absent
 const BASE_URL = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== '')
@@ -12,7 +10,8 @@ const BASE_URL = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.
 // ── Axios Instance ─────────────────────────────────────────────────────────
 const api = axios.create({ baseURL: `${BASE_URL}/api/v1` })
 
-// ── Original Supabase JWT interceptor (commented out — auth disabled) ──────
+// AUTH DISABLED — no token attached; backend accepts all requests as dev-user
+// Original: attached Supabase JWT on every request
 // api.interceptors.request.use(async (config) => {
 //   const { data: { session } } = await supabase.auth.getSession()
 //   if (session?.access_token) {
@@ -20,7 +19,6 @@ const api = axios.create({ baseURL: `${BASE_URL}/api/v1` })
 //   }
 //   return config
 // })
-// ───────────────────────────────────────────────────────────────────────────
 
 // Response interceptor — log errors and re-throw cleanly
 api.interceptors.response.use(
@@ -243,10 +241,11 @@ export async function endSession(payload) {
 }
 
 /** POST /api/v1/session/checkpoint — save current progress (Phase 5) */
-export async function checkpointSession(payload) {
-  // payload: { session_id, current_question_id, current_question_index, timer_remaining_secs, local_transcript }
+export async function checkpointSession(sessionId, payload) {
+  // payload: { current_question_index, scores, transcript, conversation_history,
+  //            detected_weaknesses, avoided_topics, timer_remaining_secs }
   try {
-    const { data } = await api.post('/session/checkpoint', payload)
+    const { data } = await api.post(`/session/${sessionId}/checkpoint`, payload)
     return data
   } catch {
     return null  // checkpoint is best-effort, never throw

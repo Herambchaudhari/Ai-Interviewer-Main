@@ -1312,3 +1312,9 @@ Create a user with 3 past sessions (insert test data to Supabase). Verify:
 | `backend/test_scoring.py` | NEW — scoring calibration tests | 7 |
 | `backend/test_streaming.py` | NEW — SSE tests | 7 |
 | `backend/test_session_persistence.py` | NEW — checkpoint/resume tests | 7 |
+
+
+
+
+
+@123

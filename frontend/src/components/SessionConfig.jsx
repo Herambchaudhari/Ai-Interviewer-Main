@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react'
 import { ChevronLeft, Zap, Clock, HelpCircle, Loader2, Play, Sparkles, Building2, Briefcase, Repeat } from 'lucide-react'
 import { startSession } from '../lib/api'
+import { requestAppFullscreen } from '../lib/fullscreen'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
@@ -20,14 +21,14 @@ const ROUND_LABELS = {
   technical:     'Technical Interview',
   hr:            'HR / Behavioural Interview',
   dsa:           'DSA / Coding Interview',
-  system_design: 'System Design Interview',
+  mcq_practice:  'Company MCQ Practice',
 }
 
 const ROUND_COLORS = {
   technical:     { accent: '#7c3aed', glow: 'rgba(124,58,237,0.3)' },
   hr:            { accent: '#ec4899', glow: 'rgba(236,72,153,0.3)' },
   dsa:           { accent: '#06b6d4', glow: 'rgba(6,182,212,0.3)' },
-  system_design: { accent: '#f59e0b', glow: 'rgba(245,158,11,0.3)' },
+  mcq_practice:  { accent: '#f59e0b', glow: 'rgba(245,158,11,0.3)' },
 }
 
 const DIFFICULTIES = [
@@ -76,8 +77,14 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
       toast.error('No resume found. Please upload your resume first.')
       return
     }
+    if (roundType === 'mcq_practice' && !targetCompany.trim()) {
+      toast.error('Enter a target company to start the MCQ practice round.')
+      return
+    }
     setStarting(true)
     try {
+      await requestAppFullscreen()
+
       // Forward student_meta from localStorage so the backend prompt is enriched
       // even if the Supabase PATCH hasn't propagated yet.
       let studentMeta = null
@@ -91,7 +98,9 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
         round_type:    roundType,
         difficulty,
         timer_mins:    timerMins,
-        num_questions: Math.max(5, Math.floor(timerMins / 3)), // Ensure enough questions for the time
+        num_questions: roundType === 'mcq_practice'
+          ? Math.max(10, Math.floor(timerMins / 2.5))
+          : Math.max(5, Math.floor(timerMins / 3)), // Ensure enough questions for the time
         student_meta:  studentMeta,
       }
       if (targetCompany.trim()) payload.target_company = targetCompany.trim();
@@ -101,7 +110,7 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
       const res = await startSession(payload)
 
       // API returns { success, data: { session_id, first_question, questions, … } }
-      const { session_id, questions, timer_mins, round_type, first_question } = res.data
+      const { session_id, questions, timer_mins, round_type, first_question, session_label } = res.data
 
       // Store full session so InterviewPage / CodingPage can read it
       sessionStorage.setItem(`session_${session_id}`, JSON.stringify({
@@ -111,6 +120,7 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
         round_type,
         difficulty,
         num_questions: numQuestions,
+        session_label,
       }))
       localStorage.setItem('session_id', session_id)
 
@@ -270,7 +280,7 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
              <span className="text-sm font-semibold flex items-center gap-2" style={{ color: isFullLoop ? accent : 'var(--color-text)' }}>
                  <Repeat size={14} /> Full Loop (Gauntlet Mode)
              </span>
-             <span className="text-xs text-muted mt-0.5">Automatically link HR, DSA, and System Design rounds into one 4H brutal onslaught.</span>
+             <span className="text-xs text-muted mt-0.5">Automatically link HR, DSA, and MCQ practice rounds into one long-form gauntlet.</span>
           </div>
           <div className={`w-10 h-6 rounded-full p-1 transition-colors ${isFullLoop ? 'bg-purple-500' : 'bg-gray-700'}`}>
              <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${isFullLoop ? 'translate-x-4' : 'translate-x-0'}`} />

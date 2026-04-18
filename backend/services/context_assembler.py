@@ -74,6 +74,7 @@ async def assemble_context(
         "round_type": round_type,
         "difficulty": difficulty,
         "company_news_context": "",
+        "company_questions_context": "",
         "is_full_loop": is_full_loop,
     }
 
@@ -169,13 +170,38 @@ async def assemble_context(
     except Exception as e:
         print(f"[context_assembler] past reports fetch failed: {e}")
 
-    # ── 6. Live company news ──────────────────────────────────────────────────
+    # ── 6. Live company news + interview question intelligence ──────────────
     if target_company:
+        from services.web_researcher import (
+            search_company_coding_questions,
+            search_company_interview_questions,
+            search_company_mcq_topics,
+        )
+
+        # Build tasks — always fetch news, fetch interview questions for technical round
+        news_task = search_company_trends(target_company)
+
+        async def _noop_str():
+            return ""
+
+        questions_task = (
+            search_company_interview_questions(target_company, job_role or "Software Engineer")
+            if round_type == "technical"
+            else search_company_coding_questions(target_company, job_role or "Software Engineer")
+            if round_type == "dsa"
+            else search_company_mcq_topics(target_company, job_role or "Software Engineer")
+            if round_type == "mcq_practice"
+            else _noop_str()
+        )
+
         try:
-            news = await search_company_trends(target_company)
-            context["company_news_context"] = news or ""
+            news, questions_ctx = await asyncio.gather(
+                news_task, questions_task, return_exceptions=True
+            )
+            context["company_news_context"] = news if isinstance(news, str) else ""
+            context["company_questions_context"] = questions_ctx if isinstance(questions_ctx, str) else ""
         except Exception as e:
-            print(f"[context_assembler] company trends failed: {e}")
+            print(f"[context_assembler] company intelligence fetch failed: {e}")
 
     return context
 

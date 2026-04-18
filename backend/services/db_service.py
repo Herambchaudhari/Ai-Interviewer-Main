@@ -10,6 +10,116 @@ from typing import Optional
 from supabase import create_client, Client
 
 _client: Optional[Client] = None
+_VALID_ROUND_TYPES = {"technical", "hr", "dsa", "mcq_practice"}
+_LEGACY_SESSION_OPTIONAL_COLUMNS = {
+    "timer_remaining_secs",
+    "last_checkpoint_at",
+    "conversation_history",
+    "detected_weaknesses",
+    "avoided_topics",
+}
+
+
+def _extract_effective_round_type(row: dict) -> str:
+    context_bundle = row.get("context_bundle") or {}
+    if isinstance(context_bundle, str):
+        try:
+            context_bundle = json.loads(context_bundle)
+        except Exception:
+            context_bundle = {}
+
+    questions = row.get("questions") or []
+    if isinstance(questions, str):
+        try:
+            questions = json.loads(questions)
+        except Exception:
+            questions = []
+
+    effective = (
+        context_bundle.get("effective_round_type")
+        or context_bundle.get("round_type")
+        or row.get("round_type")
+        or "technical"
+    )
+    if effective == "technical" and isinstance(questions, list):
+        question_types = {str(q.get("type", "")).lower() for q in questions if isinstance(q, dict)}
+        if "mcq" in question_types:
+            effective = "mcq_practice"
+        elif "code" in question_types:
+            effective = "dsa"
+    return effective if effective in _VALID_ROUND_TYPES else (row.get("round_type") or "technical")
+
+
+def _normalize_session_row(row: Optional[dict]) -> Optional[dict]:
+    if not row:
+        return row
+
+    normalized = dict(row)
+    effective_round_type = _extract_effective_round_type(normalized)
+    normalized["effective_round_type"] = effective_round_type
+    normalized["round_type"] = effective_round_type
+    return normalized
+
+
+def _mcq_compat_payload(payload: dict, include_context_bundle: bool = True) -> dict:
+    compatible = dict(payload)
+    if include_context_bundle:
+        context_bundle = dict(compatible.get("context_bundle") or {})
+        context_bundle["effective_round_type"] = "mcq_practice"
+        context_bundle.setdefault("round_type", "mcq_practice")
+        compatible["context_bundle"] = context_bundle
+    else:
+        compatible.pop("context_bundle", None)
+    compatible["round_type"] = "technical"
+    return compatible
+
+
+def _build_session_payload_candidates(payload: dict) -> list[dict]:
+    candidates: list[dict] = []
+    seen: set[str] = set()
+
+    def add(candidate: dict):
+        try:
+            key = json.dumps(candidate, sort_keys=True, default=str)
+        except Exception:
+            key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(candidate)
+
+    add(dict(payload))
+
+    if payload.get("round_type") == "mcq_practice":
+        add(_mcq_compat_payload(payload))
+
+    trimmed = {
+        k: v for k, v in payload.items()
+        if k not in _LEGACY_SESSION_OPTIONAL_COLUMNS
+    }
+    add(trimmed)
+
+    if trimmed.get("round_type") == "mcq_practice":
+        add(_mcq_compat_payload(trimmed))
+
+    no_context = {
+        k: v for k, v in trimmed.items()
+        if k != "context_bundle"
+    }
+    add(no_context)
+
+    if no_context.get("round_type") == "mcq_practice":
+        add(_mcq_compat_payload(no_context, include_context_bundle=False))
+
+    minimal = {
+        k: v for k, v in no_context.items()
+        if k not in {"target_company", "target_role"}
+    }
+    add(minimal)
+
+    if minimal.get("round_type") == "mcq_practice":
+        add(_mcq_compat_payload(minimal, include_context_bundle=False))
+
+    return candidates
 
 
 # ── Init ──────────────────────────────────────────────────────────────────────
@@ -77,11 +187,13 @@ def save_session(session_data: dict) -> str:
     if "timer_mins" in session_data and "timer_minutes" not in session_data:
         session_data["timer_minutes"] = session_data.pop("timer_mins")
 
-    # Phase 2: Filter payload to ONLY include columns that exist in the DB schema
-    ALLOWED_COLUMNS = {
-        "id", "user_id", "profile_id", "round_type", "difficulty", "num_questions", 
-        "timer_minutes", "status", "questions", "transcript", "scores", 
-        "current_question_index", "ended_at", "end_reason", "created_at"
+    allowed_columns = {
+        "id", "user_id", "profile_id", "round_type", "difficulty", "num_questions",
+        "timer_minutes", "status", "questions", "transcript", "scores",
+        "current_question_index", "ended_at", "end_reason", "created_at",
+        "context_bundle", "target_company", "target_role", "timer_remaining_secs",
+        "last_checkpoint_at", "conversation_history", "detected_weaknesses",
+        "avoided_topics",
     }
     
     payload = {
@@ -90,18 +202,24 @@ def save_session(session_data: dict) -> str:
         "status": "active",
     }
     for k, v in session_data.items():
-        if k in ALLOWED_COLUMNS:
+        if k in allowed_columns:
             payload[k] = v
 
     # Serialise lists/dicts that need to go in jsonb columns
-    for key in ("questions", "answers", "transcript", "scores"):
+    for key in ("questions", "answers", "transcript", "scores", "context_bundle", "conversation_history", "detected_weaknesses"):
         if key in payload and not isinstance(payload[key], str):
             payload[key] = payload[key]   # supabase-py handles dicts natively
-    try:
-        _db().table("sessions").insert(payload).execute()
-    except Exception as e:
-        print(f"Failed to save session to Supabase: {e}")
-        raise e
+    last_error = None
+    for candidate in _build_session_payload_candidates(payload):
+        try:
+            _db().table("sessions").insert(candidate).execute()
+            return session_id
+        except Exception as exc:
+            last_error = exc
+
+    if last_error is not None:
+        print(f"Failed to save session to Supabase: {last_error}")
+        raise last_error
     return session_id
 
 
@@ -109,7 +227,7 @@ def get_session(session_id: str) -> Optional[dict]:
     """Fetch a session by UUID."""
     res = _db().table("sessions").select("*").eq("id", session_id).limit(1).execute()
     if res.data:
-        return res.data[0]
+        return _normalize_session_row(res.data[0])
     return None
 
 
@@ -118,8 +236,92 @@ def update_session(session_id: str, updates: dict) -> bool:
     Partially update a session row.
     Returns True if at least one row was updated.
     """
-    res = _db().table("sessions").update(updates).eq("id", session_id).execute()
-    return bool(res.data)
+    allowed_columns = {
+        "user_id", "profile_id", "round_type", "difficulty", "num_questions",
+        "timer_minutes", "status", "questions", "transcript", "scores",
+        "current_question_index", "ended_at", "end_reason", "created_at",
+        "context_bundle", "target_company", "target_role", "timer_remaining_secs",
+        "last_checkpoint_at", "conversation_history", "detected_weaknesses",
+        "avoided_topics",
+    }
+    payload = {k: v for k, v in updates.items() if k in allowed_columns}
+    if not payload:
+        return False
+
+    for candidate in _build_session_payload_candidates(payload):
+        if not candidate:
+            continue
+        try:
+            res = _db().table("sessions").update(candidate).eq("id", session_id).execute()
+            return bool(res.data)
+        except Exception:
+            continue
+    return False
+
+
+# ── Checkpoint / Resume ───────────────────────────────────────────────────────
+def save_checkpoint(session_id: str, user_id: str, state: dict) -> bool:
+    """
+    Persist a mid-session snapshot.
+    Accepts any subset of: current_question_index, conversation_history,
+    scores, transcript, detected_weaknesses, avoided_topics, timer_remaining_secs.
+    Always stamps last_checkpoint_at.
+    Returns True on success.
+    """
+    allowed = {
+        "current_question_index", "conversation_history", "scores",
+        "transcript", "detected_weaknesses", "avoided_topics", "timer_remaining_secs",
+    }
+    updates = {k: v for k, v in state.items() if k in allowed}
+    updates["last_checkpoint_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Verify ownership before writing
+    session = get_session_with_auth(session_id, user_id)
+    if not session:
+        return False
+
+    return update_session(session_id, updates)
+
+
+def get_session_with_auth(session_id: str, user_id: str) -> Optional[dict]:
+    """Fetch a session only if it belongs to user_id. Returns None on mismatch."""
+    res = (
+        _db()
+        .table("sessions")
+        .select("*")
+        .eq("id", session_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if res.data:
+        return _normalize_session_row(res.data[0])
+    return None
+
+
+def get_active_sessions(user_id: str) -> list:
+    """
+    Return all sessions with status='active' for a user, newest first.
+    Only returns the fields needed for the resume prompt (no full transcript).
+    """
+    try:
+        res = (
+            _db()
+            .table("sessions")
+            .select(
+                "id, round_type, difficulty, target_company, target_role, "
+                "current_question_index, last_checkpoint_at, created_at, context_bundle"
+            )
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        print(f"[get_active_sessions] error: {e}")
+        return []
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────
@@ -129,12 +331,34 @@ def save_report(session_id: str, report_data: dict) -> str:
     Returns the generated report_id.
     """
     report_id = str(uuid.uuid4())
-    _db().table("reports").insert({
+    full_payload = {
         "id": report_id,
         "session_id": session_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         **report_data,
-    }).execute()
+    }
+    try:
+        _db().table("reports").insert(full_payload).execute()
+    except Exception as e:
+        compact_payload = {
+            "id": report_id,
+            "session_id": session_id,
+            "created_at": full_payload["created_at"],
+            "report_data": report_data,
+        }
+        for key in (
+            "overall_score", "grade", "summary", "hire_recommendation", "radar_scores",
+            "strong_areas", "weak_areas", "per_question_analysis",
+            "study_recommendations", "compared_to_level", "skill_ratings",
+            "recommendations", "round_type",
+        ):
+            if key in report_data:
+                compact_payload[key] = report_data[key]
+        try:
+            _db().table("reports").insert(compact_payload).execute()
+        except Exception:
+            print(f"Failed to save report to Supabase: {e}")
+            raise e
     return report_id
 
 
@@ -142,7 +366,18 @@ def get_report(session_id: str) -> Optional[dict]:
     """Fetch the report for a given session_id."""
     res = _db().table("reports").select("*").eq("session_id", session_id).limit(1).execute()
     if res.data:
-        return res.data[0]
+        row = res.data[0]
+        report_blob = row.get("report_data") or {}
+        if isinstance(report_blob, str):
+            try:
+                report_blob = json.loads(report_blob)
+            except Exception:
+                report_blob = {}
+        merged = dict(report_blob) if isinstance(report_blob, dict) else {}
+        merged.update({k: v for k, v in row.items() if k != "report_data"})
+        if report_blob and "report_data" not in merged:
+            merged["report_data"] = report_blob
+        return merged
     return None
 
 
@@ -156,7 +391,7 @@ def get_user_reports(user_id: str) -> list:
         sessions_res = (
             _db()
             .table("sessions")
-            .select("id, round_type, difficulty, num_questions, status, created_at, ended_at")
+            .select("id, round_type, difficulty, num_questions, status, created_at, ended_at, context_bundle")
             .eq("user_id", user_id)
             .eq("status", "completed")
             .order("created_at", desc=True)
@@ -181,11 +416,12 @@ def get_user_reports(user_id: str) -> list:
         # Merge
         merged = []
         for s in sessions:
+            effective_round_type = _extract_effective_round_type(s)
             r = reports_map.get(s["id"], {})
             merged.append({
                 "id":            r.get("session_id", s["id"]),
                 "session_id":    s["id"],
-                "round_type":    s.get("round_type", "technical"),
+                "round_type":    effective_round_type,
                 "difficulty":    s.get("difficulty", "medium"),
                 "num_questions": s.get("num_questions", 0),
                 "overall_score": r.get("overall_score"),
@@ -226,12 +462,10 @@ def get_hub_reports(user_id: str, round_type: Optional[str] = None,
     try:
         q = (
             _db().table("sessions")
-            .select("id, round_type, difficulty, num_questions, created_at, ended_at")
+            .select("id, round_type, difficulty, num_questions, created_at, ended_at, context_bundle")
             .eq("user_id", user_id)
             .eq("status", "completed")
         )
-        if round_type:
-            q = q.eq("round_type", round_type)
         if difficulty:
             q = q.eq("difficulty", difficulty)
         q = q.order("created_at", desc=(sort_order == "desc")).limit(100)
@@ -252,6 +486,9 @@ def get_hub_reports(user_id: str, round_type: Optional[str] = None,
 
         merged = []
         for s in sessions:
+            effective_round_type = _extract_effective_round_type(s)
+            if round_type and effective_round_type != round_type:
+                continue
             r = reports_map.get(s["id"], {})
             # Build weak_parts list from weak_areas JSONB
             raw_weak = r.get("weak_areas") or []
@@ -270,7 +507,7 @@ def get_hub_reports(user_id: str, round_type: Optional[str] = None,
                 "session_id":       s["id"],
                 "report_id":        r.get("id"),
                 "session_date":     s.get("created_at"),
-                "round_type":       s.get("round_type"),
+                "round_type":       effective_round_type,
                 "difficulty":       s.get("difficulty"),
                 "num_questions":    s.get("num_questions"),
                 "overall_score":    r.get("overall_score"),
@@ -768,7 +1005,7 @@ def get_past_reports_for_context(user_id: str, limit: int = 5) -> list:
 
             result.append({
                 "session_id":   s["id"],
-                "round_type":   s.get("round_type", "technical"),
+                "round_type":   _extract_effective_round_type(s),
                 "difficulty":   s.get("difficulty", "medium"),
                 "overall_score": r.get("overall_score"),
                 "grade":        r.get("grade"),
@@ -804,12 +1041,10 @@ def get_hub_reports_paginated(
     try:
         q = (
             _db().table("sessions")
-            .select("id, round_type, difficulty, num_questions, created_at, ended_at, target_company")
+            .select("id, round_type, difficulty, num_questions, created_at, ended_at, target_company, context_bundle")
             .eq("user_id", user_id)
             .eq("status", "completed")
         )
-        if round_type:
-            q = q.eq("round_type", round_type)
         if difficulty:
             q = q.eq("difficulty", difficulty)
         if date_from:
@@ -849,6 +1084,9 @@ def get_hub_reports_paginated(
 
         rows = []
         for s in sessions:
+            effective_round_type = _extract_effective_round_type(s)
+            if round_type and effective_round_type != round_type:
+                continue
             r = reports_map.get(s["id"], {})
             score = r.get("overall_score")
 
@@ -870,8 +1108,8 @@ def get_hub_reports_paginated(
                 "session_id":        s["id"],
                 "report_id":         r.get("id"),
                 "date":              s.get("created_at"),
-                "interview_agent":   r.get("interview_agent") or s.get("round_type", "technical").replace("_", " ").title(),
-                "round_type":        s.get("round_type"),
+                "interview_agent":   r.get("interview_agent") or effective_round_type.replace("_", " ").title(),
+                "round_type":        effective_round_type,
                 "difficulty":        s.get("difficulty"),
                 "num_questions":     s.get("num_questions"),
                 "target_company":    s.get("target_company") or "",
@@ -924,7 +1162,7 @@ def get_reports_summary(user_id: str) -> dict:
     try:
         sessions_res = (
             _db().table("sessions")
-            .select("id, round_type, created_at")
+            .select("id, round_type, created_at, context_bundle")
             .eq("user_id", user_id)
             .eq("status", "completed")
             .order("created_at", desc=False)
@@ -1002,18 +1240,32 @@ def compute_improvement_vs_last(user_id: str, session_id: str, round_type: str, 
     Returns {score_delta, areas_improved, areas_regressed} or None if no prior report.
     """
     try:
-        prior_sessions_res = (
-            _db().table("sessions")
-            .select("id, created_at")
-            .eq("user_id", user_id)
-            .eq("round_type", round_type)
-            .eq("status", "completed")
-            .neq("id", session_id)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        prior_sessions = prior_sessions_res.data or []
+        try:
+            prior_sessions_res = (
+                _db().table("sessions")
+                .select("id, created_at, round_type, context_bundle")
+                .eq("user_id", user_id)
+                .eq("status", "completed")
+                .neq("id", session_id)
+                .order("created_at", desc=True)
+                .limit(20)
+                .execute()
+            )
+        except Exception:
+            prior_sessions_res = (
+                _db().table("sessions")
+                .select("id, created_at, round_type, questions")
+                .eq("user_id", user_id)
+                .eq("status", "completed")
+                .neq("id", session_id)
+                .order("created_at", desc=True)
+                .limit(20)
+                .execute()
+            )
+        prior_sessions = [
+            row for row in (prior_sessions_res.data or [])
+            if _extract_effective_round_type(row) == round_type
+        ]
         if not prior_sessions:
             return None
 
@@ -1082,12 +1334,22 @@ def get_past_reports_for_analysis(user_id: str, exclude_session_id: str, limit: 
         session_ids = [s["id"] for s in sessions]
         reports_res = (
             _db().table("reports")
-            .select("session_id, overall_score, grade, weak_areas, strong_areas, radar_scores, created_at")
+            .select(
+                "session_id, overall_score, grade, weak_areas, strong_areas, "
+                "radar_scores, code_quality_metrics, round_type, created_at"
+            )
             .in_("session_id", session_ids)
             .order("created_at", desc=False)
             .execute()
         )
-        return reports_res.data or []
+        # Attach round_type from session if missing in report row
+        session_map = {s["id"]: s for s in sessions}
+        rows = reports_res.data or []
+        for row in rows:
+            if not row.get("round_type"):
+                s = session_map.get(row.get("session_id"), {})
+                row["round_type"] = _extract_effective_round_type(s)
+        return rows
     except Exception as e:
         print(f"[get_past_reports_for_analysis] error: {e}")
         return []
@@ -1134,4 +1396,271 @@ def upsert_external_links(user_id: str, data: dict) -> bool:
         return bool(res.data)
     except Exception as e:
         print(f"[upsert_external_links] error: {e}")
+        return False
+
+
+# ── Benchmarks ────────────────────────────────────────────────────────────────
+
+def save_benchmark(
+    round_type: str,
+    difficulty: str,
+    overall_score: float,
+    radar_scores: dict,
+    grade: str,
+    hire_recommendation: str,
+    target_company: str = "",
+    job_role: str = "",
+) -> bool:
+    """
+    Insert one anonymised benchmark row.
+    No user_id or session_id is stored — purely aggregate data.
+    """
+    try:
+        payload = {
+            "round_type":          round_type,
+            "difficulty":          difficulty,
+            "overall_score":       overall_score,
+            "radar_scores":        radar_scores or {},
+            "grade":               grade,
+            "hire_recommendation": hire_recommendation,
+            "created_at":          datetime.now(timezone.utc).isoformat(),
+        }
+        if target_company:
+            payload["target_company"] = target_company
+        if job_role:
+            payload["job_role"] = job_role
+        res = _db().table("benchmarks").insert(payload).execute()
+        return bool(res.data)
+    except Exception as e:
+        print(f"[save_benchmark] error: {e}")
+        return False
+
+
+def get_benchmarks(
+    round_type: str,
+    difficulty: str,
+    target_company: str = "",
+    limit: int = 500,
+) -> list:
+    """
+    Fetch benchmark rows for percentile computation.
+    Returns list of {overall_score, radar_scores, grade}.
+    """
+    try:
+        query = (
+            _db().table("benchmarks")
+            .select("overall_score, radar_scores, grade, hire_recommendation")
+            .eq("round_type", round_type)
+            .eq("difficulty", difficulty)
+            .order("created_at", desc=True)
+            .limit(limit)
+        )
+        if target_company:
+            query = query.eq("target_company", target_company)
+        res = query.execute()
+        return res.data or []
+    except Exception as e:
+        print(f"[get_benchmarks] error: {e}")
+        return []
+
+
+# ── Study Resources ───────────────────────────────────────────────────────────
+
+def get_study_resources(topics: list, round_type: str = "") -> list:
+    """
+    Fetch study resources matching given topics (case-insensitive partial match).
+    Returns list of {topic, title, url, resource_type, estimated_hours}.
+    """
+    try:
+        if not topics:
+            return []
+        query = (
+            _db().table("study_resources")
+            .select("topic, title, url, resource_type, estimated_hours, tags")
+            .limit(50)
+        )
+        if round_type:
+            query = query.eq("round_type", round_type)
+        res = query.execute()
+        rows = res.data or []
+        # Client-side filter — match any row whose topic overlaps with requested topics
+        topic_lower = [t.lower() for t in topics]
+        return [
+            r for r in rows
+            if any(tl in (r.get("topic") or "").lower() for tl in topic_lower)
+        ]
+    except Exception as e:
+        print(f"[get_study_resources] error: {e}")
+        return []
+
+
+def save_study_resources(resources: list) -> bool:
+    """Bulk-insert study resource records (skips duplicates by url)."""
+    try:
+        if not resources:
+            return True
+        payload = [
+            {
+                "topic":           r.get("topic", ""),
+                "round_type":      r.get("round_type", ""),
+                "difficulty":      r.get("difficulty", ""),
+                "resource_type":   r.get("resource_type", "article"),
+                "title":           r.get("title", ""),
+                "url":             r.get("url", ""),
+                "estimated_hours": r.get("estimated_hours", 1.0),
+                "tags":            r.get("tags", []),
+            }
+            for r in resources
+        ]
+        res = _db().table("study_resources").upsert(payload, on_conflict="url").execute()
+        return bool(res.data)
+    except Exception as e:
+        print(f"[save_study_resources] error: {e}")
+        return False
+
+
+# ── Preparation Checklists ────────────────────────────────────────────────────
+
+def save_checklist(user_id: str, session_id: str, items: list, expires_at: str = "") -> str:
+    """
+    Insert or replace preparation checklist for a user + session.
+    Returns the checklist_id.
+    """
+    checklist_id = str(uuid.uuid4())
+    try:
+        payload = {
+            "id":         checklist_id,
+            "user_id":    user_id,
+            "session_id": session_id,
+            "items":      items,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if expires_at:
+            payload["expires_at"] = expires_at
+        _db().table("preparation_checklists").insert(payload).execute()
+        return checklist_id
+    except Exception as e:
+        print(f"[save_checklist] error: {e}")
+        return checklist_id
+
+
+def get_user_checklists(user_id: str, limit: int = 5) -> list:
+    """
+    Fetch the most recent preparation checklists for a user.
+    Returns list of {id, session_id, items, created_at, expires_at}.
+    """
+    try:
+        res = (
+            _db().table("preparation_checklists")
+            .select("id, session_id, items, created_at, expires_at, updated_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        print(f"[get_user_checklists] error: {e}")
+        return []
+
+
+def update_checklist_item(checklist_id: str, item_id: str, checked: bool) -> bool:
+    """Toggle the checked state of a single checklist item."""
+    try:
+        res = (
+            _db().table("preparation_checklists")
+            .select("items")
+            .eq("id", checklist_id)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            return False
+        items = res.data[0].get("items") or []
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except Exception:
+                items = []
+        for item in items:
+            if isinstance(item, dict) and item.get("id") == item_id:
+                item["checked"] = checked
+                break
+        update_res = (
+            _db().table("preparation_checklists")
+            .update({"items": items, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .eq("id", checklist_id)
+            .execute()
+        )
+        return bool(update_res.data)
+    except Exception as e:
+        print(f"[update_checklist_item] error: {e}")
+
+
+# ── Share Report ───────────────────────────────────────────────────────────────
+
+def generate_share_token(session_id: str) -> Optional[dict]:
+    """
+    Generate (or reuse) a share token for a report.
+    Returns { share_token, share_url_path } or None on error.
+    """
+    try:
+        import secrets
+        # Check if a share token already exists for this session
+        existing = (
+            _db().table("reports")
+            .select("id, share_token, share_enabled")
+            .eq("session_id", session_id)
+            .maybe_single()
+            .execute()
+        )
+        if not existing.data:
+            return None
+
+        token = existing.data.get("share_token")
+        if not token:
+            token = secrets.token_urlsafe(24)
+
+        _db().table("reports").update({
+            "share_token":   token,
+            "share_enabled": True,
+        }).eq("session_id", session_id).execute()
+
+        return {"share_token": token, "report_id": existing.data["id"]}
+    except Exception as e:
+        print(f"[generate_share_token] error: {e}")
+        return None
+
+
+def get_report_by_share_token(token: str) -> Optional[dict]:
+    """
+    Fetch a report by its public share token.
+    Returns the report row or None if not found / not enabled.
+    """
+    try:
+        res = (
+            _db().table("reports")
+            .select("*")
+            .eq("share_token", token)
+            .eq("share_enabled", True)
+            .maybe_single()
+            .execute()
+        )
+        return res.data or None
+    except Exception as e:
+        print(f"[get_report_by_share_token] error: {e}")
+        return None
+
+
+def disable_share_token(session_id: str) -> bool:
+    """Revoke the public share link for a report."""
+    try:
+        _db().table("reports").update({
+            "share_enabled": False,
+        }).eq("session_id", session_id).execute()
+        return True
+    except Exception as e:
+        print(f"[disable_share_token] error: {e}")
+        return False
         return False

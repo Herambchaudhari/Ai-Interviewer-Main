@@ -1,0 +1,121 @@
+INFO:     127.0.0.1:61318 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58444 - "GET /api/v1/report/d2693ef3-7b86-4073-9a56-49e4a6d49e4e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56476 - "GET /api/v1/report/d2693ef3-7b86-4073-9a56-49e4a6d49e4e HTTP/1.1" 200 OK
+[get_reports_summary] error: {'message': 'column sessions.context_bundle does not exist', 'code': '42703', 'hint': None, 'details': None}
+INFO:     127.0.0.1:49687 - "GET /api/v1/context-hub/reports/summary HTTP/1.1" 200 OK
+[get_hub_reports_paginated] error: {'message': 'column sessions.target_company does not exist', 'code': '42703', 'hint': None, 'details': None}
+INFO:     127.0.0.1:49697 - "GET /api/v1/context-hub/reports/paginated?sort_by=date&sort_dir=desc&page=1&limit=15 HTTP/1.1" 200 OK
+[get_reports_summary] error: {'message': 'column sessions.context_bundle does not exist', 'code': '42703', 'hint': None, 'details': None}
+INFO:     127.0.0.1:49703 - "GET /api/v1/context-hub/reports/summary HTTP/1.1" 200 OK
+[get_hub_reports_paginated] error: {'message': 'column sessions.target_company does not exist', 'code': '42703', 'hint': None, 'details': None}
+INFO:     127.0.0.1:49705 - "GET /api/v1/context-hub/reports/paginated?sort_by=date&sort_dir=desc&page=1&limit=15 HTTP/1.1" 200 OK
+[report] Stage 3 (communication) failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 97879, Requested 4387. Please try again in 32m37.824s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[report] Stage 4 (playbook) failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99278, Requested 1924. Please try again in 17m18.528s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:51463 - "GET /api/v1/resume/profile/8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51465 - "GET /api/v1/resume/reports/user/dev-user HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57128 - "GET /api/v1/resume/profile/8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49458 - "GET /api/v1/resume/reports/user/dev-user HTTP/1.1" 200 OK
+[web_researcher] Tavily returned 6 results for 'software engineering tech hiring trends 2025'
+[synthesize_market_trends] Failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99618, Requested 1757. Please try again in 19m48s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:51464 - "GET /api/v1/news/feed?profile_id=8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+[web_researcher] Cache hit for key=4f53cda18c2baa0c
+[synthesize_market_trends] Failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99617, Requested 1757. Please try again in 19m47.136s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:51945 - "GET /api/v1/news/feed?profile_id=8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+[web_researcher] Cache hit for key=4f53cda18c2baa0c
+INFO:     127.0.0.1:64034 - "GET /api/v1/resume/profile/8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64035 - "GET /api/v1/resume/reports/user/dev-user HTTP/1.1" 200 OK
+[synthesize_market_trends] Failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99598, Requested 1757. Please try again in 19m30.72s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:64036 - "GET /api/v1/news/feed?profile_id=8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50806 - "GET /api/v1/resume/profile/8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50808 - "GET /api/v1/resume/reports/user/dev-user HTTP/1.1" 200 OK
+[web_researcher] Cache hit for key=4f53cda18c2baa0c
+[synthesize_market_trends] Failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99596, Requested 1757. Please try again in 19m28.992s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:49781 - "GET /api/v1/news/feed?profile_id=8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+[web_researcher] Failed to scrape linkedin_url (https://www.linkedin.com/in/herambchaudhari): 
+[web_researcher] Tavily returned 6 results for 'JPMorgan SWE online assessment MCQ technical screening questions 2025'
+[web_researcher] Tavily returned 6 results for 'JPMorgan software engineering hiring 2025'
+[web_researcher] Tavily returned 6 results for 'JPMorgan software engineer screening test MCQ topics OOP DBMS OS networking 2025'
+[web_researcher] Tavily returned 6 results for 'JPMorgan interview assessment asked topics resume based technical questions 2025'
+INFO:     127.0.0.1:60381 - "POST /api/v1/session/start HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64670 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50592 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60168 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62603 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52234 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55272 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61336 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51220 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62420 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56465 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57498 - "POST /api/v1/session/end HTTP/1.1" 200 OK
+[groq_service] Core report generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99375, Requested 6233. Please try again in 1h20m45.312s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:63268 - "GET /api/v1/report/63d76e58-01eb-4235-bff2-0f0a6036c1b6 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62253 - "GET /api/v1/report/63d76e58-01eb-4235-bff2-0f0a6036c1b6 HTTP/1.1" 200 OK
+[groq_service] Core report generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99372, Requested 6386. Please try again in 1h22m54.912s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[groq_service] CV audit generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99372, Requested 6169. Please try again in 1h19m47.424s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[groq_service] CV audit generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99370, Requested 6169. Please try again in 1h19m45.696s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[groq_service] Core report generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99370, Requested 6386. Please try again in 1h22m53.184s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[report] Stage 3 (communication) failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99370, Requested 5478. Please try again in 1h9m48.672s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[report] Stage 3 (communication) failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99370, Requested 3292. Please try again in 38m19.968s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[report] Stage 4 (playbook) failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99370, Requested 4889. Please try again in 1h1m19.776s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[report] Stage 4 (playbook) failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99369, Requested 4889. Please try again in 1h1m18.912s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[web_researcher] Cache hit for key=4f53cda18c2baa0c
+INFO:     127.0.0.1:50064 - "GET /api/v1/resume/profile/8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50065 - "GET /api/v1/resume/reports/user/dev-user HTTP/1.1" 200 OK
+[synthesize_market_trends] Failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99325, Requested 1757. Please try again in 15m34.848s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:50066 - "GET /api/v1/news/feed?profile_id=8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50181 - "GET /api/v1/resume/profile/8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54410 - "GET /api/v1/resume/reports/user/dev-user HTTP/1.1" 200 OK
+[web_researcher] Cache hit for key=4f53cda18c2baa0c
+[synthesize_market_trends] Failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99324, Requested 1757. Please try again in 15m33.984s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:51659 - "GET /api/v1/news/feed?profile_id=8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+[web_researcher] Failed to scrape linkedin_url (https://www.linkedin.com/in/herambchaudhari): 
+[web_researcher] Tavily returned 6 results for 'Goldman Sachs SWE online assessment coding questions 2025'
+[web_researcher] Tavily returned 6 results for 'Goldman Sachs software engineering hiring 2025'
+[web_researcher] Tavily returned 6 results for 'Goldman Sachs software engineer OA recent coding questions arrays graphs dynamic programming'
+[web_researcher] Tavily returned 6 results for 'Goldman Sachs coding round asked questions leetcode style 2025'
+INFO:     127.0.0.1:62077 - "POST /api/v1/session/start HTTP/1.1" 200 OK
+[adaptive_engine] DSA question generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99269, Requested 1604. Please try again in 12m34.272s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[adaptive_engine] default next_question failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99269, Requested 1502. Please try again in 11m6.144s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:55401 - "POST /api/v1/session/skip HTTP/1.1" 200 OK
+[adaptive_engine] DSA question generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99266, Requested 1709. Please try again in 14m2.4s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[adaptive_engine] default next_question failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99266, Requested 1528. Please try again in 11m26.016s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:51089 - "POST /api/v1/session/skip HTTP/1.1" 200 OK
+[web_researcher] Cache hit for key=4f53cda18c2baa0c
+INFO:     127.0.0.1:54836 - "GET /api/v1/resume/profile/8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54837 - "GET /api/v1/resume/reports/user/dev-user HTTP/1.1" 200 OK
+[synthesize_market_trends] Failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99228, Requested 1757. Please try again in 14m11.04s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:54838 - "GET /api/v1/news/feed?profile_id=8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59587 - "POST /api/v1/session/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59584 - "GET /api/v1/report/63d76e58-01eb-4235-bff2-0f0a6036c1b6 HTTP/1.1" 200 OK
+[web_researcher] Cache hit for key=4f53cda18c2baa0c
+INFO:     127.0.0.1:64527 - "GET /api/v1/resume/profile/8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+[groq_service] Core report generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99224, Requested 6459. Please try again in 1h21m50.112s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[groq_service] CV audit generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99224, Requested 6242. Please try again in 1h18m42.624s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:64528 - "GET /api/v1/resume/reports/user/dev-user HTTP/1.1" 200 OK
+[synthesize_market_trends] Failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99224, Requested 1757. Please try again in 14m7.584s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:64529 - "GET /api/v1/news/feed?profile_id=8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50727 - "GET /api/v1/report/d2693ef3-7b86-4073-9a56-49e4a6d49e4e HTTP/1.1" 200 OK
+[report] Stage 3 (communication) failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99223, Requested 5481. Please try again in 1h7m44.256s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[report] Stage 4 (playbook) failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99223, Requested 4889. Please try again in 59m12.767999999s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[groq_service] CV audit generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99222, Requested 5442. Please try again in 1h7m9.696s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[groq_service] Core report generation failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99222, Requested 5659. Please try again in 1h10m17.184s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:63009 - "GET /api/v1/report/d2693ef3-7b86-4073-9a56-49e4a6d49e4e HTTP/1.1" 200 OK
+[report] Stage 4 (playbook) failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99220, Requested 4887. Please try again in 59m8.448s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+[report] Stage 3 (communication) failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99220, Requested 4387. Please try again in 51m56.448s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:59437 - "GET /api/v1/resume/profile/8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59438 - "GET /api/v1/resume/reports/user/dev-user HTTP/1.1" 200 OK
+[web_researcher] Cache hit for key=4f53cda18c2baa0c
+INFO:     127.0.0.1:59442 - "GET /api/v1/resume/profile/8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59444 - "GET /api/v1/resume/reports/user/dev-user HTTP/1.1" 200 OK
+[synthesize_market_trends] Failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99216, Requested 1757. Please try again in 14m0.672s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:59440 - "GET /api/v1/news/feed?profile_id=8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+[web_researcher] Cache hit for key=4f53cda18c2baa0c
+[synthesize_market_trends] Failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jraraz38fe1b730mvbvd0zmv` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99215, Requested 1757. Please try again in 13m59.808s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+INFO:     127.0.0.1:59446 - "GET /api/v1/news/feed?profile_id=8f562b3d-db86-4adf-a48a-3e18136f8700 HTTP/1.1" 200 OK
+[web_researcher] Failed to scrape linkedin_url (https://www.linkedin.com/in/herambchaudhari): 
+[web_researcher] Tavily returned 6 results for 'Deutsche Bank SWE technical interview questions CS fundamentals OOP DBMS OS 2025'
+[web_researcher] Tavily returned 6 results for 'Deutsche Bank software engineering hiring 2025'
+[web_researcher] Tavily returned 6 results for 'Deutsche Bank software engineer interview frequently asked questions data structures algorithms'
+[web_researcher] Tavily returned 6 results for 'Deutsche Bank coding interview round questions operating systems networking database'
+INFO:     127.0.0.1:56517 - "POST /api/v1/session/start HTTP/1.1" 200 OK
