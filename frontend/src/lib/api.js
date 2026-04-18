@@ -1,5 +1,5 @@
 import axios from 'axios'
-// import { supabase } from './supabase'  // AUTH DISABLED
+import { supabase } from './supabase'
 
 // BASE_URL: empty string = use Vite proxy (relative URLs); fallback only if env is completely absent
 const BASE_URL = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== '')
@@ -10,15 +10,14 @@ const BASE_URL = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.
 // ── Axios Instance ─────────────────────────────────────────────────────────
 const api = axios.create({ baseURL: `${BASE_URL}/api/v1` })
 
-// AUTH DISABLED — no token attached; backend accepts all requests as dev-user
-// Original: attached Supabase JWT on every request
-// api.interceptors.request.use(async (config) => {
-//   const { data: { session } } = await supabase.auth.getSession()
-//   if (session?.access_token) {
-//     config.headers.Authorization = `Bearer ${session.access_token}`
-//   }
-//   return config
-// })
+// Attach Supabase JWT on every request
+api.interceptors.request.use(async (config) => {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session?.access_token) {
+    config.headers.Authorization = `Bearer ${session.access_token}`
+  }
+  return config
+})
 
 // Response interceptor — log errors and re-throw cleanly
 api.interceptors.response.use(
