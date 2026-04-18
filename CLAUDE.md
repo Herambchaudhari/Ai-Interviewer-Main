@@ -93,6 +93,25 @@ LLM feedback is delivered via SSE (`/api/v1/session/answer` streams token-by-tok
 ### Proctoring
 Entirely client-side using TensorFlow.js + MediaPipe (FaceLandmarker for gaze, EfficientDet-Lite0 for phone detection). Metrics are collected and sent to backend at session end for integrity verdict in the report.
 
+## Session Start Protocol
+
+At the beginning of every new session, ask the user:
+
+> "Which branch are you working on? Create a new branch or use an existing one?"
+
+Then confirm the branch name before doing any work. This keeps all development isolated from `main`.
+
+## Git Rules
+
+- **Never push directly to `main`.** All changes go through a feature branch → PR workflow.
+- Always create or checkout a branch before making commits.
+- Branch naming convention: `feature/<short-description>`, `fix/<short-description>`, `chore/<short-description>`.
+- Only merge to `main` via a pull request reviewed and approved by a team member.
+
+## Communication Style
+
+Be concise and to the point. No filler, no padding, no restating what was just done. Match response length to task complexity — a one-line fix gets a one-line reply. Never burn tokens explaining the obvious.
+
 ## CLAUDE.md Maintenance Rule
 
 **This file must be kept up to date.** Whenever you add a new feature, service, route, component, hook, or make any architectural change, update the relevant section(s) of this file in the same commit. Specifically:
