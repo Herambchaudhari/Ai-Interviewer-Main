@@ -41,7 +41,9 @@ function getToken() {
     return raw
   } catch { return '' }
 }
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const BASE = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== '')
+  ? import.meta.env.VITE_API_URL
+  : ''
 async function apiFetch(path, opts = {}) {
   const token = getToken()
   const res   = await fetch(`${BASE}/api/v1${path}`, {

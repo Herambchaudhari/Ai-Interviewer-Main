@@ -14,7 +14,9 @@
  *   [DONE]              — stream finished
  */
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const BASE_URL = (import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== '')
+  ? import.meta.env.VITE_API_URL
+  : ''
 
 function getToken() {
   return localStorage.getItem('access_token') || ''
