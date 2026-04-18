@@ -93,6 +93,20 @@ LLM feedback is delivered via SSE (`/api/v1/session/answer` streams token-by-tok
 ### Proctoring
 Entirely client-side using TensorFlow.js + MediaPipe (FaceLandmarker for gaze, EfficientDet-Lite0 for phone detection). Metrics are collected and sent to backend at session end for integrity verdict in the report.
 
+## CLAUDE.md Maintenance Rule
+
+**This file must be kept up to date.** Whenever you add a new feature, service, route, component, hook, or make any architectural change, update the relevant section(s) of this file in the same commit. Specifically:
+
+- New backend router → add to the **Routers** list
+- New backend service → add to **Key Services** with a one-line description of its role
+- New frontend page → add to the **Pages** flow
+- New frontend component or hook → add under the appropriate subsection
+- New environment variable → add to **Environment Variables**
+- Architectural or data-flow change → update **Data Flow** diagram
+- New npm/pip dependency that changes the tech stack → note it where relevant
+
+Keep descriptions concise (one line each). Do not pad with generic information — only include what a future Claude instance needs to orient quickly.
+
 ## Key Documentation
 - `AI Interviewer V2/IMPLEMENTATION_PLAN.md` — 7-phase feature roadmap with detailed specs
 - `AI Interviewer V2/project_handover.md` — Architecture wireframe and component status

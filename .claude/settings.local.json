@@ -4,5 +4,19 @@
       "Bash(/usr/local/bin/python3 --version)",
       "Bash(curl -s http://localhost:5173/)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | { read -r f; case \"$f\" in *backend*|*frontend*) echo '{\"systemMessage\": \"REMINDER: If you added/changed a feature, service, route, component, hook, or env var — update CLAUDE.md before finishing.\"}' ;; esac; } 2>/dev/null || true",
+            "statusMessage": "Checking CLAUDE.md update reminder..."
+          }
+        ]
+      }
+    ]
   }
 }
