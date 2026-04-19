@@ -29,7 +29,7 @@ import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
-import { getReportWithSSE, generateShareLink, getUserChecklists, toggleChecklistItem } from '../lib/api'
+import { getReportWithSSE, getCachedReportOnly, generateShareLink, getUserChecklists, toggleChecklistItem } from '../lib/api'
 import {
   Trophy, TrendingUp, TrendingDown, BookOpen, ChevronRight,
   Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
@@ -434,7 +434,7 @@ function ShareModal({ report, sessionId, onClose }) {
 
 // ── Loading State (SSE Progress) ──────────────────────────────────────────────
 
-function ReportLoading({ stage, progress, label }) {
+function ReportLoading({ stage, progress, label, isFirstGeneration }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="glass p-10 max-w-md w-full text-center space-y-6">
@@ -445,6 +445,13 @@ function ReportLoading({ stage, progress, label }) {
         <div>
           <h2 className="text-xl font-bold gradient-text mb-2">Generating Your Report</h2>
           <p className="text-muted text-sm">{label || 'Analyzing your session…'}</p>
+          {isFirstGeneration && (
+            <p className="mt-3 text-xs px-3 py-2 rounded-lg"
+              style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}>
+              ⏳ First-time generation for this report (~45 seconds).
+              Future visits will be instant.
+            </p>
+          )}
         </div>
         <div className="space-y-2">
           <div className="flex justify-between text-xs text-muted">
@@ -512,37 +519,72 @@ export default function ReportPage() {
   const { sessionId } = useParams()
   const navigate      = useNavigate()
 
-  const [report,     setReport]     = useState(null)
-  const [loading,    setLoading]    = useState(true)
-  const [error,      setError]      = useState(null)
-  const [stage,      setStage]      = useState('core_analysis')
-  const [progress,   setProgress]   = useState(10)
-  const [stageLabel, setStageLabel] = useState('Scoring your answers…')
-  const [shareOpen,       setShareOpen]       = useState(false)
-  const [checklistItems,  setChecklistItems]  = useState(null)   // null = not yet loaded
-  const [checklistId,     setChecklistId]     = useState(null)
+  const [report,            setReport]            = useState(null)
+  const [loading,           setLoading]           = useState(true)
+  const [error,             setError]             = useState(null)
+  const [stage,             setStage]             = useState('core_analysis')
+  const [progress,          setProgress]          = useState(10)
+  const [stageLabel,        setStageLabel]        = useState('Scoring your answers…')
+  const [shareOpen,         setShareOpen]         = useState(false)
+  const [checklistItems,    setChecklistItems]    = useState(null)
+  const [checklistId,       setChecklistId]       = useState(null)
+  // True when backend is generating via SSE (first time); false when returning cached JSON instantly.
+  const [isFirstGeneration, setIsFirstGeneration] = useState(false)
 
   useEffect(() => {
     if (!sessionId) return
-    getReportWithSSE(
-      sessionId,
-      (evt) => {
-        setStage(evt.stage)
-        setProgress(evt.progress || 10)
-        setStageLabel(evt.label || 'Processing…')
-      },
-      (reportData) => {
-        setReport(reportData)
-        if (reportData?.checklist?.length > 0) {
-          setChecklistItems(reportData.checklist)
+
+    const cacheKey = `report_${sessionId}`
+
+    function applyReport(reportData) {
+      setReport(reportData)
+      if (reportData?.checklist?.length > 0) setChecklistItems(reportData.checklist)
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(reportData)) } catch (_) {}
+      setLoading(false)
+    }
+
+    function startSSE() {
+      // Detect first-time generation: SSE sends progress events; cached JSON never does.
+      let receivedProgressEvent = false
+      getReportWithSSE(
+        sessionId,
+        (evt) => {
+          if (!receivedProgressEvent) {
+            receivedProgressEvent = true
+            setIsFirstGeneration(true)
+          }
+          setStage(evt.stage)
+          setProgress(evt.progress || 10)
+          setStageLabel(evt.label || 'Processing…')
+        },
+        applyReport,
+        (errMsg) => {
+          setError(errMsg || 'Failed to load report.')
+          setLoading(false)
+        },
+      )
+    }
+
+    // Layer 1: sessionStorage — instant, no network needed
+    try {
+      const stored = sessionStorage.getItem(cacheKey)
+      if (stored) {
+        applyReport(JSON.parse(stored))
+        return
+      }
+    } catch (_) {}
+
+    // Layer 2: cached-only endpoint — fast DB read, never triggers SSE generation
+    getCachedReportOnly(sessionId)
+      .then((reportData) => {
+        if (reportData) {
+          applyReport(reportData)
+        } else {
+          // Layer 3: SSE — report not yet cached, stream the full 4-stage pipeline
+          startSSE()
         }
-        setLoading(false)
-      },
-      (errMsg) => {
-        setError(errMsg || 'Failed to load report.')
-        setLoading(false)
-      },
-    )
+      })
+      .catch(() => startSSE())
   }, [sessionId])
 
   // Fetch checklist_id for this session so we can call toggle API
@@ -561,7 +603,7 @@ export default function ReportPage() {
     }).catch(() => {})
   }, [sessionId])
 
-  if (loading) return <ReportLoading stage={stage} progress={progress} label={stageLabel} />
+  if (loading) return <ReportLoading stage={stage} progress={progress} label={stageLabel} isFirstGeneration={isFirstGeneration} />
   if (error) return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="glass p-8 max-w-md text-center">

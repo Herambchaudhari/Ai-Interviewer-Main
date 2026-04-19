@@ -325,48 +325,135 @@ def get_active_sessions(user_id: str) -> list:
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────
+
+# Base schema columns guaranteed to exist in every environment (schema.sql)
+_REPORT_BASE_COLUMNS = (
+    "overall_score", "grade", "summary", "hire_recommendation", "radar_scores",
+    "strong_areas", "weak_areas", "per_question_analysis", "study_recommendations",
+    "compared_to_level", "skill_ratings", "recommendations", "round_type",
+)
+
+# Columns added by migration 001
+_REPORT_MIGRATION_001_COLUMNS = (
+    "voice_metrics", "delivery_consistency", "filler_heatmap", "transcript_annotated",
+    "audio_clips_index", "communication_breakdown", "six_axis_radar", "bs_flag",
+    "pattern_groups", "blind_spots", "company_fit", "skill_decay", "repeated_offenders",
+    "growth_trajectory", "improvement_vs_last", "swot", "what_went_wrong",
+    "skills_to_work_on", "thirty_day_plan", "auto_resources", "follow_up_questions",
+    "next_interview_blueprint", "confidence_score",
+)
+
+# Columns added by migration 007
+_REPORT_MIGRATION_007_COLUMNS = ("checklist", "study_schedule", "peer_comparison")
+
+
+def _report_flat_cols(report_data: dict, *column_sets) -> dict:
+    """Return a dict of only the specified columns that exist in report_data."""
+    result = {}
+    for col_set in column_sets:
+        for key in col_set:
+            if key in report_data:
+                result[key] = report_data[key]
+    return result
+
+
 def save_report(session_id: str, report_data: dict) -> str:
     """
-    Insert a report row linked to a session.
-    Returns the generated report_id.
+    Upsert a report row. Tries progressively simpler payloads until one succeeds
+    so the report is always persisted regardless of which DB migrations have been applied.
+
+    The full report is always stored in the report_data JSONB blob as a guaranteed
+    fallback; get_report() merges it back on read.
+
+    Returns the report_id (new or existing).
     """
-    report_id = str(uuid.uuid4())
-    full_payload = {
-        "id": report_id,
-        "session_id": session_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        **report_data,
-    }
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    # Guard: if a row already exists, update it — never create duplicate rows.
     try:
-        _db().table("reports").insert(full_payload).execute()
-    except Exception as e:
-        compact_payload = {
-            "id": report_id,
-            "session_id": session_id,
-            "created_at": full_payload["created_at"],
-            "report_data": report_data,
-        }
-        for key in (
-            "overall_score", "grade", "summary", "hire_recommendation", "radar_scores",
-            "strong_areas", "weak_areas", "per_question_analysis",
-            "study_recommendations", "compared_to_level", "skill_ratings",
-            "recommendations", "round_type",
-            # Phase-4/5/6 rich fields — must be promoted so get_report() finds them
-            "checklist", "study_schedule", "peer_comparison",
-        ):
-            if key in report_data:
-                compact_payload[key] = report_data[key]
-        try:
-            _db().table("reports").insert(compact_payload).execute()
-        except Exception:
-            print(f"Failed to save report to Supabase: {e}")
-            raise e
+        existing = _db().table("reports").select("id").eq("session_id", session_id).limit(1).execute()
+        if existing.data:
+            existing_id = existing.data[0]["id"]
+            _update_report(session_id, existing_id, report_data)
+            return existing_id
+    except Exception as chk_err:
+        print(f"[save_report] existence check failed (will insert): {chk_err}")
+
+    report_id = str(uuid.uuid4())
+    _insert_report(session_id, report_id, created_at, report_data)
     return report_id
 
 
+def _insert_report(session_id: str, report_id: str, created_at: str, report_data: dict) -> None:
+    """
+    Try to insert a report row using progressively simpler payloads.
+    Tier 1 → all migration columns; Tier 2 → migration 001 only; Tier 3 → base schema only.
+    The full report is always in report_data so get_report() can merge it back regardless of tier.
+    """
+    base = {
+        "id": report_id,
+        "session_id": session_id,
+        "created_at": created_at,
+        "report_data": report_data,  # full report always in JSONB blob
+        **_report_flat_cols(report_data, _REPORT_BASE_COLUMNS),
+    }
+
+    # Tier 1: base + migration 001 + migration 007 (all migrations applied)
+    try:
+        _db().table("reports").insert({
+            **base,
+            **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS, _REPORT_MIGRATION_007_COLUMNS),
+        }).execute()
+        return
+    except Exception as e1:
+        print(f"[save_report] Tier-1 insert failed: {e1}")
+
+    # Tier 2: base + migration 001 only (migration 007 not applied)
+    try:
+        _db().table("reports").insert({
+            **base,
+            **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS),
+        }).execute()
+        return
+    except Exception as e2:
+        print(f"[save_report] Tier-2 insert failed: {e2}")
+
+    # Tier 3: pure base schema — guaranteed columns only.
+    # Everything is already in report_data blob; get_report() will merge it back.
+    _db().table("reports").insert(base).execute()
+
+
+def _update_report(session_id: str, report_id: str, report_data: dict) -> None:
+    """Update an existing report row using the same tier strategy."""
+    base_update = {
+        "report_data": report_data,
+        **_report_flat_cols(report_data, _REPORT_BASE_COLUMNS),
+    }
+
+    try:
+        _db().table("reports").update({
+            **base_update,
+            **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS, _REPORT_MIGRATION_007_COLUMNS),
+        }).eq("id", report_id).execute()
+        return
+    except Exception as e1:
+        print(f"[save_report] Tier-1 update failed: {e1}")
+
+    try:
+        _db().table("reports").update({
+            **base_update,
+            **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS),
+        }).eq("id", report_id).execute()
+        return
+    except Exception as e2:
+        print(f"[save_report] Tier-2 update failed: {e2}")
+
+    _db().table("reports").update(base_update).eq("id", report_id).execute()
+
+
 def get_report(session_id: str) -> Optional[dict]:
-    """Fetch the report for a given session_id."""
-    res = _db().table("reports").select("*").eq("session_id", session_id).limit(1).execute()
+    """Fetch the most recent report for a given session_id."""
+    res = _db().table("reports").select("*").eq("session_id", session_id).order("created_at", desc=True).limit(1).execute()
     if res.data:
         row = res.data[0]
         report_blob = row.get("report_data") or {}
@@ -1757,3 +1844,67 @@ def get_audio_signed_url(path: str, expires_in: int = 86400) -> Optional[str]:
     except Exception as e:
         print(f"[get_audio_signed_url] error: {e}")
         return None
+
+
+# ── Backfill helpers ──────────────────────────────────────────────────────────
+
+def get_sessions_pending_report(user_id: Optional[str] = None, limit: int = 50) -> list:
+    """
+    Return completed sessions that have no corresponding report row.
+    Falls back to a direct query if the view isn't deployed yet.
+    """
+    try:
+        q = _db().table("sessions_pending_report").select(
+            "session_id, user_id, round_type, difficulty, num_questions, created_at, context_bundle"
+        )
+        if user_id:
+            q = q.eq("user_id", user_id)
+        res = q.limit(limit).execute()
+        return res.data or []
+    except Exception:
+        # View not deployed — fall back to explicit LEFT JOIN via two queries
+        try:
+            sessions_q = (
+                _db().table("sessions")
+                .select("id, user_id, round_type, difficulty, num_questions, created_at, context_bundle")
+                .eq("status", "completed")
+                .order("created_at", desc=False)
+                .limit(limit)
+            )
+            if user_id:
+                sessions_q = sessions_q.eq("user_id", user_id)
+            sessions = sessions_q.execute().data or []
+            if not sessions:
+                return []
+
+            session_ids = [s["id"] for s in sessions]
+            existing = (
+                _db().table("reports")
+                .select("session_id")
+                .in_("session_id", session_ids)
+                .execute()
+            ).data or []
+            existing_ids = {r["session_id"] for r in existing}
+
+            return [
+                {**s, "session_id": s["id"]}
+                for s in sessions
+                if s["id"] not in existing_ids
+            ]
+        except Exception as e2:
+            print(f"[get_sessions_pending_report] fallback error: {e2}")
+            return []
+
+
+def get_pending_report_count(user_id: Optional[str] = None) -> int:
+    """Return the number of completed sessions that still lack a cached report."""
+    try:
+        q = _db().table("user_pending_report_counts").select("pending_count")
+        if user_id:
+            q = q.eq("user_id", user_id)
+        res = q.execute()
+        if res.data:
+            return sum(int(r.get("pending_count", 0)) for r in res.data)
+        return 0
+    except Exception:
+        return len(get_sessions_pending_report(user_id=user_id, limit=200))

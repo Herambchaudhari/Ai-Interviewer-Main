@@ -236,6 +236,18 @@ export async function generateReport(sessionId) {
   return data  // { success, data: { report_id, report }, error }
 }
 
+/** GET /api/v1/report/:sessionId/cached — fetch cached report only, no generation triggered.
+ *  Returns the report object if it exists, or null if not yet generated (404). */
+export async function getCachedReportOnly(sessionId) {
+  try {
+    const { data } = await api.get(`/report/${sessionId}/cached`)
+    return data?.data ?? null
+  } catch (err) {
+    if (err.response?.status === 404) return null
+    throw err
+  }
+}
+
 /** GET /api/v1/reports/:sessionId — fetch cached report */
 export async function getReportV2(sessionId) {
   const { data } = await api.get(`/reports/${sessionId}`)
@@ -482,6 +494,35 @@ export async function getSharedReport(token) {
     throw new Error(err?.detail || `Error ${res.status}`)
   }
   return res.json()  // { success, data: reportRow, error }
+}
+
+// ── Report Backfill ───────────────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/admin/backfill/user
+ * Triggers background report generation for the calling user's uncached sessions.
+ * Safe to call on every hub load — the backend lock prevents duplicate runs.
+ */
+export async function triggerUserBackfill() {
+  try {
+    const { data } = await api.post('/admin/backfill/user')
+    return data  // { success, data: { status, pending_count, message } }
+  } catch (e) {
+    // Non-critical — silently swallow so it never breaks the hub
+    return { success: false, data: null, error: e?.message }
+  }
+}
+
+/**
+ * GET /api/v1/admin/backfill/status
+ * Returns { pending_count, is_running } for the global queue.
+ * Requires X-Admin-Secret header — only for admin tooling.
+ */
+export async function getBackfillStatus(adminSecret) {
+  const { data } = await api.get('/admin/backfill/status', {
+    headers: { 'X-Admin-Secret': adminSecret },
+  })
+  return data
 }
 
 export default api
