@@ -17,7 +17,7 @@ import {
   Activity, Download, Target, Zap, Brain, ArrowUp, ArrowDown,
   Calendar, Filter, BarChart2, Repeat, Award,
 } from 'lucide-react'
-import { getHubReportsPaginated, getHubReportsSummary } from '../../lib/api'
+import { getHubReportsPaginated, getHubReportsSummary, triggerUserBackfill } from '../../lib/api'
 import { getReportRoute } from '../../lib/routes'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -126,13 +126,22 @@ function ScoreDisplay({ score, delta }) {
 
 // ── Mini 6-Axis Radar ─────────────────────────────────────────────────────────
 
-const SIX_AXES_SHORT = ['Clarity', 'Confidence', 'Structure', 'Pacing', 'Relevance', 'Examples']
+// Maps backend six_axis_radar keys → short display labels.
+// Keyed lookup prevents the positional mismatch that Object.values() causes.
+const RADAR_AXIS_MAP = {
+  'Communication Clarity': 'Clarity',
+  'Confidence':            'Confidence',
+  'Answer Structure':      'Structure',
+  'Pacing':                'Pacing',
+  'Relevance':             'Relevance',
+  'Example Quality':       'Examples',
+}
 
 function MiniRadar({ data }) {
   if (!data) return <span className="text-xs text-muted">No radar data</span>
-  const chartData = SIX_AXES_SHORT.map((axis, i) => ({
-    axis,
-    value: Object.values(data)[i] ?? 0,
+  const chartData = Object.entries(RADAR_AXIS_MAP).map(([backendKey, label]) => ({
+    axis:  label,
+    value: data[backendKey] ?? 0,
   }))
   return (
     <ResponsiveContainer width="100%" height={160}>
@@ -702,11 +711,16 @@ export default function ReportsSection() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT))
 
-  // Fetch summary once on mount
+  // Fetch summary + silently trigger backfill for old sessions on mount
   useEffect(() => {
     getHubReportsSummary()
       .then(res => setSummary(res?.data ?? null))
       .catch(() => {})
+
+    // Kick off background report generation for any session that was completed
+    // before the caching fix.  Fire-and-forget — errors are swallowed inside
+    // triggerUserBackfill so this never breaks the hub.
+    triggerUserBackfill()
   }, [])
 
   // Fetch rows whenever filters or page change
@@ -928,22 +942,34 @@ export default function ReportsSection() {
 
                         {/* Score + delta */}
                         <td className="px-4 py-3.5">
-                          <ScoreDisplay score={row.overall_score} delta={row.improvement_vs_last?.delta} />
+                          {row.overall_score == null ? (
+                            <span
+                              title="Report is being generated in the background. Click 'Generate' to create it now."
+                              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full"
+                              style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' }}>
+                              ⏳ Pending
+                            </span>
+                          ) : (
+                            <ScoreDisplay score={row.overall_score} delta={row.improvement_vs_last?.delta} />
+                          )}
                         </td>
 
-                        {/* Mini radar snapshot — show avg across 6 axes */}
+                        {/* Mini radar snapshot — show first 3 axes using canonical key order */}
                         <td className="px-4 py-3.5">
                           {radar ? (
                             <div className="flex gap-1 flex-wrap max-w-[140px]">
-                              {Object.entries(radar).slice(0, 3).map(([k, v]) => (
-                                <span key={k} className="text-xs px-1.5 py-0.5 rounded"
-                                  style={{
-                                    background: v >= 75 ? 'rgba(74,222,128,0.1)' : v >= 55 ? 'rgba(250,204,21,0.1)' : 'rgba(248,113,113,0.1)',
-                                    color:      v >= 75 ? '#4ade80' : v >= 55 ? '#facc15' : '#f87171',
-                                  }}>
-                                  {v}
-                                </span>
-                              ))}
+                              {Object.entries(RADAR_AXIS_MAP).slice(0, 3).map(([backendKey, label]) => {
+                                const v = radar[backendKey] ?? 0
+                                return (
+                                  <span key={label} className="text-xs px-1.5 py-0.5 rounded"
+                                    style={{
+                                      background: v >= 75 ? 'rgba(74,222,128,0.1)' : v >= 55 ? 'rgba(250,204,21,0.1)' : 'rgba(248,113,113,0.1)',
+                                      color:      v >= 75 ? '#4ade80' : v >= 55 ? '#facc15' : '#f87171',
+                                    }}>
+                                    {v}
+                                  </span>
+                                )
+                              })}
                             </div>
                           ) : (
                             <span className="text-muted text-xs">—</span>
@@ -981,11 +1007,18 @@ export default function ReportsSection() {
 
                         {/* Action — stop propagation so row click doesn't fire */}
                         <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
-                          {row.overall_score != null && (
+                          {row.overall_score != null ? (
                             <Link to={getReportRoute(row.session_id)}
                               className="flex items-center gap-0.5 text-xs font-semibold whitespace-nowrap transition-colors"
                               style={{ color: '#7c3aed' }}>
                               Report <ChevronRight size={12} />
+                            </Link>
+                          ) : (
+                            <Link to={getReportRoute(row.session_id)}
+                              title="Click to generate this report now (one-time, ~45 seconds)"
+                              className="flex items-center gap-0.5 text-xs font-semibold whitespace-nowrap transition-colors"
+                              style={{ color: '#f59e0b' }}>
+                              Generate <ChevronRight size={12} />
                             </Link>
                           )}
                         </td>
