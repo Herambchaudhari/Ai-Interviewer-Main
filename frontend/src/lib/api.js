@@ -190,10 +190,10 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
 
   const contentType = response.headers.get('content-type') || ''
 
-  // Cached report — return as plain JSON
+  // Cached report — return as plain JSON (persist_status: 'saved' implied)
   if (contentType.includes('application/json')) {
     const data = await response.json()
-    onComplete(data?.data ?? data)
+    onComplete(data?.data ?? data, 'saved')
     return
   }
 
@@ -214,7 +214,7 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
         try {
           const event = JSON.parse(line.slice(6))
           if (event.stage === 'complete') {
-            onComplete(event.report)
+            onComplete(event.report, event.persist_status ?? 'saved')
             return
           } else if (event.stage === 'error') {
             onError(event.error || 'Report generation failed')
@@ -234,6 +234,13 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
 export async function generateReport(sessionId) {
   const { data } = await api.post('/reports/generate', { session_id: sessionId })
   return data  // { success, data: { report_id, report }, error }
+}
+
+/** POST /api/v1/report/:sessionId/retry-save — retry persisting a report that failed to save.
+ *  Returns { success, data: { saved: true } } on success, throws on network/server error. */
+export async function retrySaveReport(sessionId, reportPayload) {
+  const { data } = await api.post(`/report/${sessionId}/retry-save`, { report: reportPayload })
+  return data  // { success, data: { saved: true }, error }
 }
 
 /** GET /api/v1/report/:sessionId/cached — fetch cached report only, no generation triggered.

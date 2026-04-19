@@ -27,6 +27,7 @@ from services.db_service import (
     compute_improvement_vs_last, get_past_reports_for_analysis, update_session,
     save_benchmark, save_checklist, get_benchmarks,
     get_audio_signed_url,
+    mark_report_complete, mark_report_persist_failed,
 )
 from services.benchmarking_service import compute_peer_comparison
 from services.spaced_repetition_service import build_study_schedule
@@ -63,6 +64,86 @@ def _err(error: str, status: int = 400):
 
 async def _empty_async_dict() -> dict:
     return {}
+
+
+def _normalize_report_payload(payload: dict) -> dict:
+    """
+    Enforce correct types on every report field before the payload leaves the
+    backend.  The frontend destructures these fields with defaults, but a cached
+    report saved before a schema migration — or a report where an LLM stage
+    silently failed — can carry null where an array or dict is expected, crashing
+    the React render.  This normalizer is idempotent: running it twice is safe.
+    """
+    # ── Fields that must always be lists ─────────────────────────────────────
+    _LIST_FIELDS = [
+        "per_question_analysis", "question_scores", "skill_ratings",
+        "strong_areas", "weak_areas", "red_flags", "failure_patterns",
+        "study_recommendations", "interview_tips", "mock_ready_topics",
+        "not_ready_topics", "repeated_offenders", "pattern_groups",
+        "blind_spots", "bs_flag", "skill_decay", "skills_to_work_on",
+        "auto_resources", "follow_up_questions", "category_breakdown",
+        "checklist", "filler_heatmap",
+    ]
+    # ── Fields that must always be dicts ─────────────────────────────────────
+    _DICT_FIELDS = [
+        "hire_signal", "communication_breakdown", "six_axis_radar",
+        "delivery_consistency", "proctoring_summary", "swot",
+        "thirty_day_plan", "cv_audit", "study_roadmap",
+    ]
+    # ── String fields that must not be null ──────────────────────────────────
+    _STR_FIELDS = [
+        "summary", "grade", "hire_recommendation", "difficulty",
+        "compared_to_level", "session_label", "target_company", "candidate_name",
+    ]
+
+    result = dict(payload)
+
+    for field in _LIST_FIELDS:
+        if not isinstance(result.get(field), list):
+            result[field] = []
+
+    for field in _DICT_FIELDS:
+        if not isinstance(result.get(field), dict):
+            result[field] = {}
+
+    for field in _STR_FIELDS:
+        val = result.get(field)
+        if not isinstance(val, str):
+            result[field] = "" if val is None else str(val)
+
+    # ── Nested: code_quality_metrics ─────────────────────────────────────────
+    cqm = result.get("code_quality_metrics")
+    if isinstance(cqm, dict):
+        if not isinstance(cqm.get("per_question"), list):
+            cqm["per_question"] = []
+
+    # ── Nested: peer_comparison ───────────────────────────────────────────────
+    pc = result.get("peer_comparison")
+    if isinstance(pc, dict):
+        if not isinstance(pc.get("grade_distribution"), dict):
+            pc["grade_distribution"] = {}
+        if not isinstance(pc.get("radar_comparison"), list):
+            pc["radar_comparison"] = []
+
+    # ── Nested: next_interview_blueprint ─────────────────────────────────────
+    nib = result.get("next_interview_blueprint")
+    if isinstance(nib, dict):
+        if not isinstance(nib.get("focus_topics"), list):
+            nib["focus_topics"] = []
+
+    # ── Nested: interview_integrity ───────────────────────────────────────────
+    ii = result.get("interview_integrity")
+    if isinstance(ii, dict):
+        if not isinstance(ii.get("highlights"), list):
+            ii["highlights"] = []
+
+    # ── Nested: proctoring_summary ────────────────────────────────────────────
+    ps = result.get("proctoring_summary")
+    if isinstance(ps, dict):
+        if not isinstance(ps.get("counts"), dict):
+            ps["counts"] = {}
+
+    return result
 
 
 def _is_complete_report(report: dict) -> bool:
@@ -861,14 +942,31 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "confidence_score": 85,
     }
 
+    # ── Normalize types before persist and emit ───────────────────────────────
+    report_payload = _normalize_report_payload(report_payload)
+
     # ── Persist ───────────────────────────────────────────────────────────────
+    persist_ok = False
+    persist_error_msg = None
     try:
         save_report(session_id, report_payload)
+        mark_report_complete(session_id)
         update_session(session_id, {"status": "completed"})
+        persist_ok = True
     except Exception as e:
+        persist_error_msg = str(e)
         print(f"[report/sse] Persist failed: {e}")
+        try:
+            mark_report_persist_failed(session_id, persist_error_msg)
+        except Exception:
+            pass  # DB is truly unavailable; still deliver the report to the user
 
-    yield _sse({"stage": "complete", "progress": 100, "report": report_payload})
+    yield _sse({
+        "stage": "complete",
+        "progress": 100,
+        "report": report_payload,
+        "persist_status": "saved" if persist_ok else "failed",
+    })
 
 
 # ── GET /api/v1/report/:session_id  (SSE stream) ─────────────────────────────
@@ -888,7 +986,7 @@ async def get_or_generate_report(
     try:
         cached = get_report(session_id)
         if cached and _is_complete_report(cached):
-            return _ok(data=cached)
+            return _ok(data=_normalize_report_payload(cached))
         if cached:
             # A row exists but is still too sparse (e.g. a schema migration column
             # was just added). Log and fall through to regeneration only when
@@ -941,10 +1039,49 @@ async def get_cached_report(
             session = get_session(session_id)
             if session and session.get("user_id") != user["user_id"]:
                 return _err("Access denied.", status=403)
-        return _ok(data=cached)
+        return _ok(data=_normalize_report_payload(cached))
     except RuntimeError:
         if _DEBUG:
             return _ok(data=_mock_report(session_id))
         return _err("Database not configured. Set SUPABASE_URL and SUPABASE_KEY.", status=503)
     except Exception as e:
         return _err(str(e), status=500)
+
+
+# ── POST /api/v1/report/:session_id/retry-save ────────────────────────────────
+@router.post("/{session_id}/retry-save")
+async def retry_save_report(
+    session_id: str,
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Called by the frontend when a persist_failed SSE event was received.
+    Accepts the full report payload and attempts to save it to the database.
+    """
+    try:
+        session = get_session(session_id)
+        if not session:
+            return _err("Session not found.", status=404)
+        if session.get("user_id") != user["user_id"]:
+            return _err("Access denied.", status=403)
+    except RuntimeError:
+        return _err("Database not configured.", status=503)
+    except Exception as e:
+        return _err(str(e), status=500)
+
+    report_payload = body.get("report")
+    if not report_payload or not isinstance(report_payload, dict):
+        return _err("Missing or invalid report payload.", status=422)
+
+    try:
+        save_report(session_id, report_payload)
+        mark_report_complete(session_id)
+        update_session(session_id, {"status": "completed"})
+        return _ok(data={"saved": True})
+    except Exception as e:
+        try:
+            mark_report_persist_failed(session_id, str(e))
+        except Exception:
+            pass
+        return _err(f"Save failed: {e}", status=503)

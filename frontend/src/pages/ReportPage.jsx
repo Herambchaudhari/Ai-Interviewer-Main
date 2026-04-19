@@ -29,7 +29,8 @@ import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
-import { getReportWithSSE, getCachedReportOnly, generateShareLink, getUserChecklists, toggleChecklistItem } from '../lib/api'
+import { getReportWithSSE, getCachedReportOnly, generateShareLink, getUserChecklists, toggleChecklistItem, retrySaveReport } from '../lib/api'
+import SectionErrorBoundary from '../components/SectionErrorBoundary'
 import {
   Trophy, TrendingUp, TrendingDown, BookOpen, ChevronRight,
   Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
@@ -530,16 +531,65 @@ export default function ReportPage() {
   const [checklistId,       setChecklistId]       = useState(null)
   // True when backend is generating via SSE (first time); false when returning cached JSON instantly.
   const [isFirstGeneration, setIsFirstGeneration] = useState(false)
+  const [persistFailed,     setPersistFailed]     = useState(false)
+  const [retryingSave,      setRetryingSave]      = useState(false)
+  const [retrySaveSuccess,  setRetrySaveSuccess]  = useState(false)
+  const rawReportRef = useRef(null)  // holds report payload for retry without re-render
+
+  const handleRetrySave = useCallback(async () => {
+    const payload = rawReportRef.current
+    if (!payload || retryingSave) return
+    setRetryingSave(true)
+    try {
+      const res = await retrySaveReport(sessionId, payload)
+      if (res?.data?.saved) {
+        setPersistFailed(false)
+        setRetrySaveSuccess(true)
+        const cacheKey = `report_${sessionId}`
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(payload)) } catch (_) {}
+      }
+    } catch (_) {
+      // banner stays visible; user can click "Try Again" manually
+    } finally {
+      setRetryingSave(false)
+    }
+  }, [sessionId, retryingSave])
 
   useEffect(() => {
     if (!sessionId) return
 
     const cacheKey = `report_${sessionId}`
 
-    function applyReport(reportData) {
+    function applyReport(reportData, persistStatus = 'saved') {
+      rawReportRef.current = reportData
       setReport(reportData)
       if (reportData?.checklist?.length > 0) setChecklistItems(reportData.checklist)
-      try { sessionStorage.setItem(cacheKey, JSON.stringify(reportData)) } catch (_) {}
+
+      if (persistStatus === 'saved') {
+        // Only cache locally when the DB save succeeded — otherwise a refresh
+        // would serve stale sessionStorage instead of triggering a real re-fetch.
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(reportData)) } catch (_) {}
+      } else {
+        setPersistFailed(true)
+        // Auto-retry once after 4 seconds to handle transient DB hiccups.
+        setTimeout(() => {
+          setRetryingSave(prev => {
+            if (prev) return prev  // already retrying
+            retrySaveReport(sessionId, reportData)
+              .then(res => {
+                if (res?.data?.saved) {
+                  setPersistFailed(false)
+                  setRetrySaveSuccess(true)
+                  try { sessionStorage.setItem(cacheKey, JSON.stringify(reportData)) } catch (_) {}
+                }
+              })
+              .catch(() => {})  // banner stays; user can click manually
+              .finally(() => setRetryingSave(false))
+            return true  // mark as retrying
+          })
+        }, 4000)
+      }
+
       setLoading(false)
     }
 
@@ -668,12 +718,12 @@ export default function ReportPage() {
     score: q.score || 0,
   }))
 
-  const fillerData = filler_heatmap.map(f => ({
+  const fillerData = (filler_heatmap ?? []).map(f => ({
     question_id: f.question_id, filler_count: f.filler_count || 0,
     confidence_score: f.confidence_score || 0, filler_words: f.filler_words || [],
   }))
 
-  const deliveryArc = (delivery_consistency?.arc_plot || []).map((v, i) => ({
+  const deliveryArc = ((delivery_consistency ?? {}).arc_plot ?? []).map((v, i) => ({
     q: `Q${i + 1}`, confidence: v,
   }))
 
@@ -703,6 +753,49 @@ export default function ReportPage() {
                 environment to generate real AI-powered reports.
               </p>
             </div>
+          </div>
+        )}
+
+        {/* ── Persist-Failed Warning Banner ───────────────────────────────── */}
+        {persistFailed && !retrySaveSuccess && (
+          <div className="rounded-xl px-4 py-3 flex items-center justify-between gap-4"
+            style={{
+              background: 'rgba(245,158,11,0.1)',
+              border: '1px solid rgba(245,158,11,0.35)',
+            }}>
+            <div className="flex items-center gap-2 text-sm" style={{ color: '#f59e0b' }}>
+              <AlertTriangle size={16} className="flex-shrink-0" />
+              <span>
+                <strong>Report not saved.</strong> Your results are shown but weren't stored —
+                refreshing this page may lose them.
+              </span>
+            </div>
+            <button
+              onClick={handleRetrySave}
+              disabled={retryingSave}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 transition-all"
+              style={{
+                background: retryingSave ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.25)',
+                border: '1px solid rgba(245,158,11,0.5)',
+                color: '#f59e0b',
+                opacity: retryingSave ? 0.7 : 1,
+                cursor: retryingSave ? 'not-allowed' : 'pointer',
+              }}>
+              {retryingSave ? 'Saving…' : 'Try Again'}
+            </button>
+          </div>
+        )}
+
+        {/* ── Persist-Success Confirmation Banner ─────────────────────────── */}
+        {retrySaveSuccess && (
+          <div className="rounded-xl px-4 py-3 flex items-center gap-2 text-sm"
+            style={{
+              background: 'rgba(74,222,128,0.1)',
+              border: '1px solid rgba(74,222,128,0.3)',
+              color: '#4ade80',
+            }}>
+            <CheckCircle size={16} className="flex-shrink-0" />
+            <span>Report saved successfully. This page is now permanent.</span>
           </div>
         )}
 
@@ -760,7 +853,7 @@ export default function ReportPage() {
               </p>
               <div className="flex flex-wrap gap-2">
                 {repeated_offenders.map((r, i) => (
-                  <Chip key={i} label={`${r.issue} ×${r.count_across_sessions}`} color="#f59e0b" />
+                  <Chip key={i} label={`${r?.issue ?? 'Unknown'} ×${r?.count_across_sessions ?? 0}`} color="#f59e0b" />
                 ))}
               </div>
             </div>
@@ -772,9 +865,9 @@ export default function ReportPage() {
           <SectionCard icon={<Shield size={16}/>} title="Interview Integrity" color="#22d3ee">
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
               {[
-                { label: 'Status', value: interview_integrity.status, color: interview_integrity.status === 'Clear' ? '#4ade80' : interview_integrity.status === 'Minor Concerns' ? '#facc15' : '#f87171' },
-                { label: 'Integrity Score', value: `${interview_integrity.score}/100`, color: scoreColor(interview_integrity.score) },
-                { label: 'Flagged Events', value: interview_integrity.total_incidents, color: '#f97316' },
+                { label: 'Status', value: interview_integrity?.status ?? 'Unknown', color: interview_integrity?.status === 'Clear' ? '#4ade80' : interview_integrity?.status === 'Minor Concerns' ? '#facc15' : '#f87171' },
+                { label: 'Integrity Score', value: `${interview_integrity?.score ?? '—'}/100`, color: scoreColor(interview_integrity?.score ?? 0) },
+                { label: 'Flagged Events', value: interview_integrity?.total_incidents ?? 0, color: '#f97316' },
                 { label: 'Camera Uptime', value: `${Math.round((proctoring_summary?.camera_uptime_ratio || 0) * 100)}%`, color: '#22d3ee' },
               ].map(card => (
                 <div key={card.label} className="rounded-xl p-4"
@@ -784,10 +877,10 @@ export default function ReportPage() {
                 </div>
               ))}
             </div>
-            <p className="text-sm text-muted leading-relaxed mb-4">{interview_integrity.summary}</p>
-            {proctoring_summary?.counts && (
+            <p className="text-sm text-muted leading-relaxed mb-4">{interview_integrity?.summary || 'No integrity summary available.'}</p>
+            {proctoring_summary?.counts && Object.keys(proctoring_summary.counts).length > 0 && (
               <div className="flex flex-wrap gap-2 mb-4">
-                {Object.entries(proctoring_summary.counts).map(([key, value]) => (
+                {Object.entries(proctoring_summary?.counts ?? {}).map(([key, value]) => (
                   <Chip key={key} label={`${key.replaceAll('_', ' ')}: ${value}`} color={value ? '#f97316' : '#64748b'} size="xs" />
                 ))}
               </div>
@@ -855,6 +948,7 @@ export default function ReportPage() {
         </div>
 
         {/* ── 6-Axis Communication Radar + Delivery Consistency ───────────── */}
+        <SectionErrorBoundary>
         {(radarData.length > 0 || deliveryArc.length > 0) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {radarData.length > 0 && (
@@ -867,9 +961,9 @@ export default function ReportPage() {
                       dot={{ r: 3, fill: '#67e8f9' }} />
                   </RadarChart>
                 </ResponsiveContainer>
-                {communication_breakdown && Object.keys(communication_breakdown).length > 0 && (
+                {communication_breakdown && Object.keys(communication_breakdown ?? {}).length > 0 && (
                   <div className="grid grid-cols-2 gap-2 mt-3">
-                    {Object.entries(communication_breakdown).map(([k, v]) => (
+                    {Object.entries(communication_breakdown ?? {}).map(([k, v]) => (
                       <div key={k} className="flex justify-between items-center text-xs">
                         <span className="text-muted truncate mr-2">{k}</span>
                         <span className="font-semibold flex-shrink-0" style={{ color: scoreColor(v) }}>{v}</span>
@@ -972,8 +1066,10 @@ export default function ReportPage() {
             })()}
           </SectionCard>
         )}
+        </SectionErrorBoundary>
 
         {/* ── Filler & Hesitation Heatmap ─────────────────────────────────── */}
+        <SectionErrorBoundary>
         {fillerData.length > 0 && (
           <SectionCard icon={<BarChart2 size={16}/>} title="Filler Word Heatmap" color="#fb923c">
             <p className="text-xs text-muted mb-3">
@@ -991,8 +1087,10 @@ export default function ReportPage() {
             </ResponsiveContainer>
           </SectionCard>
         )}
+        </SectionErrorBoundary>
 
         {/* ── Per-Question Scores Chart ────────────────────────────────────── */}
+        <SectionErrorBoundary>
         {qaData.length > 0 && (
           <SectionCard icon={<TrendingUp size={16}/>} title="Per-Question Scores" color="#4ade80">
             <ResponsiveContainer width="100%" height={200}>
@@ -1007,6 +1105,7 @@ export default function ReportPage() {
             </ResponsiveContainer>
           </SectionCard>
         )}
+        </SectionErrorBoundary>
 
         {/* ── Strong & Weak Areas ─────────────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -1092,6 +1191,7 @@ export default function ReportPage() {
         )}
 
         {/* ── Code Quality Analysis (DSA rounds only) ─────────────────────── */}
+        <SectionErrorBoundary>
         {round_type === 'dsa' && code_quality_metrics && (
           <SectionCard icon={<BarChart2 size={16}/>} title="Code Quality Analysis" color="#a78bfa">
             {/* Aggregate stats row */}
@@ -1111,7 +1211,7 @@ export default function ReportPage() {
 
             {/* Per-question code quality radar */}
             {(() => {
-              const perQ = code_quality_metrics.per_question || []
+              const perQ = code_quality_metrics?.per_question ?? []
               const firstRadar = perQ[0]?.code_quality_radar
               if (!firstRadar) return null
               // Aggregate radar across all questions
@@ -1138,7 +1238,7 @@ export default function ReportPage() {
 
             {/* Per-question expandable cards */}
             <div className="space-y-3">
-              {(code_quality_metrics.per_question || []).map((q, i) => (
+              {(code_quality_metrics?.per_question ?? []).map((q, i) => (
                 <details key={i} className="rounded-lg overflow-hidden" style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.15)' }}>
                   <summary className="px-4 py-3 cursor-pointer text-sm font-medium flex items-center justify-between">
                     <span>{q.question_text ? q.question_text.slice(0, 60) + '…' : `Question ${i + 1}`}</span>
@@ -1180,10 +1280,13 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── Peer Comparison ──────────────────────────────────────────────── */}
+        <SectionErrorBoundary>
         {peer_comparison && (
           <SectionCard icon={<Users size={16}/>} title="Peer Comparison" color="#06b6d4">
-            {peer_comparison.sample_size > 0 ? (
+            {(peer_comparison?.sample_size ?? 0) > 0 ? (
               <>
                 {/* Summary strip */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
@@ -1229,12 +1332,12 @@ export default function ReportPage() {
                 )}
 
                 {/* Grade distribution */}
-                {Object.keys(peer_comparison.grade_distribution || {}).length > 0 && (
+                {Object.keys(peer_comparison?.grade_distribution ?? {}).length > 0 && (
                   <div>
                     <p className="text-xs text-muted uppercase tracking-widest mb-2">Grade Distribution (peers)</p>
                     <div className="flex gap-2 flex-wrap">
-                      {Object.entries(peer_comparison.grade_distribution).map(([g, pct]) => {
-                        const isUser = g === peer_comparison.user_grade
+                      {Object.entries(peer_comparison?.grade_distribution ?? {}).map(([g, pct]) => {
+                        const isUser = g === (peer_comparison?.user_grade ?? '')
                         return (
                           <div key={g}
                             className="flex flex-col items-center px-3 py-2 rounded-xl text-xs"
@@ -1256,24 +1359,27 @@ export default function ReportPage() {
               <div className="space-y-3">
                 <div className="flex items-center gap-4">
                   <div className="glass p-4 rounded-xl text-center min-w-[90px]">
-                    <p className="text-2xl font-bold" style={{ color: scoreColor(overall) }}>{peer_comparison.user_grade}</p>
+                    <p className="text-2xl font-bold" style={{ color: scoreColor(overall) }}>{peer_comparison?.user_grade ?? 'N/A'}</p>
                     <p className="text-xs text-muted mt-0.5">Your Grade</p>
                   </div>
-                  <p className="text-sm text-muted flex-1">{peer_comparison.insight || 'Not enough peer data yet to compute percentile — check back after more users complete this round.'}</p>
+                  <p className="text-sm text-muted flex-1">{peer_comparison?.insight || 'Not enough peer data yet to compute percentile — check back after more users complete this round.'}</p>
                 </div>
               </div>
             )}
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── Company Fit ─────────────────────────────────────────────────── */}
+        <SectionErrorBoundary>
         {company_fit && (
           <SectionCard icon={<Target size={16}/>} title={`${company_fit.target_company || 'Company'} Fit Calibration`} color="#22d3ee">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               {[
-                { label: 'Your Score', val: `${company_fit.your_score}`, color: scoreColor(company_fit.your_score) },
-                { label: 'Bar Required', val: `${company_fit.bar_score_required}`, color: '#94a3b8' },
-                { label: 'Pass Probability', val: `${company_fit.pass_probability}%`, color: scoreColor(company_fit.pass_probability) },
+                { label: 'Your Score', val: company_fit?.your_score != null ? `${company_fit.your_score}` : '—', color: scoreColor(company_fit?.your_score ?? 0) },
+                { label: 'Bar Required', val: company_fit?.bar_score_required != null ? `${company_fit.bar_score_required}` : '—', color: '#94a3b8' },
+                { label: 'Pass Probability', val: company_fit?.pass_probability != null ? `${company_fit.pass_probability}%` : '—', color: scoreColor(company_fit?.pass_probability ?? 0) },
               ].map(({ label, val, color }) => (
                 <div key={label} className="text-center p-4 rounded-xl"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
@@ -1324,7 +1430,10 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── SWOT Grid ───────────────────────────────────────────────────── */}
+        <SectionErrorBoundary>
         {swot && Object.keys(swot).length > 0 && (
           <SectionCard icon={<Compass size={16}/>} title="SWOT Analysis" color="#7c3aed">
             <div className="grid grid-cols-2 gap-3">
@@ -1419,8 +1528,11 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── 30-Day Sprint Plan ──────────────────────────────────────────── */}
-        {thirty_day_plan && Object.keys(thirty_day_plan).some(k => thirty_day_plan[k]?.length > 0) && (
+        <SectionErrorBoundary>
+        {thirty_day_plan && Object.keys(thirty_day_plan ?? {}).some(k => thirty_day_plan[k]?.length > 0) && (
           <SectionCard icon={<Clock size={16}/>} title="30-Day Sprint Plan" color="#22d3ee">
             <div className="space-y-4">
               {['week_1', 'week_2', 'week_3', 'week_4'].map((wk, wi) => {
@@ -1492,7 +1604,10 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── Per-Question Deep Dive ───────────────────────────────────────── */}
+        <SectionErrorBoundary>
         {(per_question_analysis?.length > 0 || question_scores?.length > 0) && (
           <div>
             <h2 className="font-bold mb-4 flex items-center gap-2">
@@ -1734,17 +1849,20 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── Next Interview Blueprint CTA ─────────────────────────────────── */}
+        <SectionErrorBoundary>
         {next_interview_blueprint && (
           <div className="rounded-2xl p-6 text-center"
             style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.15), rgba(34,211,238,0.1))', border: '1px solid rgba(124,58,237,0.3)' }}>
             <Star size={24} className="text-purple-400 mx-auto mb-3" />
             <h3 className="font-bold text-lg mb-1">Your Next Interview</h3>
-            <p className="text-muted text-sm mb-4">{next_interview_blueprint.reason}</p>
+            <p className="text-muted text-sm mb-4">{next_interview_blueprint?.reason || 'Personalized recommendation based on your performance.'}</p>
             <div className="flex flex-wrap justify-center gap-2 mb-4">
-              <Chip label={ROUND_LABELS[next_interview_blueprint.round_type] || next_interview_blueprint.round_type} color="#7c3aed" />
-              <Chip label={next_interview_blueprint.difficulty} color="#22d3ee" />
-              <Chip label={`${next_interview_blueprint.timer_mins}m`} color="#a78bfa" />
+              <Chip label={ROUND_LABELS[next_interview_blueprint?.round_type] || next_interview_blueprint?.round_type || 'Technical'} color="#7c3aed" />
+              <Chip label={next_interview_blueprint?.difficulty || 'Medium'} color="#22d3ee" />
+              <Chip label={`${next_interview_blueprint?.timer_mins ?? 30}m`} color="#a78bfa" />
               {next_interview_blueprint.focus_topics?.map((t, i) => (
                 <Chip key={i} label={t} color="#4ade80" size="xs" />
               ))}
@@ -1754,6 +1872,7 @@ export default function ReportPage() {
             </button>
           </div>
         )}
+        </SectionErrorBoundary>
 
       </div>
     </div>

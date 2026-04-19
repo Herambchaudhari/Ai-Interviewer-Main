@@ -451,6 +451,23 @@ def _update_report(session_id: str, report_id: str, report_data: dict) -> None:
     _db().table("reports").update(base_update).eq("id", report_id).execute()
 
 
+def mark_report_complete(session_id: str) -> None:
+    """Mark a report row as fully persisted."""
+    _db().table("reports").update(
+        {"report_status": "complete", "last_persist_error": None}
+    ).eq("session_id", session_id).execute()
+
+
+def mark_report_persist_failed(session_id: str, error_msg: str) -> None:
+    """Mark a report row as persist_failed and store the truncated error message."""
+    _db().table("reports").update(
+        {
+            "report_status": "persist_failed",
+            "last_persist_error": error_msg[:500],
+        }
+    ).eq("session_id", session_id).execute()
+
+
 def get_report(session_id: str) -> Optional[dict]:
     """Fetch the most recent report for a given session_id."""
     res = _db().table("reports").select("*").eq("session_id", session_id).order("created_at", desc=True).limit(1).execute()
