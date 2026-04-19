@@ -178,7 +178,7 @@ export default function DashboardPage() {
             <h1 className="text-4xl font-bold mb-1">
               Welcome back,{' '}
               <span className="gradient-text">
-                {studentMeta?.name?.split(' ')[0] || profile?.name?.split(' ')[0] || user?.email?.split('@')[0]} 👋
+                {studentMeta?.name?.split(' ')[0] || profile?.name?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0]}
               </span>
             </h1>
             <div className="flex items-center gap-2 text-muted text-sm mt-1">
