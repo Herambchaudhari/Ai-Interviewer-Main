@@ -15,20 +15,17 @@ export default function Navbar() {
   const location  = useLocation()
   const path      = location.pathname
 
-  // Hide during active interview/coding sessions
-  // AUTH DISABLED — removed !user and path === '/auth' conditions
-  const hidden = // !user ||           // AUTH DISABLED
-    // path === '/auth' ||              // AUTH DISABLED
-    path.startsWith('/interview/')
+  const hidden = !user
+    || path === '/auth'
+    || path.startsWith('/interview/')
     || path.startsWith('/coding/')
   if (hidden) return null
 
-  // AUTH DISABLED — sign-out is a no-op; navigate to / instead of /auth
   const handleSignOut = async () => {
     try {
       await signOut()
       toast.success('Signed out')
-      navigate('/')
+      navigate('/auth')
     } catch {
       toast.error('Sign out failed')
     }
@@ -56,7 +53,7 @@ export default function Navbar() {
       {/* Right side */}
       <div className="flex items-center gap-2">
         <span className="text-muted text-xs hidden md:block mr-1 max-w-[180px] truncate">
-          {user.email}
+          {user?.email}
         </span>
 
         <Link to="/" className="btn-secondary text-xs py-2 px-3 hidden sm:flex items-center gap-1.5"

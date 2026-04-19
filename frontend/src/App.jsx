@@ -1,11 +1,11 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
-// import AuthPage from './pages/AuthPage'  // AUTH DISABLED
+import AuthPage from './pages/AuthPage'
 import UploadPage from './pages/Upload'
 import OnboardingPage from './pages/OnboardingPage'
 import DashboardPage from './pages/DashboardPage'
@@ -39,9 +39,7 @@ export default function App() {
       />
       <Navbar />
       <Routes>
-        {/* AUTH DISABLED — /auth redirects to home */}
-        {/* <Route path="/auth" element={<AuthPage />} /> */}
-        <Route path="/auth" element={<Navigate to="/" replace />} />
+        <Route path="/auth" element={<AuthPage />} />
         <Route path="/share/:token" element={<SharedReportPage />} />
 
         {/* Protected */}

@@ -237,6 +237,12 @@ body {
     animation: gradientShift 12s ease infinite;
   }
 
+  [data-theme="dark"] .animated-bg {
+    background: linear-gradient(135deg, #0d0f14 0%, #13101e 40%, #0c1519 80%, #0d0f14 100%);
+    background-size: 400% 400%;
+    animation: gradientShift 12s ease infinite;
+  }
+
   /* ── Waveform bars ────────────────────────────────────────────────────── */
   .waveform-bar {
     width: 4px;
