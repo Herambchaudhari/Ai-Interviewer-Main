@@ -453,15 +453,28 @@ export default function DashboardPage() {
                       <td className="px-5 py-3.5 text-muted">{r.num_questions}</td>
                       <td className="px-5 py-3.5">
                         {r.overall_score != null ? (
-                          <span className={`font-bold ${r.overall_score >= 7 ? 'text-green-400' : r.overall_score >= 5 ? 'text-yellow-400' : 'text-red-400'}`}>
-                            {Number(r.overall_score).toFixed(1)}/10
+                          <span className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`font-bold ${r.overall_score >= 7 ? 'text-green-400' : r.overall_score >= 5 ? 'text-yellow-400' : 'text-red-400'}`}>
+                              {Number(r.overall_score).toFixed(1)}/10
+                            </span>
+                            {r.report_quality === 'partial'    && <span className="badge badge-yellow" style={{fontSize:10,padding:'1px 6px'}}>Partial</span>}
+                            {r.report_quality === 'degraded'   && <span className="badge badge-red"    style={{fontSize:10,padding:'1px 6px'}}>Degraded</span>}
+                            {r.report_status  === 'persist_failed' && <span className="badge badge-red" style={{fontSize:10,padding:'1px 6px'}}>Save Failed</span>}
+                          </span>
+                        ) : r.has_report ? (
+                          <span className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-muted">—</span>
+                            {r.report_quality === 'degraded'
+                              ? <span className="badge badge-red"    style={{fontSize:10,padding:'1px 6px'}}>Degraded</span>
+                              : <span className="badge badge-yellow" style={{fontSize:10,padding:'1px 6px'}}>Partial</span>}
+                            {r.report_status === 'persist_failed' && <span className="badge badge-red" style={{fontSize:10,padding:'1px 6px'}}>Save Failed</span>}
                           </span>
                         ) : (
                           <span className="text-muted">—</span>
                         )}
                       </td>
                       <td className="px-5 py-3.5">
-                        {r.overall_score != null && (
+                        {(r.has_report ?? r.overall_score != null) && (
                           <Link to={getReportRoute(r.id)}
                             className="text-purple-400 hover:text-purple-300 text-xs font-semibold flex items-center gap-0.5 transition-colors">
                             View Report <ChevronRight size={12} />

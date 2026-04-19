@@ -29,8 +29,9 @@ import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
-import { getReportWithSSE, getCachedReportOnly, generateShareLink, getUserChecklists, toggleChecklistItem, retrySaveReport } from '../lib/api'
+import { getReportWithSSE, getCachedReportOnly, generateShareLink, getUserChecklists, toggleChecklistItem, retrySaveReport, retryStages } from '../lib/api'
 import SectionErrorBoundary from '../components/SectionErrorBoundary'
+import SectionRetryCard from '../components/SectionRetryCard'
 import {
   Trophy, TrendingUp, TrendingDown, BookOpen, ChevronRight,
   Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
@@ -495,7 +496,10 @@ function QTooltip({ active, payload }) {
     <div className="glass p-3 text-xs max-w-xs" style={{ border: '1px solid rgba(124,58,237,0.4)' }}>
       <p className="font-semibold mb-1 text-white text-sm">{d.label}</p>
       <p className="text-muted">{d.question_text}</p>
-      <p className="mt-1" style={{ color: scoreColor(d.score * 10) }}>Score: {d.score}/10</p>
+      {d.skipped || d.score == null
+        ? <p className="mt-1 text-yellow-400">Skipped</p>
+        : <p className="mt-1" style={{ color: scoreColor(d.score * 10) }}>Score: {d.score}/10</p>
+      }
     </div>
   )
 }
@@ -534,6 +538,11 @@ export default function ReportPage() {
   const [persistFailed,     setPersistFailed]     = useState(false)
   const [retryingSave,      setRetryingSave]      = useState(false)
   const [retrySaveSuccess,  setRetrySaveSuccess]  = useState(false)
+  // Report quality tracking (Bug #3)
+  const [reportQuality,     setReportQuality]     = useState('full')   // 'full' | 'partial' | 'degraded'
+  const [failedSections,    setFailedSections]    = useState([])       // list of section names that failed
+  const [retryingStage,     setRetryingStage]     = useState(null)     // stage key currently retrying
+  const [stageRetrySuccess, setStageRetrySuccess] = useState({})       // { stageKey: true } on success
   const rawReportRef = useRef(null)  // holds report payload for retry without re-render
 
   const handleRetrySave = useCallback(async () => {
@@ -555,6 +564,28 @@ export default function ReportPage() {
     }
   }, [sessionId, retryingSave])
 
+  const handleRetryStage = useCallback(async (stageKey) => {
+    if (retryingStage) return
+    setRetryingStage(stageKey)
+    try {
+      const res = await retryStages(sessionId, [stageKey])
+      if (res?.data?.report) {
+        const merged = res.data.report
+        rawReportRef.current = merged
+        setReport(merged)
+        setReportQuality(res.data.report_quality ?? 'full')
+        setFailedSections(res.data.failed_sections ?? [])
+        setStageRetrySuccess(prev => ({ ...prev, [stageKey]: true }))
+        // Update sessionStorage with merged payload
+        try { sessionStorage.setItem(`report_${sessionId}`, JSON.stringify(merged)) } catch (_) {}
+      }
+    } catch (_) {
+      // retry card stays visible; user can try again
+    } finally {
+      setRetryingStage(null)
+    }
+  }, [sessionId, retryingStage])
+
   useEffect(() => {
     if (!sessionId) return
 
@@ -564,6 +595,9 @@ export default function ReportPage() {
       rawReportRef.current = reportData
       setReport(reportData)
       if (reportData?.checklist?.length > 0) setChecklistItems(reportData.checklist)
+      // Sync quality metadata so UI can show retry cards / degraded state
+      setReportQuality(reportData?.report_quality ?? 'full')
+      setFailedSections(reportData?.failed_sections ?? [])
 
       if (persistStatus === 'saved') {
         // Only cache locally when the DB save succeeded — otherwise a refresh
@@ -629,6 +663,11 @@ export default function ReportPage() {
       .then((reportData) => {
         if (reportData) {
           applyReport(reportData)
+          // If the report row exists but save_report succeeded while status updates
+          // failed (race condition fix), silently repair the status columns now.
+          if (reportData.report_status === 'persist_failed') {
+            retrySaveReport(sessionId, reportData).catch(() => {})
+          }
         } else {
           // Layer 3: SSE — report not yet cached, stream the full 4-stage pipeline
           startSSE()
@@ -715,7 +754,8 @@ export default function ReportPage() {
 
   const qaData = (per_question_analysis?.length ? per_question_analysis : question_scores).map((q, i) => ({
     label: `Q${i + 1}`, question_text: q.question_text || q.question || '',
-    score: q.score || 0,
+    score: (q.skipped || q.score == null) ? null : q.score,
+    skipped: q.skipped || false,
   }))
 
   const fillerData = (filler_heatmap ?? []).map(f => ({
@@ -796,6 +836,52 @@ export default function ReportPage() {
             }}>
             <CheckCircle size={16} className="flex-shrink-0" />
             <span>Report saved successfully. This page is now permanent.</span>
+          </div>
+        )}
+
+        {/* ── Partial Report Banner (some sections failed) ─────────────────── */}
+        {reportQuality === 'partial' && failedSections.length > 0 && (
+          <div className="rounded-xl px-4 py-3 flex items-center gap-3 text-sm"
+            style={{
+              background: 'rgba(245,158,11,0.08)',
+              border: '1px solid rgba(245,158,11,0.3)',
+              color: '#f59e0b',
+            }}>
+            <AlertTriangle size={16} className="flex-shrink-0" />
+            <span>
+              <strong>Some sections of this report are incomplete.</strong>{' '}
+              Our AI service was temporarily unavailable for certain stages.
+              Use the <strong>Regenerate Section</strong> buttons below to fill them in.
+            </span>
+          </div>
+        )}
+
+        {/* ── Degraded Report State (core analysis failed) ─────────────────── */}
+        {reportQuality === 'degraded' && (
+          <div className="rounded-xl p-6 text-center"
+            style={{
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.3)',
+            }}>
+            <div style={{ fontSize: 36 }}>⚠</div>
+            <h3 className="text-lg font-bold mt-3" style={{ color: '#f87171' }}>
+              Report generation was interrupted
+            </h3>
+            <p className="text-sm text-muted mt-2 max-w-md mx-auto">
+              The core analysis stage failed — your scores and radar chart couldn't be computed.
+              This usually happens when our AI service is temporarily overloaded.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 px-5 py-2 rounded-lg text-sm font-semibold"
+              style={{
+                background: 'rgba(239,68,68,0.2)',
+                border: '1px solid rgba(239,68,68,0.4)',
+                color: '#f87171',
+                cursor: 'pointer',
+              }}>
+              Regenerate Full Report
+            </button>
           </div>
         )}
 
@@ -934,7 +1020,7 @@ export default function ReportPage() {
           <div className="grid grid-cols-2 gap-3 flex-shrink-0">
             {[
               { label: 'Total Qs',  val: num_questions },
-              { label: 'Answered',  val: qaData.filter(q => q.score > 0).length },
+              { label: 'Answered',  val: qaData.filter(q => !q.skipped && q.score != null).length },
               { label: 'Score',     val: `${overall}` },
               { label: 'Grade',     val: grade || '—' },
             ].map(({ label, val }) => (
@@ -949,7 +1035,14 @@ export default function ReportPage() {
 
         {/* ── 6-Axis Communication Radar + Delivery Consistency ───────────── */}
         <SectionErrorBoundary>
-        {(radarData.length > 0 || deliveryArc.length > 0) && (
+        {failedSections.includes('communication_breakdown') && !stageRetrySuccess['stage3_communication'] ? (
+          <SectionRetryCard
+            sectionLabel="Communication Analysis"
+            onRetry={() => handleRetryStage('stage3_communication')}
+            isRetrying={retryingStage === 'stage3_communication'}
+            retrySuccess={!!stageRetrySuccess['stage3_communication']}
+          />
+        ) : (radarData.length > 0 || deliveryArc.length > 0) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {radarData.length > 0 && (
               <SectionCard icon={<MessageSquare size={16}/>} title="Communication (6-Axis)" color="#22d3ee">
@@ -1099,7 +1192,7 @@ export default function ReportPage() {
                 <YAxis domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
                 <Tooltip content={<QTooltip />} cursor={{ fill: 'rgba(124,58,237,0.08)' }} />
                 <Bar dataKey="score" radius={[6, 6, 0, 0]}>
-                  {qaData.map((e, i) => <Cell key={i} fill={scoreColor10(e.score)} />)}
+                  {qaData.map((e, i) => <Cell key={i} fill={e.skipped || e.score == null ? '#f59e0b' : scoreColor10(e.score)} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -1434,7 +1527,14 @@ export default function ReportPage() {
 
         {/* ── SWOT Grid ───────────────────────────────────────────────────── */}
         <SectionErrorBoundary>
-        {swot && Object.keys(swot).length > 0 && (
+        {failedSections.includes('swot') && !stageRetrySuccess['stage4_playbook'] ? (
+          <SectionRetryCard
+            sectionLabel="SWOT Analysis & 30-Day Plan"
+            onRetry={() => handleRetryStage('stage4_playbook')}
+            isRetrying={retryingStage === 'stage4_playbook'}
+            retrySuccess={!!stageRetrySuccess['stage4_playbook']}
+          />
+        ) : swot && Object.keys(swot).length > 0 && (
           <SectionCard icon={<Compass size={16}/>} title="SWOT Analysis" color="#7c3aed">
             <div className="grid grid-cols-2 gap-3">
               {[
@@ -1617,13 +1717,21 @@ export default function ReportPage() {
               {(per_question_analysis?.length ? per_question_analysis : question_scores).map((q, i) => (
                 <details key={i} className="glass group">
                   <summary className="flex items-center gap-3 p-4 cursor-pointer select-none list-none">
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-lg flex-shrink-0"
-                      style={{ background: `${scoreColor10(q.score)}20`, color: scoreColor10(q.score) }}>
-                      Q{i + 1} · {q.score}/10
-                    </span>
+                    {(q.skipped || q.score == null) ? (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-lg flex-shrink-0 badge badge-yellow">
+                        Q{i + 1} · Skipped
+                      </span>
+                    ) : (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-lg flex-shrink-0"
+                        style={{ background: `${scoreColor10(q.score)}20`, color: scoreColor10(q.score) }}>
+                        Q{i + 1} · {q.score}/10
+                      </span>
+                    )}
                     <p className="text-sm flex-1 line-clamp-1">{q.question_text || q.question || ''}</p>
                     <Chip label={q.category || q.topic || 'General'} size="xs" color="#22d3ee" />
-                    {q.verdict && <Chip label={q.verdict} size="xs" color={scoreColor10(q.score)} />}
+                    {q.verdict && q.verdict !== 'skipped' && (
+                      <Chip label={q.verdict} size="xs" color={scoreColor10(q.score)} />
+                    )}
                     <ChevronRight size={14} className="text-muted group-open:rotate-90 transition-transform" />
                   </summary>
                   <div className="px-4 pb-4 space-y-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
@@ -1633,7 +1741,13 @@ export default function ReportPage() {
                         <Chip label={q.category || q.topic || 'General'} color="#22d3ee" size="xs" />
                       </div>
                     </div>
-                    {q.answer_summary && (
+                    {(q.skipped || q.answer_text === '[SKIPPED]') && (
+                      <div>
+                        <p className="text-xs text-muted uppercase tracking-wider mb-1">Status</p>
+                        <p className="text-sm text-yellow-400">Candidate skipped this question.</p>
+                      </div>
+                    )}
+                    {q.answer_summary && !q.skipped && (
                       <div>
                         <p className="text-xs text-muted uppercase tracking-wider mb-1">Summary</p>
                         <p className="text-sm leading-relaxed text-muted">{q.answer_summary}</p>

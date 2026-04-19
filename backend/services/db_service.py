@@ -346,6 +346,9 @@ _REPORT_MIGRATION_001_COLUMNS = (
 # Columns added by migration 007
 _REPORT_MIGRATION_007_COLUMNS = ("checklist", "study_schedule", "peer_comparison")
 
+# Columns added by migration 011
+_REPORT_MIGRATION_011_COLUMNS = ("report_quality", "failed_sections", "stage_errors")
+
 
 def _report_flat_cols(report_data: dict, *column_sets) -> dict:
     """Return a dict of only the specified columns that exist in report_data."""
@@ -398,27 +401,37 @@ def _insert_report(session_id: str, report_id: str, created_at: str, report_data
         **_report_flat_cols(report_data, _REPORT_BASE_COLUMNS),
     }
 
-    # Tier 1: base + migration 001 + migration 007 (all migrations applied)
+    # Tier 1: base + migration 001 + migration 007 + migration 011 (all migrations applied)
+    try:
+        _db().table("reports").insert({
+            **base,
+            **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS, _REPORT_MIGRATION_007_COLUMNS, _REPORT_MIGRATION_011_COLUMNS),
+        }).execute()
+        return
+    except Exception as e1:
+        print(f"[save_report] Tier-1 insert failed: {e1}")
+
+    # Tier 2: base + migration 001 + migration 007 (migration 011 not applied)
     try:
         _db().table("reports").insert({
             **base,
             **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS, _REPORT_MIGRATION_007_COLUMNS),
         }).execute()
         return
-    except Exception as e1:
-        print(f"[save_report] Tier-1 insert failed: {e1}")
+    except Exception as e2:
+        print(f"[save_report] Tier-2 insert failed: {e2}")
 
-    # Tier 2: base + migration 001 only (migration 007 not applied)
+    # Tier 3: base + migration 001 only
     try:
         _db().table("reports").insert({
             **base,
             **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS),
         }).execute()
         return
-    except Exception as e2:
-        print(f"[save_report] Tier-2 insert failed: {e2}")
+    except Exception as e3:
+        print(f"[save_report] Tier-3 insert failed: {e3}")
 
-    # Tier 3: pure base schema — guaranteed columns only.
+    # Tier 4: pure base schema — guaranteed columns only.
     # Everything is already in report_data blob; get_report() will merge it back.
     _db().table("reports").insert(base).execute()
 
@@ -433,7 +446,7 @@ def _update_report(session_id: str, report_id: str, report_data: dict) -> None:
     try:
         _db().table("reports").update({
             **base_update,
-            **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS, _REPORT_MIGRATION_007_COLUMNS),
+            **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS, _REPORT_MIGRATION_007_COLUMNS, _REPORT_MIGRATION_011_COLUMNS),
         }).eq("id", report_id).execute()
         return
     except Exception as e1:
@@ -442,11 +455,20 @@ def _update_report(session_id: str, report_id: str, report_data: dict) -> None:
     try:
         _db().table("reports").update({
             **base_update,
-            **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS),
+            **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS, _REPORT_MIGRATION_007_COLUMNS),
         }).eq("id", report_id).execute()
         return
     except Exception as e2:
         print(f"[save_report] Tier-2 update failed: {e2}")
+
+    try:
+        _db().table("reports").update({
+            **base_update,
+            **_report_flat_cols(report_data, _REPORT_MIGRATION_001_COLUMNS),
+        }).eq("id", report_id).execute()
+        return
+    except Exception as e3:
+        print(f"[save_report] Tier-3 update failed: {e3}")
 
     _db().table("reports").update(base_update).eq("id", report_id).execute()
 
@@ -464,6 +486,17 @@ def mark_report_persist_failed(session_id: str, error_msg: str) -> None:
         {
             "report_status": "persist_failed",
             "last_persist_error": error_msg[:500],
+        }
+    ).eq("session_id", session_id).execute()
+
+
+def mark_report_degraded(session_id: str, stage_errors: dict) -> None:
+    """Mark a report as degraded (Stage 1/2 core failed) so it can be retried."""
+    _db().table("reports").update(
+        {
+            "report_status": "degraded",
+            "report_quality": "degraded",
+            "stage_errors": stage_errors,
         }
     ).eq("session_id", session_id).execute()
 

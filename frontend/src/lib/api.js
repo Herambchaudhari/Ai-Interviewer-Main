@@ -243,6 +243,14 @@ export async function retrySaveReport(sessionId, reportPayload) {
   return data  // { success, data: { saved: true }, error }
 }
 
+/** POST /api/v1/report/:sessionId/retry-stages — re-run specific failed LLM stages and merge results.
+ *  stages: string[] — e.g. ["stage3_communication", "stage4_playbook"]
+ *  Returns { success, data: { merged_fields, report_quality, failed_sections, report } } */
+export async function retryStages(sessionId, stages) {
+  const { data } = await api.post(`/report/${sessionId}/retry-stages`, { stages })
+  return data  // { success, data: { merged_fields, report_quality, failed_sections, report } }
+}
+
 /** GET /api/v1/report/:sessionId/cached — fetch cached report only, no generation triggered.
  *  Returns the report object if it exists, or null if not yet generated (404). */
 export async function getCachedReportOnly(sessionId) {
