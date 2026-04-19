@@ -1663,4 +1663,67 @@ def disable_share_token(session_id: str) -> bool:
     except Exception as e:
         print(f"[disable_share_token] error: {e}")
         return False
-        return False
+
+
+# ── Backfill helpers ──────────────────────────────────────────────────────────
+
+def get_sessions_pending_report(user_id: Optional[str] = None, limit: int = 50) -> list:
+    """
+    Return completed sessions that have no corresponding report row.
+    Falls back to a direct query if the view isn't deployed yet.
+    """
+    try:
+        q = _db().table("sessions_pending_report").select(
+            "session_id, user_id, round_type, difficulty, num_questions, created_at, context_bundle"
+        )
+        if user_id:
+            q = q.eq("user_id", user_id)
+        res = q.limit(limit).execute()
+        return res.data or []
+    except Exception:
+        # View not deployed — fall back to explicit LEFT JOIN via two queries
+        try:
+            sessions_q = (
+                _db().table("sessions")
+                .select("id, user_id, round_type, difficulty, num_questions, created_at, context_bundle")
+                .eq("status", "completed")
+                .order("created_at", desc=False)
+                .limit(limit)
+            )
+            if user_id:
+                sessions_q = sessions_q.eq("user_id", user_id)
+            sessions = sessions_q.execute().data or []
+            if not sessions:
+                return []
+
+            session_ids = [s["id"] for s in sessions]
+            existing = (
+                _db().table("reports")
+                .select("session_id")
+                .in_("session_id", session_ids)
+                .execute()
+            ).data or []
+            existing_ids = {r["session_id"] for r in existing}
+
+            return [
+                {**s, "session_id": s["id"]}
+                for s in sessions
+                if s["id"] not in existing_ids
+            ]
+        except Exception as e2:
+            print(f"[get_sessions_pending_report] fallback error: {e2}")
+            return []
+
+
+def get_pending_report_count(user_id: Optional[str] = None) -> int:
+    """Return the number of completed sessions that still lack a cached report."""
+    try:
+        q = _db().table("user_pending_report_counts").select("pending_count")
+        if user_id:
+            q = q.eq("user_id", user_id)
+        res = q.execute()
+        if res.data:
+            return sum(int(r.get("pending_count", 0)) for r in res.data)
+        return 0
+    except Exception:
+        return len(get_sessions_pending_report(user_id=user_id, limit=200))

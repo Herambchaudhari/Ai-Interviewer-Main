@@ -3,6 +3,8 @@ AI Interviewer — FastAPI Backend
 Main application entry point.
 """
 import os
+import asyncio
+import logging
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +13,9 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
 from routers import resume, interview, transcribe, report, reports, session, context_hub, portfolio, news, progress, share
+from routers import admin
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="AI Interviewer API",
@@ -44,6 +49,31 @@ app.include_router(portfolio.router, prefix=f"{API_PREFIX}/portfolio", tags=["Po
 app.include_router(news.router,      prefix=f"{API_PREFIX}/news",      tags=["News"])
 app.include_router(progress.router,  prefix=f"{API_PREFIX}/progress",  tags=["Progress"])
 app.include_router(share.router,     prefix=f"{API_PREFIX}/share",     tags=["Share"])
+app.include_router(admin.router,     prefix=f"{API_PREFIX}/admin",     tags=["Admin"])
+
+
+# ── Startup: quiet background backfill for old sessions ───────────────────────
+@app.on_event("startup")
+async def _startup_backfill():
+    """
+    On every cold start, kick off a small backfill batch (5 sessions).
+    This drains the queue of old sessions over successive deploys/restarts
+    without any manual intervention.  The lock inside run_backfill_batch
+    prevents overlapping runs if the server restarts quickly.
+    """
+    from services.backfill_service import run_backfill_batch
+
+    async def _run():
+        try:
+            result = await run_backfill_batch(limit=5, delay_seconds=3.0)
+            logger.info("[startup] Backfill result: %s", result)
+        except Exception as e:
+            logger.warning("[startup] Backfill startup task failed: %s", e)
+
+    # Fire-and-forget — don't block server startup
+    asyncio.create_task(_run())
+
+
 # ── Standard Response Helpers ─────────────────────────────────────────────────
 def success_response(data=None, message: str = "Success") -> dict:
     return {"success": True, "data": data, "error": None, "message": message}

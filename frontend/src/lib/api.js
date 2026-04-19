@@ -465,4 +465,33 @@ export async function getSharedReport(token) {
   return res.json()  // { success, data: reportRow, error }
 }
 
+// ── Report Backfill ───────────────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/admin/backfill/user
+ * Triggers background report generation for the calling user's uncached sessions.
+ * Safe to call on every hub load — the backend lock prevents duplicate runs.
+ */
+export async function triggerUserBackfill() {
+  try {
+    const { data } = await api.post('/admin/backfill/user')
+    return data  // { success, data: { status, pending_count, message } }
+  } catch (e) {
+    // Non-critical — silently swallow so it never breaks the hub
+    return { success: false, data: null, error: e?.message }
+  }
+}
+
+/**
+ * GET /api/v1/admin/backfill/status
+ * Returns { pending_count, is_running } for the global queue.
+ * Requires X-Admin-Secret header — only for admin tooling.
+ */
+export async function getBackfillStatus(adminSecret) {
+  const { data } = await api.get('/admin/backfill/status', {
+    headers: { 'X-Admin-Secret': adminSecret },
+  })
+  return data
+}
+
 export default api

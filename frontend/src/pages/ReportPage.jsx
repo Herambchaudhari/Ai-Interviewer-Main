@@ -433,7 +433,7 @@ function ShareModal({ report, sessionId, onClose }) {
 
 // ── Loading State (SSE Progress) ──────────────────────────────────────────────
 
-function ReportLoading({ stage, progress, label }) {
+function ReportLoading({ stage, progress, label, isFirstGeneration }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="glass p-10 max-w-md w-full text-center space-y-6">
@@ -444,6 +444,13 @@ function ReportLoading({ stage, progress, label }) {
         <div>
           <h2 className="text-xl font-bold gradient-text mb-2">Generating Your Report</h2>
           <p className="text-muted text-sm">{label || 'Analyzing your session…'}</p>
+          {isFirstGeneration && (
+            <p className="mt-3 text-xs px-3 py-2 rounded-lg"
+              style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}>
+              ⏳ First-time generation for this report (~45 seconds).
+              Future visits will be instant.
+            </p>
+          )}
         </div>
         <div className="space-y-2">
           <div className="flex justify-between text-xs text-muted">
@@ -511,19 +518,31 @@ export default function ReportPage() {
   const { sessionId } = useParams()
   const navigate      = useNavigate()
 
-  const [report,     setReport]     = useState(null)
-  const [loading,    setLoading]    = useState(true)
-  const [error,      setError]      = useState(null)
-  const [stage,      setStage]      = useState('core_analysis')
-  const [progress,   setProgress]   = useState(10)
-  const [stageLabel, setStageLabel] = useState('Scoring your answers…')
-  const [shareOpen,  setShareOpen]  = useState(false)
+  const [report,            setReport]            = useState(null)
+  const [loading,           setLoading]           = useState(true)
+  const [error,             setError]             = useState(null)
+  const [stage,             setStage]             = useState('core_analysis')
+  const [progress,          setProgress]          = useState(10)
+  const [stageLabel,        setStageLabel]        = useState('Scoring your answers…')
+  const [shareOpen,         setShareOpen]         = useState(false)
+  // True when the backend is generating (SSE stream), false when it returned cached JSON instantly.
+  const [isFirstGeneration, setIsFirstGeneration] = useState(false)
 
   useEffect(() => {
     if (!sessionId) return
+
+    // We detect "first generation" by checking whether the backend sends SSE
+    // events (streaming = generating now) vs. plain JSON (cached = instant).
+    // getReportWithSSE calls onProgress only for SSE events, never for cached hits.
+    let receivedProgressEvent = false
+
     getReportWithSSE(
       sessionId,
       (evt) => {
+        if (!receivedProgressEvent) {
+          receivedProgressEvent = true
+          setIsFirstGeneration(true)
+        }
         setStage(evt.stage)
         setProgress(evt.progress || 10)
         setStageLabel(evt.label || 'Processing…')
@@ -539,7 +558,7 @@ export default function ReportPage() {
     )
   }, [sessionId])
 
-  if (loading) return <ReportLoading stage={stage} progress={progress} label={stageLabel} />
+  if (loading) return <ReportLoading stage={stage} progress={progress} label={stageLabel} isFirstGeneration={isFirstGeneration} />
   if (error) return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="glass p-8 max-w-md text-center">
