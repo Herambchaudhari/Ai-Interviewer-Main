@@ -66,16 +66,13 @@ async def _empty_async_dict() -> dict:
 
 
 def _is_complete_report(report: dict) -> bool:
+    # Only require Stage 1 keys — always generated and always saved.
+    # Stages 2-4 keys are bonuses; a report is "complete enough to serve" once
+    # core scoring data exists. This prevents regeneration when Stage 3/4 LLM
+    # calls fail or when older sessions were saved with a partial schema.
     required_keys = {
-        "question_scores",
         "per_question_analysis",
-        "category_breakdown",
-        "cv_audit",
-        "study_roadmap",
-        "communication_breakdown",
-        "what_went_wrong",
-        "thirty_day_plan",
-        "follow_up_questions",
+        "overall_score",
     }
     return isinstance(report, dict) and all(key in report for key in required_keys)
 
@@ -885,11 +882,18 @@ async def get_or_generate_report(
     Otherwise → stream SSE events during 4-stage generation,
     ending with data: {"stage": "complete", "report": {...}}.
     """
-    # Check cache first
+    # ── Cache check ───────────────────────────────────────────────────────────
+    # Serve ANY existing report row — don't regenerate if a row exists, even if
+    # it only has Stage 1 data (prevents looping regeneration on partial saves).
     try:
         cached = get_report(session_id)
         if cached and _is_complete_report(cached):
             return _ok(data=cached)
+        if cached:
+            # A row exists but is still too sparse (e.g. a schema migration column
+            # was just added). Log and fall through to regeneration only when
+            # the row is truly incomplete (missing overall_score / per_question_analysis).
+            print(f"[report] Cached row found but incomplete for {session_id}, regenerating")
     except RuntimeError:
         if _DEBUG:
             return _ok(data=_mock_report(session_id))
@@ -897,7 +901,7 @@ async def get_or_generate_report(
     except Exception:
         pass
 
-    # Verify session exists before starting SSE
+    # ── Session ownership check ───────────────────────────────────────────────
     try:
         session = get_session(session_id)
         if not session:
@@ -911,7 +915,7 @@ async def get_or_generate_report(
     except Exception as e:
         return _err(str(e), status=500)
 
-    # Stream SSE
+    # ── Stream SSE generation ─────────────────────────────────────────────────
     return StreamingResponse(
         _generate_report_sse(session_id, user["user_id"]),
         media_type="text/event-stream",

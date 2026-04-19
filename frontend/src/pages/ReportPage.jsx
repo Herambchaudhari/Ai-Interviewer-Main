@@ -524,6 +524,20 @@ export default function ReportPage() {
 
   useEffect(() => {
     if (!sessionId) return
+
+    // Serve from sessionStorage instantly if available — avoids spinner on revisit
+    const cacheKey = `report_${sessionId}`
+    try {
+      const cached = sessionStorage.getItem(cacheKey)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        setReport(parsed)
+        if (parsed?.checklist?.length > 0) setChecklistItems(parsed.checklist)
+        setLoading(false)
+        return
+      }
+    } catch (_) {}
+
     getReportWithSSE(
       sessionId,
       (evt) => {
@@ -536,6 +550,8 @@ export default function ReportPage() {
         if (reportData?.checklist?.length > 0) {
           setChecklistItems(reportData.checklist)
         }
+        // Cache in sessionStorage so revisits within this browser session are instant
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(reportData)) } catch (_) {}
         setLoading(false)
       },
       (errMsg) => {
