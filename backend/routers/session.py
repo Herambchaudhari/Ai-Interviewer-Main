@@ -13,6 +13,7 @@ from services.interviewer import generate_first_question
 from services.db_service import (
     save_session, get_profile as _get_profile,
     save_checkpoint, get_session_with_auth, get_active_sessions,
+    upload_audio_clip, get_audio_signed_url,
 )
 from services.evaluator import evaluate_mcq_response
 
@@ -185,6 +186,7 @@ class SessionStartRequest(BaseModel):
     target_company: Optional[str] = None
     job_role: Optional[str] = None
     is_full_loop: Optional[bool] = False
+    target_interview_date: Optional[str] = None       # ISO date e.g. "2026-05-10"; feeds study schedule horizon
 
 
 _DIFFICULTY_MAP = {
@@ -301,6 +303,7 @@ async def start_session(
         "conversation_history":  [],
         "detected_weaknesses":   {},
         "avoided_topics":        [],
+        "target_interview_date": body.target_interview_date or None,
     }
 
     # Save session
@@ -425,7 +428,24 @@ async def transcribe_answer(
     # ── Phase 4: Derive soft-skill delivery metadata ───────────────────────
     meta = _extract_audio_meta(transcript, len(contents))
 
-    return _ok(data={"transcript": transcript, "question_id": question_id, "meta": meta})
+    # ── Upload audio clip to Supabase Storage (best-effort, never blocks) ──
+    audio_path = None
+    audio_url  = None
+    try:
+        ct = audio.content_type or "audio/webm"
+        audio_path = upload_audio_clip(session_id, question_id, contents, ct)
+        if audio_path:
+            audio_url = get_audio_signed_url(audio_path)
+    except Exception as _au_err:
+        print(f"[transcribe] audio upload skipped: {_au_err}")
+
+    return _ok(data={
+        "transcript":  transcript,
+        "question_id": question_id,
+        "meta":        meta,
+        "audio_url":   audio_url,   # signed URL (None if storage not configured)
+        "audio_path":  audio_path,  # storage path for later URL refresh
+    })
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -446,6 +466,8 @@ class AnswerRequest(BaseModel):
     current_question: Optional[dict] = None
     is_last_question: Optional[bool] = False
     scoring_context:  Optional[dict] = None   # Phase 4: audio/delivery metadata
+    audio_url:        Optional[str] = None    # signed URL from /transcribe
+    audio_path:       Optional[str] = None    # storage path for URL refresh at report time
 
 
 @router.post("/answer")
@@ -552,6 +574,9 @@ async def submit_answer(
             "scoring_meta":       body.scoring_context or {},
             "dimension_scores":   evaluation.get("dimension_scores", {}),
             "red_flag_detected":  evaluation.get("red_flag_detected", ""),
+            # Audio playback — stored path allows signed URL refresh at report time
+            "audio_url":          body.audio_url or None,
+            "audio_path":         body.audio_path or None,
         })
         existing_scores.append(evaluation.get("score"))
         answered_count = len(existing_transcript)

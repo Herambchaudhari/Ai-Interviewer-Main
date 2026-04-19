@@ -97,7 +97,7 @@ export async function transcribeSession(audioBlob, sessionId, questionId) {
   const { data } = await api.post('/session/transcribe', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
-  return data  // { success, data: { transcript, question_id }, error }
+  return data  // { success, data: { transcript, question_id, meta, audio_url, audio_path }, error }
 }
 
 /**
@@ -105,7 +105,7 @@ export async function transcribeSession(audioBlob, sessionId, questionId) {
  * Evaluate the transcript and return next question or session_complete.
  */
 export async function submitSessionAnswer(payload) {
-  // payload: { session_id, question_id, transcript, time_taken_secs? }
+  // payload: { session_id, question_id, transcript, time_taken_secs?, audio_url?, audio_path?, ... }
   const { data } = await api.post('/session/answer', payload)
   return data  // { success, data: { evaluation, next_question|null, session_complete }, error }
 }
@@ -151,15 +151,28 @@ export async function getReport(sessionId) {
  * @param {Function} onError     - (errorMessage) => void
  */
 export async function getReportWithSSE(sessionId, onProgress, onComplete, onError) {
-  const token = localStorage.getItem('access_token')
+  // Fetch the live Supabase JWT the same way the Axios interceptor does —
+  // localStorage.getItem('access_token') is never written by the Supabase SDK.
+  let token
+  try {
+    const { data } = await supabase.auth.getSession()
+    token = data?.session?.access_token
+  } catch (e) {
+    onError('Failed to retrieve auth session. Please log in again.')
+    return
+  }
+  if (!token) {
+    onError('Not authenticated. Please log in again.')
+    return
+  }
+
   const url = `${BASE_URL}/api/v1/report/${sessionId}`
   let response
   try {
-    const headers = { Accept: 'text/event-stream, application/json' }
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
+    const headers = {
+      Accept: 'text/event-stream, application/json',
+      Authorization: `Bearer ${token}`,
     }
-
     response = await fetch(url, { headers })
   } catch (e) {
     onError(e.message || 'Network error')
@@ -167,7 +180,11 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
   }
 
   if (!response.ok) {
-    onError(`Server error: ${response.status}`)
+    if (response.status === 401 || response.status === 403) {
+      onError('Session expired or access denied. Please log in again.')
+    } else {
+      onError(`Server error: ${response.status}`)
+    }
     return
   }
 
@@ -417,8 +434,10 @@ export async function getMarketNews(profileId, forceRefresh = false) {
 // ── Checklists ────────────────────────────────────────────────────────────────
 
 /** GET /api/v1/context-hub/checklists */
-export async function getUserChecklists(limit = 5) {
-  const { data } = await api.get(`/context-hub/checklists?limit=${limit}`)
+export async function getUserChecklists(limit = 5, sessionId = null) {
+  const params = new URLSearchParams({ limit })
+  if (sessionId) params.set('session_id', sessionId)
+  const { data } = await api.get(`/context-hub/checklists?${params}`)
   return data
 }
 

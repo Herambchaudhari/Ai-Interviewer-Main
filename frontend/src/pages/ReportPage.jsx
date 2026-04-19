@@ -21,6 +21,7 @@
  * 16. Next Interview Blueprint CTA
  * 17. Study Recommendations (legacy)
  */
+import './print.css'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
@@ -28,7 +29,7 @@ import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
-import { getReportWithSSE, generateShareLink } from '../lib/api'
+import { getReportWithSSE, generateShareLink, getUserChecklists, toggleChecklistItem } from '../lib/api'
 import {
   Trophy, TrendingUp, TrendingDown, BookOpen, ChevronRight,
   Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
@@ -517,7 +518,9 @@ export default function ReportPage() {
   const [stage,      setStage]      = useState('core_analysis')
   const [progress,   setProgress]   = useState(10)
   const [stageLabel, setStageLabel] = useState('Scoring your answers…')
-  const [shareOpen,  setShareOpen]  = useState(false)
+  const [shareOpen,       setShareOpen]       = useState(false)
+  const [checklistItems,  setChecklistItems]  = useState(null)   // null = not yet loaded
+  const [checklistId,     setChecklistId]     = useState(null)
 
   useEffect(() => {
     if (!sessionId) return
@@ -530,6 +533,9 @@ export default function ReportPage() {
       },
       (reportData) => {
         setReport(reportData)
+        if (reportData?.checklist?.length > 0) {
+          setChecklistItems(reportData.checklist)
+        }
         setLoading(false)
       },
       (errMsg) => {
@@ -537,6 +543,22 @@ export default function ReportPage() {
         setLoading(false)
       },
     )
+  }, [sessionId])
+
+  // Fetch checklist_id for this session so we can call toggle API
+  useEffect(() => {
+    if (!sessionId) return
+    getUserChecklists(10, sessionId).then(res => {
+      const match = res?.data?.checklists?.find(c => c.session_id === sessionId)
+      if (match) {
+        setChecklistId(match.id)
+        // Fallback: if SSE/cache didn't carry items, use the DB copy.
+        // Functional updater reads CURRENT state to avoid stale-closure overwrite.
+        if (match.items?.length > 0) {
+          setChecklistItems(prev => prev ?? match.items)
+        }
+      }
+    }).catch(() => {})
   }, [sessionId])
 
   if (loading) return <ReportLoading stage={stage} progress={progress} label={stageLabel} />
@@ -1189,7 +1211,15 @@ export default function ReportPage() {
                 )}
               </>
             ) : (
-              <p className="text-sm text-muted">{peer_comparison.insight || 'Not enough peer data yet.'}</p>
+              <div className="space-y-3">
+                <div className="flex items-center gap-4">
+                  <div className="glass p-4 rounded-xl text-center min-w-[90px]">
+                    <p className="text-2xl font-bold" style={{ color: scoreColor(overall) }}>{peer_comparison.user_grade}</p>
+                    <p className="text-xs text-muted mt-0.5">Your Grade</p>
+                  </div>
+                  <p className="text-sm text-muted flex-1">{peer_comparison.insight || 'Not enough peer data yet to compute percentile — check back after more users complete this round.'}</p>
+                </div>
+              </div>
             )}
           </SectionCard>
         )}
@@ -1488,9 +1518,15 @@ export default function ReportPage() {
         )}
 
         {/* ── Adaptive Study Schedule ─────────────────────────────────────── */}
-        {study_schedule?.topics?.length > 0 && (
+        {study_schedule != null && (
           <SectionCard icon={<BookOpen size={16}/>} title="Adaptive Study Schedule" color="#4ade80">
-            {/* Summary line */}
+            {study_schedule.topics?.length === 0 && (
+              <div className="flex items-center gap-3 py-2">
+                <CheckCircle size={18} className="text-green-400 shrink-0" />
+                <p className="text-sm text-muted">No weak areas identified — solid performance across all topics. Nothing to schedule!</p>
+              </div>
+            )}
+            {study_schedule.topics?.length > 0 && (<>
             <div className="flex flex-wrap gap-4 mb-5 text-sm">
               <span className="text-muted">
                 <span className="font-semibold text-white">{study_schedule.topics.length}</span> topics tracked
@@ -1570,48 +1606,65 @@ export default function ReportPage() {
                 </div>
               )
             })()}
+            </>)}
           </SectionCard>
         )}
 
         {/* ── Preparation Checklist ──────────────────────────────────────── */}
-        {reportChecklist?.length > 0 && (
-          <SectionCard icon={<CheckCircle size={16}/>} title="Preparation Checklist" color="#4ade80">
-            <p className="text-xs text-muted mb-4">
-              {reportChecklist.filter(i => i.checked).length} / {reportChecklist.length} completed
-            </p>
-            <div className="space-y-2">
-              {reportChecklist.map((item) => {
-                const catColor = {
-                  'Weak Area Fix':    '#f87171',
-                  'Practice':         '#06b6d4',
-                  'Concept Review':   '#7c3aed',
-                  'Resource':         '#f59e0b',
-                  'Mock Interview':   '#4ade80',
-                  'Company Research': '#a78bfa',
-                }[item.category] || '#94a3b8'
-                const priorityColor = item.priority === 'High' ? '#f87171' : item.priority === 'Medium' ? '#facc15' : '#4ade80'
-                return (
-                  <div key={item.id}
-                    className="flex items-start gap-3 p-3 rounded-xl"
-                    style={{ background: 'rgba(255,255,255,0.03)', opacity: item.checked ? 0.5 : 1 }}>
-                    <div className="w-4 h-4 rounded mt-0.5 flex-shrink-0"
-                      style={{ background: item.checked ? '#4ade80' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
-                      {item.checked && <Check size={12} style={{ color: '#0f172a', margin: 1 }} />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-white" style={{ textDecoration: item.checked ? 'line-through' : 'none' }}>{item.title}</p>
-                      {item.details && <p className="text-xs text-muted mt-0.5 truncate">{item.details}</p>}
-                    </div>
-                    <div className="flex-shrink-0 flex flex-col items-end gap-1">
-                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: `${catColor}20`, color: catColor }}>{item.category}</span>
-                      <span className="text-xs" style={{ color: priorityColor }}>{item.priority}</span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </SectionCard>
-        )}
+        {(checklistItems ?? reportChecklist)?.length > 0 && (() => {
+          const items = checklistItems ?? reportChecklist
+          const CAT_COLOR = {
+            'Weak Area Fix':    '#f87171',
+            'Practice':         '#06b6d4',
+            'Concept Review':   '#7c3aed',
+            'Resource':         '#f59e0b',
+            'Mock Interview':   '#4ade80',
+            'Company Research': '#a78bfa',
+          }
+          const handleToggle = async (item) => {
+            const next = !item.checked
+            // Optimistic update
+            setChecklistItems(prev =>
+              (prev ?? items).map(i => i.id === item.id ? { ...i, checked: next } : i)
+            )
+            if (checklistId) {
+              try { await toggleChecklistItem(checklistId, item.id, next) } catch (_) {}
+            }
+          }
+          return (
+            <SectionCard icon={<CheckCircle size={16}/>} title="Preparation Checklist" color="#4ade80">
+              <p className="text-xs text-muted mb-4">
+                {items.filter(i => i.checked).length} / {items.length} completed
+                {!checklistId && <span className="ml-2 opacity-50">(read-only — log in to save progress)</span>}
+              </p>
+              <div className="space-y-2">
+                {items.map((item) => {
+                  const catColor = CAT_COLOR[item.category] || '#94a3b8'
+                  const priorityColor = item.priority === 'High' ? '#f87171' : item.priority === 'Medium' ? '#facc15' : '#4ade80'
+                  return (
+                    <button key={item.id}
+                      onClick={() => handleToggle(item)}
+                      className="w-full flex items-start gap-3 p-3 rounded-xl text-left transition-opacity hover:opacity-80"
+                      style={{ background: 'rgba(255,255,255,0.03)', opacity: item.checked ? 0.5 : 1 }}>
+                      <div className="w-4 h-4 rounded mt-0.5 flex-shrink-0 flex items-center justify-center"
+                        style={{ background: item.checked ? '#4ade80' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+                        {item.checked && <Check size={12} style={{ color: '#0f172a' }} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-white" style={{ textDecoration: item.checked ? 'line-through' : 'none' }}>{item.title}</p>
+                        {item.details && <p className="text-xs text-muted mt-0.5 truncate">{item.details}</p>}
+                      </div>
+                      <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                        <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: `${catColor}20`, color: catColor }}>{item.category}</span>
+                        <span className="text-xs" style={{ color: priorityColor }}>{item.priority}</span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </SectionCard>
+          )
+        })()}
 
         {/* ── Study Recommendations (legacy) ──────────────────────────────── */}
         {study_recommendations?.length > 0 && (

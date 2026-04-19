@@ -26,6 +26,7 @@ from services.db_service import (
     get_session, get_report, save_report, get_profile,
     compute_improvement_vs_last, get_past_reports_for_analysis, update_session,
     save_benchmark, save_checklist, get_benchmarks,
+    get_audio_signed_url,
 )
 from services.benchmarking_service import compute_peer_comparison
 from services.spaced_repetition_service import build_study_schedule
@@ -79,9 +80,19 @@ def _is_complete_report(report: dict) -> bool:
     return isinstance(report, dict) and all(key in report for key in required_keys)
 
 
-def _merge_per_question_analysis(question_scores: list, per_question_analysis: list) -> list:
+def _merge_per_question_analysis(
+    question_scores: list,
+    per_question_analysis: list,
+    audio_map: dict | None = None,
+) -> list:
+    """
+    Merge per-question LLM analysis with raw scores and (optionally) audio URLs.
+
+    audio_map: {question_id: {"audio_url": str, "audio_path": str}} from session transcript.
+    """
     merged = []
     source = per_question_analysis or question_scores
+    audio_map = audio_map or {}
 
     for idx, item in enumerate(source):
         fallback = question_scores[idx] if idx < len(question_scores) else {}
@@ -94,6 +105,22 @@ def _merge_per_question_analysis(question_scores: list, per_question_analysis: l
         payload.setdefault("category", fallback.get("category", "General"))
         payload.setdefault("strengths", fallback.get("strengths", []))
         payload.setdefault("improvements", fallback.get("improvements", []))
+
+        # Merge audio playback data from transcript
+        qid = payload.get("question_id", "")
+        if qid in audio_map:
+            audio_entry = audio_map[qid]
+            audio_path = audio_entry.get("audio_path")
+            # Regenerate signed URL at report time so it's fresh (24 h TTL)
+            fresh_url = get_audio_signed_url(audio_path) if audio_path else None
+            payload["audio_url"]       = fresh_url or audio_entry.get("audio_url")
+            payload["audio_path"]      = audio_path
+            payload["audio_start_sec"] = audio_entry.get("audio_start_sec", 0)
+        else:
+            payload.setdefault("audio_url", None)
+            payload.setdefault("audio_path", None)
+            payload.setdefault("audio_start_sec", None)
+
         merged.append(payload)
 
     return merged
@@ -279,6 +306,16 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
         "interview_integrity": None,
         "is_mock": True,
         "_debug_mock": True,
+        # Phase 5/6: always include these so the UI sections render in debug mode
+        "peer_comparison": None,
+        "study_schedule": None,
+        "checklist": generate_checklist(
+            weak_areas=[{"area": "Screening accuracy", "what_was_missed": "Missed core fundamentals under time pressure", "score": 45}],
+            skills_to_work_on=[{"skill": "MCQ Decision Accuracy", "priority": "High", "resources": ["LeetCode Discuss"]}],
+            thirty_day_plan={"week_1": [{"topic": "Arrays & Strings", "task": "Solve 10 LeetCode Easy", "resource": "LeetCode"}]},
+            round_type=round_type,
+            target_company="",
+        ),
     }
 
 
@@ -550,9 +587,21 @@ async def _generate_report_sse(session_id: str, user_id: str):
     if isinstance(company_fit_prelim, Exception):
         company_fit_prelim = {}
 
+    # Build audio_map from session transcript — question_id → {audio_url, audio_path}
+    audio_map = {
+        entry["question_id"]: {
+            "audio_url":       entry.get("audio_url"),
+            "audio_path":      entry.get("audio_path"),
+            "audio_start_sec": entry.get("audio_start_sec", 0),
+        }
+        for entry in (transcript or [])
+        if entry.get("question_id") and (entry.get("audio_url") or entry.get("audio_path"))
+    }
+
     per_question_analysis = _merge_per_question_analysis(
         question_scores,
         core_result.get("per_question_analysis", question_scores),
+        audio_map=audio_map,
     )
 
     # Now rerun company_fit with actual radar scores from core
@@ -664,6 +713,23 @@ async def _generate_report_sse(session_id: str, user_id: str):
     except Exception as _sr_e:
         print(f"[report/sse] Study schedule failed: {_sr_e}")
 
+    # ── Save benchmark row BEFORE computing peer comparison ──────────────────
+    # Saving first ensures the current user's score is included in their own
+    # percentile pool, not excluded because the insert happens too late.
+    try:
+        save_benchmark(
+            round_type=round_type,
+            difficulty=difficulty,
+            overall_score=overall_pct,
+            radar_scores=radar_scores,
+            grade=core_result.get("grade", ""),
+            hire_recommendation=core_result.get("hire_recommendation", ""),
+            target_company=target_company,
+            job_role=job_role,
+        )
+    except Exception as _bm_pre_err:
+        print(f"[report/sse] Early benchmark save failed: {_bm_pre_err}")
+
     # ── Peer comparison (Industry Benchmarking) ──────────────────────────────
     peer_comparison = None
     try:
@@ -761,7 +827,7 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "delivery_consistency":   delivery_consistency,
         "filler_heatmap":         filler_heatmap,
         "transcript_annotated":   transcript_annotated,
-        "audio_clips_index":      None,  # populated separately if audio stored
+        "audio_clips_index":      audio_map if audio_map else None,
         "proctoring_summary":     proctoring_summary,
         "interview_integrity":    interview_integrity,
 
@@ -804,21 +870,6 @@ async def _generate_report_sse(session_id: str, user_id: str):
         update_session(session_id, {"status": "completed"})
     except Exception as e:
         print(f"[report/sse] Persist failed: {e}")
-
-    # ── Fire-and-forget: save anonymised benchmark row ────────────────────────
-    try:
-        save_benchmark(
-            round_type=round_type,
-            difficulty=difficulty,
-            overall_score=overall_pct,
-            radar_scores=radar_scores,
-            grade=core_result.get("grade", ""),
-            hire_recommendation=core_result.get("hire_recommendation", ""),
-            target_company=target_company,
-            job_role=job_role,
-        )
-    except Exception as _bm_err:
-        print(f"[report/sse] Benchmark save failed: {_bm_err}")
 
     yield _sse({"stage": "complete", "progress": 100, "report": report_payload})
 
