@@ -29,7 +29,7 @@ import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
-import { getReportWithSSE, generateShareLink, getUserChecklists, toggleChecklistItem } from '../lib/api'
+import { getReportWithSSE, getCachedReportOnly, generateShareLink, getUserChecklists, toggleChecklistItem } from '../lib/api'
 import {
   Trophy, TrendingUp, TrendingDown, BookOpen, ChevronRight,
   Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
@@ -525,40 +525,62 @@ export default function ReportPage() {
   useEffect(() => {
     if (!sessionId) return
 
-    // Serve from sessionStorage instantly if available — avoids spinner on revisit
     const cacheKey = `report_${sessionId}`
+
+    function applyReport(reportData) {
+      setReport(reportData)
+      if (reportData?.checklist?.length > 0) setChecklistItems(reportData.checklist)
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(reportData)) } catch (_) {}
+      setLoading(false)
+    }
+
+    // Layer 1: sessionStorage — instant, no network needed
     try {
-      const cached = sessionStorage.getItem(cacheKey)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        setReport(parsed)
-        if (parsed?.checklist?.length > 0) setChecklistItems(parsed.checklist)
-        setLoading(false)
+      const stored = sessionStorage.getItem(cacheKey)
+      if (stored) {
+        applyReport(JSON.parse(stored))
         return
       }
     } catch (_) {}
 
-    getReportWithSSE(
-      sessionId,
-      (evt) => {
-        setStage(evt.stage)
-        setProgress(evt.progress || 10)
-        setStageLabel(evt.label || 'Processing…')
-      },
-      (reportData) => {
-        setReport(reportData)
-        if (reportData?.checklist?.length > 0) {
-          setChecklistItems(reportData.checklist)
+    // Layer 2: cached-only endpoint — fast DB read, never triggers SSE generation
+    getCachedReportOnly(sessionId)
+      .then((reportData) => {
+        if (reportData) {
+          applyReport(reportData)
+        } else {
+          // Layer 3: SSE — report not yet generated, stream the full 4-stage pipeline
+          getReportWithSSE(
+            sessionId,
+            (evt) => {
+              setStage(evt.stage)
+              setProgress(evt.progress || 10)
+              setStageLabel(evt.label || 'Processing…')
+            },
+            applyReport,
+            (errMsg) => {
+              setError(errMsg || 'Failed to load report.')
+              setLoading(false)
+            },
+          )
         }
-        // Cache in sessionStorage so revisits within this browser session are instant
-        try { sessionStorage.setItem(cacheKey, JSON.stringify(reportData)) } catch (_) {}
-        setLoading(false)
-      },
-      (errMsg) => {
-        setError(errMsg || 'Failed to load report.')
-        setLoading(false)
-      },
-    )
+      })
+      .catch(() => {
+        // Network error on cached check — fall through to SSE
+        getReportWithSSE(
+          sessionId,
+          (evt) => {
+            setStage(evt.stage)
+            setProgress(evt.progress || 10)
+            setStageLabel(evt.label || 'Processing…')
+          },
+          applyReport,
+          (errMsg) => {
+            setError(errMsg || 'Failed to load report.')
+            setLoading(false)
+          },
+        )
+      })
   }, [sessionId])
 
   // Fetch checklist_id for this session so we can call toggle API

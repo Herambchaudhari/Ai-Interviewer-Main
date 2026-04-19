@@ -236,6 +236,18 @@ export async function generateReport(sessionId) {
   return data  // { success, data: { report_id, report }, error }
 }
 
+/** GET /api/v1/report/:sessionId/cached — fetch cached report only, no generation triggered.
+ *  Returns the report object if it exists, or null if not yet generated (404). */
+export async function getCachedReportOnly(sessionId) {
+  try {
+    const { data } = await api.get(`/report/${sessionId}/cached`)
+    return data?.data ?? null
+  } catch (err) {
+    if (err.response?.status === 404) return null
+    throw err
+  }
+}
+
 /** GET /api/v1/reports/:sessionId — fetch cached report */
 export async function getReportV2(sessionId) {
   const { data } = await api.get(`/reports/${sessionId}`)
