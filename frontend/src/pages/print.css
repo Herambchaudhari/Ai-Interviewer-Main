@@ -1,6 +1,6 @@
 /**
  * print.css — Report page print styles for PDF export.
- * Import only in Report.jsx.
+ * Imported by ReportPage.jsx.
  */
 
 @media print {

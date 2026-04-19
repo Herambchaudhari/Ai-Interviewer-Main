@@ -351,6 +351,8 @@ def save_report(session_id: str, report_data: dict) -> str:
             "strong_areas", "weak_areas", "per_question_analysis",
             "study_recommendations", "compared_to_level", "skill_ratings",
             "recommendations", "round_type",
+            # Phase-4/5/6 rich fields — must be promoted so get_report() finds them
+            "checklist", "study_schedule", "peer_comparison",
         ):
             if key in report_data:
                 compact_payload[key] = report_data[key]
@@ -373,10 +375,17 @@ def get_report(session_id: str) -> Optional[dict]:
                 report_blob = json.loads(report_blob)
             except Exception:
                 report_blob = {}
-        merged = dict(report_blob) if isinstance(report_blob, dict) else {}
-        merged.update({k: v for k, v in row.items() if k != "report_data"})
-        if report_blob and "report_data" not in merged:
-            merged["report_data"] = report_blob
+        # Merge strategy: start with flat DB columns, then overlay with report_data blob.
+        # This ensures rich JSONB fields (checklist, study_schedule, peer_comparison, …)
+        # always win over NULL flat columns that haven't been backfilled yet.
+        blob = report_blob if isinstance(report_blob, dict) else {}
+        merged = {k: v for k, v in row.items() if k != "report_data"}
+        # Overlay non-None blob values so they override any NULL flat columns
+        for k, v in blob.items():
+            if v is not None or k not in merged:
+                merged[k] = v
+        if blob:
+            merged["report_data"] = blob
         return merged
     return None
 
@@ -1545,20 +1554,22 @@ def save_checklist(user_id: str, session_id: str, items: list, expires_at: str =
         return checklist_id
 
 
-def get_user_checklists(user_id: str, limit: int = 5) -> list:
+def get_user_checklists(user_id: str, limit: int = 5, session_id: str = None) -> list:
     """
     Fetch the most recent preparation checklists for a user.
     Returns list of {id, session_id, items, created_at, expires_at}.
+    Pass session_id to filter to a single session (used by ReportPage toggle).
     """
     try:
-        res = (
+        q = (
             _db().table("preparation_checklists")
             .select("id, session_id, items, created_at, expires_at, updated_at")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
         )
+        if session_id:
+            q = q.eq("session_id", session_id)
+        res = q.limit(limit).execute()
         return res.data or []
     except Exception as e:
         print(f"[get_user_checklists] error: {e}")
@@ -1663,4 +1674,86 @@ def disable_share_token(session_id: str) -> bool:
     except Exception as e:
         print(f"[disable_share_token] error: {e}")
         return False
+
+
+# ── Audio Storage ──────────────────────────────────────────────────────────────
+
+_AUDIO_BUCKET = "interview-audio"
+_bucket_ready = False  # module-level guard so we only attempt creation once
+
+
+def _ensure_audio_bucket() -> bool:
+    """
+    Create the interview-audio bucket if it doesn't exist yet.
+    Returns True if the bucket is (now) available, False on any error.
+    Called lazily before the first upload.
+    """
+    global _bucket_ready
+    if _bucket_ready:
+        return True
+    try:
+        existing = [b.name for b in _db().storage.list_buckets()]
+        if _AUDIO_BUCKET not in existing:
+            _db().storage.create_bucket(
+                _AUDIO_BUCKET,
+                options={"public": False, "file_size_limit": 10 * 1024 * 1024},  # 10 MB
+            )
+        _bucket_ready = True
+        return True
+    except Exception as e:
+        print(f"[audio_storage] bucket ensure failed: {e}")
         return False
+
+
+def upload_audio_clip(
+    session_id: str,
+    question_id: str,
+    audio_bytes: bytes,
+    content_type: str = "audio/webm",
+) -> Optional[str]:
+    """
+    Upload a per-question audio clip to Supabase Storage.
+
+    Storage path: interview-audio/{session_id}/{question_id}.webm
+    Returns the storage path on success, None on failure.
+    The path is stored in the transcript entry; signed URLs are generated
+    on-demand via get_audio_signed_url().
+    """
+    if not audio_bytes:
+        return None
+    try:
+        if not _ensure_audio_bucket():
+            return None
+        ext = ".ogg" if "ogg" in content_type else ".wav" if "wav" in content_type else ".webm"
+        path = f"{session_id}/{question_id}{ext}"
+        _db().storage.from_(_AUDIO_BUCKET).upload(
+            path=path,
+            file=audio_bytes,
+            file_options={"content-type": content_type, "upsert": "true"},
+        )
+        return path
+    except Exception as e:
+        print(f"[upload_audio_clip] error: {e}")
+        return None
+
+
+def get_audio_signed_url(path: str, expires_in: int = 86400) -> Optional[str]:
+    """
+    Generate a time-limited signed URL for an audio clip.
+
+    path:       storage path returned by upload_audio_clip()
+    expires_in: seconds until expiry (default 24 h)
+    Returns the URL string, or None if path is empty / Supabase errors.
+    """
+    if not path:
+        return None
+    try:
+        result = _db().storage.from_(_AUDIO_BUCKET).create_signed_url(path, expires_in)
+        # Supabase Python SDK ≥2.x returns an object with .signed_url
+        url = getattr(result, "signed_url", None) or (result if isinstance(result, str) else None)
+        if not url and isinstance(result, dict):
+            url = result.get("signedURL") or result.get("signed_url")
+        return url
+    except Exception as e:
+        print(f"[get_audio_signed_url] error: {e}")
+        return None
