@@ -543,7 +543,9 @@ export default function ReportPage() {
   const [failedSections,    setFailedSections]    = useState([])       // list of section names that failed
   const [retryingStage,     setRetryingStage]     = useState(null)     // stage key currently retrying
   const [stageRetrySuccess, setStageRetrySuccess] = useState({})       // { stageKey: true } on success
-  const rawReportRef = useRef(null)  // holds report payload for retry without re-render
+  const rawReportRef    = useRef(null)  // holds report payload for retry without re-render
+  const startSSERef     = useRef(null)  // ref to startSSE so the error-screen "Try Again" can call it
+  const sseWatchdogRef  = useRef(null)  // client-side 6-min watchdog for the SSE stream
 
   const handleRetrySave = useCallback(async () => {
     const payload = rawReportRef.current
@@ -628,6 +630,14 @@ export default function ReportPage() {
     }
 
     function startSSE() {
+      // 6-minute client-side watchdog — defence-in-depth on top of the 5-min AbortController
+      // in api.js (C1 fix). Fires only if neither onComplete nor onError was called first.
+      clearTimeout(sseWatchdogRef.current)
+      sseWatchdogRef.current = setTimeout(() => {
+        setError('Report generation is taking too long. Click "Try Again" to retry.')
+        setLoading(false)
+      }, 6 * 60 * 1000)
+
       // Detect first-time generation: SSE sends progress events; cached JSON never does.
       let receivedProgressEvent = false
       getReportWithSSE(
@@ -638,16 +648,23 @@ export default function ReportPage() {
             setIsFirstGeneration(true)
           }
           setStage(evt.stage)
-          setProgress(evt.progress || 10)
+          setProgress(Math.max(0, evt.progress || 10))
           setStageLabel(evt.label || 'Processing…')
         },
-        applyReport,
+        (reportData, persistStatus) => {
+          clearTimeout(sseWatchdogRef.current)
+          applyReport(reportData, persistStatus)
+        },
         (errMsg) => {
+          clearTimeout(sseWatchdogRef.current)
           setError(errMsg || 'Failed to load report.')
           setLoading(false)
         },
       )
     }
+
+    // Store reference so the error-screen "Try Again" button can re-invoke SSE.
+    startSSERef.current = startSSE
 
     // Layer 1: sessionStorage — instant, no network needed
     try {
@@ -686,7 +703,10 @@ export default function ReportPage() {
         // Fallback: if SSE/cache didn't carry items, use the DB copy.
         // Functional updater reads CURRENT state to avoid stale-closure overwrite.
         if (match.items?.length > 0) {
-          setChecklistItems(prev => prev ?? match.items)
+          // C3 fix: use DB items if state is null OR empty [] — prev?.length > 0 is the
+          // correct guard because applyReport may set [] from an SSE payload with no
+          // checklist yet, and `prev ?? match.items` would wrongly keep the empty array.
+          setChecklistItems(prev => (prev?.length > 0 ? prev : match.items))
         }
       }
     }).catch(() => {})
@@ -699,7 +719,24 @@ export default function ReportPage() {
         <XCircle size={40} className="text-red-400 mx-auto mb-4" />
         <h2 className="text-xl font-bold mb-2">Report Error</h2>
         <p className="text-muted mb-6 text-sm">{error}</p>
-        <button onClick={() => navigate('/dashboard')} className="btn-primary">Back to Dashboard</button>
+        <div className="flex gap-3 justify-center flex-wrap">
+          {startSSERef.current && (
+            <button
+              onClick={() => {
+                setError(null)
+                setLoading(true)
+                setProgress(10)
+                setStage('core_analysis')
+                setStageLabel('Scoring your answers…')
+                startSSERef.current()
+              }}
+              className="btn-primary"
+            >
+              Try Again
+            </button>
+          )}
+          <button onClick={() => navigate('/dashboard')} className="btn-secondary">Back to Dashboard</button>
+        </div>
       </div>
     </div>
   )
@@ -752,11 +789,26 @@ export default function ReportPage() {
     subject: s.skill, A: +Number(s.score).toFixed(1), fullMark: 10,
   }))
 
-  const qaData = (per_question_analysis?.length ? per_question_analysis : question_scores).map((q, i) => ({
-    label: `Q${i + 1}`, question_text: q.question_text || q.question || '',
-    score: (q.skipped || q.score == null) ? null : q.score,
-    skipped: q.skipped || false,
-  }))
+  // C2 fix: pick the best source array, then normalise every field so chart code
+  // never receives string-"null", NaN, or undefined values.
+  const _qaSource = per_question_analysis?.length
+    ? per_question_analysis
+    : question_scores?.length
+      ? question_scores
+      : []
+  const qaData = _qaSource.map((q, i) => {
+    const isSkipped  = q.skipped || false
+    const rawScore   = q.score == null ? null : Number(q.score)
+    const safeScore  = (isSkipped || rawScore == null || isNaN(rawScore)) ? null : rawScore
+    return {
+      label:         `Q${i + 1}`,
+      question_text: (q.question_text || q.question || `Question ${i + 1}`).trim(),
+      score:         safeScore,
+      skipped:       isSkipped,
+      verdict:       q.verdict  || '',
+      feedback:      q.feedback || '',
+    }
+  })
 
   const fillerData = (filler_heatmap ?? []).map(f => ({
     question_id: f.question_id, filler_count: f.filler_count || 0,
@@ -767,13 +819,15 @@ export default function ReportPage() {
     q: `Q${i + 1}`, confidence: v,
   }))
 
-  // MCQ category breakdown chart data — always an array from backend now
-  const mcqCategoryData = (Array.isArray(category_breakdown) ? category_breakdown : []).map(d => ({
-    category: d.category || 'Uncategorized',
-    accuracy: d.accuracy ?? 0,
-    correct:  d.correct  ?? 0,
-    total:    d.total    ?? 1,
-  }))
+  // MCQ category breakdown — filter out zero-total entries to prevent NaN accuracy (C2 fix)
+  const mcqCategoryData = (Array.isArray(category_breakdown) ? category_breakdown : [])
+    .filter(d => (d.total ?? 0) > 0)
+    .map(d => ({
+      category: d.category || 'Uncategorized',
+      accuracy: d.accuracy ?? 0,
+      correct:  d.correct  ?? 0,
+      total:    d.total,
+    }))
 
   return (
     <div className="min-h-screen pt-20 pb-16 px-4">
@@ -1184,20 +1238,23 @@ export default function ReportPage() {
 
         {/* ── Per-Question Scores Chart ────────────────────────────────────── */}
         <SectionErrorBoundary>
-        {qaData.length > 0 && (
           <SectionCard icon={<TrendingUp size={16}/>} title="Per-Question Scores" color="#4ade80">
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={qaData} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
-                <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
-                <Tooltip content={<QTooltip />} cursor={{ fill: 'rgba(124,58,237,0.08)' }} />
-                <Bar dataKey="score" radius={[6, 6, 0, 0]}>
-                  {qaData.map((e, i) => <Cell key={i} fill={e.skipped || e.score == null ? '#f59e0b' : scoreColor10(e.score)} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            {qaData.length === 0
+              ? <p className="text-muted text-sm text-center py-4">No question data available for this session.</p>
+              : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={qaData} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
+                    <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <Tooltip content={<QTooltip />} cursor={{ fill: 'rgba(124,58,237,0.08)' }} />
+                    <Bar dataKey="score" radius={[6, 6, 0, 0]}>
+                      {qaData.map((e, i) => <Cell key={i} fill={e.skipped || e.score == null ? '#f59e0b' : scoreColor10(e.score)} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )
+            }
           </SectionCard>
-        )}
         </SectionErrorBoundary>
 
         {/* ── Strong & Weak Areas ─────────────────────────────────────────── */}

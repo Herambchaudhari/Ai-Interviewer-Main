@@ -1054,6 +1054,27 @@ async def _generate_report_sse(session_id: str, user_id: str):
     })
 
 
+async def _safe_generate_report_sse(session_id: str, user_id: str):
+    """
+    Thin safety wrapper around _generate_report_sse.
+    If the inner generator raises an unhandled exception at any point, this
+    wrapper catches it and yields a terminal {"stage": "error"} event so the
+    frontend never hangs on an abruptly closed stream (C1 fix).
+    """
+    def _sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
+
+    try:
+        async for chunk in _generate_report_sse(session_id, user_id):
+            yield chunk
+    except Exception as e:
+        print(f"[report/sse] Unhandled generator crash for session {session_id}: {e}")
+        yield _sse({
+            "stage": "error",
+            "error": "An unexpected error occurred during report generation. Please try again.",
+        })
+
+
 # ── GET /api/v1/report/:session_id  (SSE stream) ─────────────────────────────
 @router.get("/{session_id}")
 async def get_or_generate_report(
@@ -1100,7 +1121,7 @@ async def get_or_generate_report(
 
     # ── Stream SSE generation ─────────────────────────────────────────────────
     return StreamingResponse(
-        _generate_report_sse(session_id, user["user_id"]),
+        _safe_generate_report_sse(session_id, user["user_id"]),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

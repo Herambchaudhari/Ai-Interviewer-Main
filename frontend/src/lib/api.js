@@ -166,6 +166,11 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
     return
   }
 
+  // AbortController gives us a hard 5-minute ceiling on the whole request (C1 fix).
+  const SSE_TIMEOUT_MS = 5 * 60 * 1000
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), SSE_TIMEOUT_MS)
+
   const url = `${BASE_URL}/api/v1/report/${sessionId}`
   let response
   try {
@@ -173,13 +178,19 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
       Accept: 'text/event-stream, application/json',
       Authorization: `Bearer ${token}`,
     }
-    response = await fetch(url, { headers })
+    response = await fetch(url, { headers, signal: controller.signal })
   } catch (e) {
-    onError(e.message || 'Network error')
+    clearTimeout(timeoutId)
+    if (e.name === 'AbortError') {
+      onError('Report generation timed out after 5 minutes. Please try again.')
+    } else {
+      onError(e.message || 'Network error')
+    }
     return
   }
 
   if (!response.ok) {
+    clearTimeout(timeoutId)
     if (response.status === 401 || response.status === 403) {
       onError('Session expired or access denied. Please log in again.')
     } else {
@@ -192,6 +203,7 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
 
   // Cached report — return as plain JSON (persist_status: 'saved' implied)
   if (contentType.includes('application/json')) {
+    clearTimeout(timeoutId)
     const data = await response.json()
     onComplete(data?.data ?? data, 'saved')
     return
@@ -201,6 +213,7 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let receivedComplete = false
 
   try {
     while (true) {
@@ -214,9 +227,12 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
         try {
           const event = JSON.parse(line.slice(6))
           if (event.stage === 'complete') {
+            receivedComplete = true
+            clearTimeout(timeoutId)
             onComplete(event.report, event.persist_status ?? 'saved')
             return
           } else if (event.stage === 'error') {
+            clearTimeout(timeoutId)
             onError(event.error || 'Report generation failed')
             return
           } else {
@@ -225,8 +241,18 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
         } catch (_) { /* ignore malformed SSE lines */ }
       }
     }
+    // Hang guard: stream closed (done=true) without a complete/error event (C1 fix).
+    if (!receivedComplete) {
+      onError('Report generation ended unexpectedly. Please try again.')
+    }
   } catch (e) {
-    onError(e.message || 'Stream read error')
+    if (e.name === 'AbortError') {
+      onError('Report generation timed out after 5 minutes. Please try again.')
+    } else {
+      onError(e.message || 'Stream read error')
+    }
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
 
