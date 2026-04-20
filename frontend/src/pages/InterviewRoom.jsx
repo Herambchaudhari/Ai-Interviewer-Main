@@ -117,6 +117,8 @@ export default function InterviewRoom() {
   // ── Audio/delivery metadata for scoring (Phase 4) ────────────────────────
   const [scoringMeta,    setScoringMeta]    = useState(null)
   const [recordStartMs,  setRecordStartMs]  = useState(0)
+  // ── Audio clip reference for report playback ─────────────────────────────
+  const [audioClipData,  setAudioClipData]  = useState(null) // {audio_url, audio_path}
 
   // ── Time tracking for DSA hints ──────────────────────────────────────────
   const [qStartTime,  setQStartTime] = useState(Date.now())
@@ -235,6 +237,7 @@ export default function InterviewRoom() {
     setMcqTimeLeft(currentQ.time_limit_secs || 90)
     mcqAutoSubmitRef.current = ''
     resetRecording()
+    setAudioClipData(null)
     setQStartTime(Date.now())
     setTimeElapsed(0)
 
@@ -280,6 +283,11 @@ export default function InterviewRoom() {
         const text = res.data?.transcript || res.transcript || ''
         const meta = res.data?.meta || {}
         setTranscript(text)
+        // Store audio clip reference for report playback
+        setAudioClipData({
+          audio_url:  res.data?.audio_url  || null,
+          audio_path: res.data?.audio_path || null,
+        })
         // Store delivery metadata for scoring context (Phase 4)
         setScoringMeta({
           ...meta,
@@ -413,6 +421,9 @@ export default function InterviewRoom() {
       current_question: currentQ,
       is_last_question: isLast,
       scoring_context:  (!isDSA && !isMCQ && scoringMeta) ? scoringMeta : null,
+      // Audio playback — set by handleRecordToggle after transcription
+      audio_url:        audioClipData?.audio_url  || null,
+      audio_path:       audioClipData?.audio_path || null,
     }
 
     // DSA and MCQ rounds use blocking calls; voice rounds stream

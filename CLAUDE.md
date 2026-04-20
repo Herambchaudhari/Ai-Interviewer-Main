@@ -52,7 +52,7 @@ User Auth (Supabase) → Resume/Context Upload → Interview Config
 
 **Entry point:** `main.py` registers all routers.
 
-**Routers** (`routers/`): `session.py` (interview lifecycle: start/answer/skip/end/checkpoint/resume), `report.py`/`reports.py`, `resume.py`, `context_hub.py`, `transcribe.py`, `interview.py`, `portfolio.py`, `news.py`, `progress.py`, `share.py`, `admin.py` (hardcoded-credential admin panel: login, all users/sessions/profiles, per-student detail)
+**Routers** (`routers/`): `session.py` (interview lifecycle: start/answer/skip/end/checkpoint/resume), `report.py`/`reports.py`, `resume.py`, `context_hub.py`, `transcribe.py`, `interview.py`, `portfolio.py`, `news.py`, `progress.py`, `share.py`, `admin.py` (hardcoded-credential admin panel: login, all users/sessions/profiles, per-student detail; also exposes report backfill trigger + status endpoints)
 
 **Key Services** (`services/`):
 - `groq_service.py` — LLM inference with streaming (llama-3.3-70b-versatile), API key failover via `api_manager.py`
@@ -62,6 +62,7 @@ User Auth (Supabase) → Resume/Context Upload → Interview Config
 - `stt.py` / `whisper_service.py` — Speech-to-text via faster-whisper
 - `code_runner.py` — Executes and validates DSA code submissions
 - `session_history_analyzer.py` — Cross-session trend analysis for progress tracking
+- `backfill_service.py` — Background batch service that pre-generates and caches reports for old sessions (completed before the caching fix); drains `_generate_report_sse` without SSE, protected by asyncio.Lock
 - `supabase_service.py` / `db_service.py` — All database interactions
 
 **Prompts** (`prompts/`): `interviewer_prompt.py` (question generation with context), `report_prompt.py` (synthesis), `scoring_examples.py` (few-shot calibration), `stage3_prompt.py`, `stage4_prompt.py`

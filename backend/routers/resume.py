@@ -256,13 +256,17 @@ async def get_user_reports(
             session_ids = [s["id"] for s in sessions]
             reports_res = (
                 db.table("reports")
-                .select("session_id, overall_score")
+                .select("session_id, overall_score, report_quality, report_status")
                 .in_("session_id", session_ids)
                 .execute()
             )
-            score_map = {r["session_id"]: r["overall_score"] for r in (reports_res.data or [])}
+            report_map = {r["session_id"]: r for r in (reports_res.data or [])}
             for s in sessions:
-                s["overall_score"] = score_map.get(s["id"])
+                r = report_map.get(s["id"])
+                s["overall_score"]  = r["overall_score"]  if r else None
+                s["has_report"]     = r is not None
+                s["report_quality"] = r["report_quality"] if r else None
+                s["report_status"]  = r["report_status"]  if r else None
 
     except RuntimeError:
         return _err("Database not configured.", status=503)

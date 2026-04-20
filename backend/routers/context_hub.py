@@ -319,11 +319,16 @@ async def activate_resume_endpoint(
 @router.get("/checklists")
 async def list_checklists(
     limit: int = 5,
+    session_id: str = None,
     user: dict = Depends(get_current_user),
 ):
-    """Return the most recent preparation checklists for the authenticated user."""
+    """Return the most recent preparation checklists for the authenticated user.
+
+    Pass ?session_id=<id> to filter to a specific session (used by ReportPage
+    to look up the checklist_id for interactive toggle calls).
+    """
     try:
-        checklists = get_user_checklists(user["user_id"], limit=limit)
+        checklists = get_user_checklists(user["user_id"], limit=limit, session_id=session_id)
         return _ok({"checklists": checklists})
     except RuntimeError:
         return _ok({"checklists": []})

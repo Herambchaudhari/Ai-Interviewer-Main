@@ -21,6 +21,7 @@
  * 16. Next Interview Blueprint CTA
  * 17. Study Recommendations (legacy)
  */
+import './print.css'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
@@ -28,7 +29,9 @@ import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
-import { getReportWithSSE, generateShareLink } from '../lib/api'
+import { getReportWithSSE, getCachedReportOnly, generateShareLink, getUserChecklists, toggleChecklistItem, retrySaveReport, retryStages } from '../lib/api'
+import SectionErrorBoundary from '../components/SectionErrorBoundary'
+import SectionRetryCard from '../components/SectionRetryCard'
 import {
   Trophy, TrendingUp, TrendingDown, BookOpen, ChevronRight,
   Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
@@ -433,7 +436,7 @@ function ShareModal({ report, sessionId, onClose }) {
 
 // ── Loading State (SSE Progress) ──────────────────────────────────────────────
 
-function ReportLoading({ stage, progress, label }) {
+function ReportLoading({ stage, progress, label, isFirstGeneration }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="glass p-10 max-w-md w-full text-center space-y-6">
@@ -444,6 +447,13 @@ function ReportLoading({ stage, progress, label }) {
         <div>
           <h2 className="text-xl font-bold gradient-text mb-2">Generating Your Report</h2>
           <p className="text-muted text-sm">{label || 'Analyzing your session…'}</p>
+          {isFirstGeneration && (
+            <p className="mt-3 text-xs px-3 py-2 rounded-lg"
+              style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}>
+              ⏳ First-time generation for this report (~45 seconds).
+              Future visits will be instant.
+            </p>
+          )}
         </div>
         <div className="space-y-2">
           <div className="flex justify-between text-xs text-muted">
@@ -486,7 +496,10 @@ function QTooltip({ active, payload }) {
     <div className="glass p-3 text-xs max-w-xs" style={{ border: '1px solid rgba(124,58,237,0.4)' }}>
       <p className="font-semibold mb-1 text-white text-sm">{d.label}</p>
       <p className="text-muted">{d.question_text}</p>
-      <p className="mt-1" style={{ color: scoreColor(d.score * 10) }}>Score: {d.score}/10</p>
+      {d.skipped || d.score == null
+        ? <p className="mt-1 text-yellow-400">Skipped</p>
+        : <p className="mt-1" style={{ color: scoreColor(d.score * 10) }}>Score: {d.score}/10</p>
+      }
     </div>
   )
 }
@@ -511,42 +524,219 @@ export default function ReportPage() {
   const { sessionId } = useParams()
   const navigate      = useNavigate()
 
-  const [report,     setReport]     = useState(null)
-  const [loading,    setLoading]    = useState(true)
-  const [error,      setError]      = useState(null)
-  const [stage,      setStage]      = useState('core_analysis')
-  const [progress,   setProgress]   = useState(10)
-  const [stageLabel, setStageLabel] = useState('Scoring your answers…')
-  const [shareOpen,  setShareOpen]  = useState(false)
+  const [report,            setReport]            = useState(null)
+  const [loading,           setLoading]           = useState(true)
+  const [error,             setError]             = useState(null)
+  const [stage,             setStage]             = useState('core_analysis')
+  const [progress,          setProgress]          = useState(10)
+  const [stageLabel,        setStageLabel]        = useState('Scoring your answers…')
+  const [shareOpen,         setShareOpen]         = useState(false)
+  const [checklistItems,    setChecklistItems]    = useState(null)
+  const [checklistId,       setChecklistId]       = useState(null)
+  // True when backend is generating via SSE (first time); false when returning cached JSON instantly.
+  const [isFirstGeneration, setIsFirstGeneration] = useState(false)
+  const [persistFailed,     setPersistFailed]     = useState(false)
+  const [retryingSave,      setRetryingSave]      = useState(false)
+  const [retrySaveSuccess,  setRetrySaveSuccess]  = useState(false)
+  // Report quality tracking (Bug #3)
+  const [reportQuality,     setReportQuality]     = useState('full')   // 'full' | 'partial' | 'degraded'
+  const [failedSections,    setFailedSections]    = useState([])       // list of section names that failed
+  const [retryingStage,     setRetryingStage]     = useState(null)     // stage key currently retrying
+  const [stageRetrySuccess, setStageRetrySuccess] = useState({})       // { stageKey: true } on success
+  const rawReportRef    = useRef(null)  // holds report payload for retry without re-render
+  const startSSERef     = useRef(null)  // ref to startSSE so the error-screen "Try Again" can call it
+  const sseWatchdogRef  = useRef(null)  // client-side 6-min watchdog for the SSE stream
+
+  const handleRetrySave = useCallback(async () => {
+    const payload = rawReportRef.current
+    if (!payload || retryingSave) return
+    setRetryingSave(true)
+    try {
+      const res = await retrySaveReport(sessionId, payload)
+      if (res?.data?.saved) {
+        setPersistFailed(false)
+        setRetrySaveSuccess(true)
+        const cacheKey = `report_${sessionId}`
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(payload)) } catch (_) {}
+      }
+    } catch (_) {
+      // banner stays visible; user can click "Try Again" manually
+    } finally {
+      setRetryingSave(false)
+    }
+  }, [sessionId, retryingSave])
+
+  const handleRetryStage = useCallback(async (stageKey) => {
+    if (retryingStage) return
+    setRetryingStage(stageKey)
+    try {
+      const res = await retryStages(sessionId, [stageKey])
+      if (res?.data?.report) {
+        const merged = res.data.report
+        rawReportRef.current = merged
+        setReport(merged)
+        setReportQuality(res.data.report_quality ?? 'full')
+        setFailedSections(res.data.failed_sections ?? [])
+        setStageRetrySuccess(prev => ({ ...prev, [stageKey]: true }))
+        // Update sessionStorage with merged payload
+        try { sessionStorage.setItem(`report_${sessionId}`, JSON.stringify(merged)) } catch (_) {}
+      }
+    } catch (_) {
+      // retry card stays visible; user can try again
+    } finally {
+      setRetryingStage(null)
+    }
+  }, [sessionId, retryingStage])
 
   useEffect(() => {
     if (!sessionId) return
-    getReportWithSSE(
-      sessionId,
-      (evt) => {
-        setStage(evt.stage)
-        setProgress(evt.progress || 10)
-        setStageLabel(evt.label || 'Processing…')
-      },
-      (reportData) => {
-        setReport(reportData)
+
+    const cacheKey = `report_${sessionId}`
+
+    function applyReport(reportData, persistStatus = 'saved') {
+      rawReportRef.current = reportData
+      setReport(reportData)
+      if (reportData?.checklist?.length > 0) setChecklistItems(reportData.checklist)
+      // Sync quality metadata so UI can show retry cards / degraded state
+      setReportQuality(reportData?.report_quality ?? 'full')
+      setFailedSections(reportData?.failed_sections ?? [])
+
+      if (persistStatus === 'saved') {
+        // Only cache locally when the DB save succeeded — otherwise a refresh
+        // would serve stale sessionStorage instead of triggering a real re-fetch.
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(reportData)) } catch (_) {}
+      } else {
+        setPersistFailed(true)
+        // Auto-retry once after 4 seconds to handle transient DB hiccups.
+        setTimeout(() => {
+          setRetryingSave(prev => {
+            if (prev) return prev  // already retrying
+            retrySaveReport(sessionId, reportData)
+              .then(res => {
+                if (res?.data?.saved) {
+                  setPersistFailed(false)
+                  setRetrySaveSuccess(true)
+                  try { sessionStorage.setItem(cacheKey, JSON.stringify(reportData)) } catch (_) {}
+                }
+              })
+              .catch(() => {})  // banner stays; user can click manually
+              .finally(() => setRetryingSave(false))
+            return true  // mark as retrying
+          })
+        }, 4000)
+      }
+
+      setLoading(false)
+    }
+
+    function startSSE() {
+      // 6-minute client-side watchdog — defence-in-depth on top of the 5-min AbortController
+      // in api.js (C1 fix). Fires only if neither onComplete nor onError was called first.
+      clearTimeout(sseWatchdogRef.current)
+      sseWatchdogRef.current = setTimeout(() => {
+        setError('Report generation is taking too long. Click "Try Again" to retry.')
         setLoading(false)
-      },
-      (errMsg) => {
-        setError(errMsg || 'Failed to load report.')
-        setLoading(false)
-      },
-    )
+      }, 6 * 60 * 1000)
+
+      // Detect first-time generation: SSE sends progress events; cached JSON never does.
+      let receivedProgressEvent = false
+      getReportWithSSE(
+        sessionId,
+        (evt) => {
+          if (!receivedProgressEvent) {
+            receivedProgressEvent = true
+            setIsFirstGeneration(true)
+          }
+          setStage(evt.stage)
+          setProgress(Math.max(0, evt.progress || 10))
+          setStageLabel(evt.label || 'Processing…')
+        },
+        (reportData, persistStatus) => {
+          clearTimeout(sseWatchdogRef.current)
+          applyReport(reportData, persistStatus)
+        },
+        (errMsg) => {
+          clearTimeout(sseWatchdogRef.current)
+          setError(errMsg || 'Failed to load report.')
+          setLoading(false)
+        },
+      )
+    }
+
+    // Store reference so the error-screen "Try Again" button can re-invoke SSE.
+    startSSERef.current = startSSE
+
+    // Layer 1: sessionStorage — instant, no network needed
+    try {
+      const stored = sessionStorage.getItem(cacheKey)
+      if (stored) {
+        applyReport(JSON.parse(stored))
+        return
+      }
+    } catch (_) {}
+
+    // Layer 2: cached-only endpoint — fast DB read, never triggers SSE generation
+    getCachedReportOnly(sessionId)
+      .then((reportData) => {
+        if (reportData) {
+          applyReport(reportData)
+          // If the report row exists but save_report succeeded while status updates
+          // failed (race condition fix), silently repair the status columns now.
+          if (reportData.report_status === 'persist_failed') {
+            retrySaveReport(sessionId, reportData).catch(() => {})
+          }
+        } else {
+          // Layer 3: SSE — report not yet cached, stream the full 4-stage pipeline
+          startSSE()
+        }
+      })
+      .catch(() => startSSE())
   }, [sessionId])
 
-  if (loading) return <ReportLoading stage={stage} progress={progress} label={stageLabel} />
+  // Fetch checklist_id for this session so we can call toggle API
+  useEffect(() => {
+    if (!sessionId) return
+    getUserChecklists(10, sessionId).then(res => {
+      const match = res?.data?.checklists?.find(c => c.session_id === sessionId)
+      if (match) {
+        setChecklistId(match.id)
+        // Fallback: if SSE/cache didn't carry items, use the DB copy.
+        // Functional updater reads CURRENT state to avoid stale-closure overwrite.
+        if (match.items?.length > 0) {
+          // C3 fix: use DB items if state is null OR empty [] — prev?.length > 0 is the
+          // correct guard because applyReport may set [] from an SSE payload with no
+          // checklist yet, and `prev ?? match.items` would wrongly keep the empty array.
+          setChecklistItems(prev => (prev?.length > 0 ? prev : match.items))
+        }
+      }
+    }).catch(() => {})
+  }, [sessionId])
+
+  if (loading) return <ReportLoading stage={stage} progress={progress} label={stageLabel} isFirstGeneration={isFirstGeneration} />
   if (error) return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="glass p-8 max-w-md text-center">
         <XCircle size={40} className="text-red-400 mx-auto mb-4" />
         <h2 className="text-xl font-bold mb-2">Report Error</h2>
         <p className="text-muted mb-6 text-sm">{error}</p>
-        <button onClick={() => navigate('/dashboard')} className="btn-primary">Back to Dashboard</button>
+        <div className="flex gap-3 justify-center flex-wrap">
+          {startSSERef.current && (
+            <button
+              onClick={() => {
+                setError(null)
+                setLoading(true)
+                setProgress(10)
+                setStage('core_analysis')
+                setStageLabel('Scoring your answers…')
+                startSSERef.current()
+              }}
+              className="btn-primary"
+            >
+              Try Again
+            </button>
+          )}
+          <button onClick={() => navigate('/dashboard')} className="btn-secondary">Back to Dashboard</button>
+        </div>
       </div>
     </div>
   )
@@ -599,27 +789,45 @@ export default function ReportPage() {
     subject: s.skill, A: +Number(s.score).toFixed(1), fullMark: 10,
   }))
 
-  const qaData = (per_question_analysis?.length ? per_question_analysis : question_scores).map((q, i) => ({
-    label: `Q${i + 1}`, question_text: q.question_text || q.question || '',
-    score: q.score || 0,
-  }))
+  // C2 fix: pick the best source array, then normalise every field so chart code
+  // never receives string-"null", NaN, or undefined values.
+  const _qaSource = per_question_analysis?.length
+    ? per_question_analysis
+    : question_scores?.length
+      ? question_scores
+      : []
+  const qaData = _qaSource.map((q, i) => {
+    const isSkipped  = q.skipped || false
+    const rawScore   = q.score == null ? null : Number(q.score)
+    const safeScore  = (isSkipped || rawScore == null || isNaN(rawScore)) ? null : rawScore
+    return {
+      label:         `Q${i + 1}`,
+      question_text: (q.question_text || q.question || `Question ${i + 1}`).trim(),
+      score:         safeScore,
+      skipped:       isSkipped,
+      verdict:       q.verdict  || '',
+      feedback:      q.feedback || '',
+    }
+  })
 
-  const fillerData = filler_heatmap.map(f => ({
+  const fillerData = (filler_heatmap ?? []).map(f => ({
     question_id: f.question_id, filler_count: f.filler_count || 0,
     confidence_score: f.confidence_score || 0, filler_words: f.filler_words || [],
   }))
 
-  const deliveryArc = (delivery_consistency?.arc_plot || []).map((v, i) => ({
+  const deliveryArc = ((delivery_consistency ?? {}).arc_plot ?? []).map((v, i) => ({
     q: `Q${i + 1}`, confidence: v,
   }))
 
-  // MCQ category breakdown chart data — always an array from backend now
-  const mcqCategoryData = (Array.isArray(category_breakdown) ? category_breakdown : []).map(d => ({
-    category: d.category || 'Uncategorized',
-    accuracy: d.accuracy ?? 0,
-    correct:  d.correct  ?? 0,
-    total:    d.total    ?? 1,
-  }))
+  // MCQ category breakdown — filter out zero-total entries to prevent NaN accuracy (C2 fix)
+  const mcqCategoryData = (Array.isArray(category_breakdown) ? category_breakdown : [])
+    .filter(d => (d.total ?? 0) > 0)
+    .map(d => ({
+      category: d.category || 'Uncategorized',
+      accuracy: d.accuracy ?? 0,
+      correct:  d.correct  ?? 0,
+      total:    d.total,
+    }))
 
   return (
     <div className="min-h-screen pt-20 pb-16 px-4">
@@ -639,6 +847,95 @@ export default function ReportPage() {
                 environment to generate real AI-powered reports.
               </p>
             </div>
+          </div>
+        )}
+
+        {/* ── Persist-Failed Warning Banner ───────────────────────────────── */}
+        {persistFailed && !retrySaveSuccess && (
+          <div className="rounded-xl px-4 py-3 flex items-center justify-between gap-4"
+            style={{
+              background: 'rgba(245,158,11,0.1)',
+              border: '1px solid rgba(245,158,11,0.35)',
+            }}>
+            <div className="flex items-center gap-2 text-sm" style={{ color: '#f59e0b' }}>
+              <AlertTriangle size={16} className="flex-shrink-0" />
+              <span>
+                <strong>Report not saved.</strong> Your results are shown but weren't stored —
+                refreshing this page may lose them.
+              </span>
+            </div>
+            <button
+              onClick={handleRetrySave}
+              disabled={retryingSave}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 transition-all"
+              style={{
+                background: retryingSave ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.25)',
+                border: '1px solid rgba(245,158,11,0.5)',
+                color: '#f59e0b',
+                opacity: retryingSave ? 0.7 : 1,
+                cursor: retryingSave ? 'not-allowed' : 'pointer',
+              }}>
+              {retryingSave ? 'Saving…' : 'Try Again'}
+            </button>
+          </div>
+        )}
+
+        {/* ── Persist-Success Confirmation Banner ─────────────────────────── */}
+        {retrySaveSuccess && (
+          <div className="rounded-xl px-4 py-3 flex items-center gap-2 text-sm"
+            style={{
+              background: 'rgba(74,222,128,0.1)',
+              border: '1px solid rgba(74,222,128,0.3)',
+              color: '#4ade80',
+            }}>
+            <CheckCircle size={16} className="flex-shrink-0" />
+            <span>Report saved successfully. This page is now permanent.</span>
+          </div>
+        )}
+
+        {/* ── Partial Report Banner (some sections failed) ─────────────────── */}
+        {reportQuality === 'partial' && failedSections.length > 0 && (
+          <div className="rounded-xl px-4 py-3 flex items-center gap-3 text-sm"
+            style={{
+              background: 'rgba(245,158,11,0.08)',
+              border: '1px solid rgba(245,158,11,0.3)',
+              color: '#f59e0b',
+            }}>
+            <AlertTriangle size={16} className="flex-shrink-0" />
+            <span>
+              <strong>Some sections of this report are incomplete.</strong>{' '}
+              Our AI service was temporarily unavailable for certain stages.
+              Use the <strong>Regenerate Section</strong> buttons below to fill them in.
+            </span>
+          </div>
+        )}
+
+        {/* ── Degraded Report State (core analysis failed) ─────────────────── */}
+        {reportQuality === 'degraded' && (
+          <div className="rounded-xl p-6 text-center"
+            style={{
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.3)',
+            }}>
+            <div style={{ fontSize: 36 }}>⚠</div>
+            <h3 className="text-lg font-bold mt-3" style={{ color: '#f87171' }}>
+              Report generation was interrupted
+            </h3>
+            <p className="text-sm text-muted mt-2 max-w-md mx-auto">
+              The core analysis stage failed — your scores and radar chart couldn't be computed.
+              This usually happens when our AI service is temporarily overloaded.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 px-5 py-2 rounded-lg text-sm font-semibold"
+              style={{
+                background: 'rgba(239,68,68,0.2)',
+                border: '1px solid rgba(239,68,68,0.4)',
+                color: '#f87171',
+                cursor: 'pointer',
+              }}>
+              Regenerate Full Report
+            </button>
           </div>
         )}
 
@@ -696,7 +993,7 @@ export default function ReportPage() {
               </p>
               <div className="flex flex-wrap gap-2">
                 {repeated_offenders.map((r, i) => (
-                  <Chip key={i} label={`${r.issue} ×${r.count_across_sessions}`} color="#f59e0b" />
+                  <Chip key={i} label={`${r?.issue ?? 'Unknown'} ×${r?.count_across_sessions ?? 0}`} color="#f59e0b" />
                 ))}
               </div>
             </div>
@@ -708,9 +1005,9 @@ export default function ReportPage() {
           <SectionCard icon={<Shield size={16}/>} title="Interview Integrity" color="#22d3ee">
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
               {[
-                { label: 'Status', value: interview_integrity.status, color: interview_integrity.status === 'Clear' ? '#4ade80' : interview_integrity.status === 'Minor Concerns' ? '#facc15' : '#f87171' },
-                { label: 'Integrity Score', value: `${interview_integrity.score}/100`, color: scoreColor(interview_integrity.score) },
-                { label: 'Flagged Events', value: interview_integrity.total_incidents, color: '#f97316' },
+                { label: 'Status', value: interview_integrity?.status ?? 'Unknown', color: interview_integrity?.status === 'Clear' ? '#4ade80' : interview_integrity?.status === 'Minor Concerns' ? '#facc15' : '#f87171' },
+                { label: 'Integrity Score', value: `${interview_integrity?.score ?? '—'}/100`, color: scoreColor(interview_integrity?.score ?? 0) },
+                { label: 'Flagged Events', value: interview_integrity?.total_incidents ?? 0, color: '#f97316' },
                 { label: 'Camera Uptime', value: `${Math.round((proctoring_summary?.camera_uptime_ratio || 0) * 100)}%`, color: '#22d3ee' },
               ].map(card => (
                 <div key={card.label} className="rounded-xl p-4"
@@ -720,10 +1017,10 @@ export default function ReportPage() {
                 </div>
               ))}
             </div>
-            <p className="text-sm text-muted leading-relaxed mb-4">{interview_integrity.summary}</p>
-            {proctoring_summary?.counts && (
+            <p className="text-sm text-muted leading-relaxed mb-4">{interview_integrity?.summary || 'No integrity summary available.'}</p>
+            {proctoring_summary?.counts && Object.keys(proctoring_summary.counts).length > 0 && (
               <div className="flex flex-wrap gap-2 mb-4">
-                {Object.entries(proctoring_summary.counts).map(([key, value]) => (
+                {Object.entries(proctoring_summary?.counts ?? {}).map(([key, value]) => (
                   <Chip key={key} label={`${key.replaceAll('_', ' ')}: ${value}`} color={value ? '#f97316' : '#64748b'} size="xs" />
                 ))}
               </div>
@@ -777,7 +1074,7 @@ export default function ReportPage() {
           <div className="grid grid-cols-2 gap-3 flex-shrink-0">
             {[
               { label: 'Total Qs',  val: num_questions },
-              { label: 'Answered',  val: qaData.filter(q => q.score > 0).length },
+              { label: 'Answered',  val: qaData.filter(q => !q.skipped && q.score != null).length },
               { label: 'Score',     val: `${overall}` },
               { label: 'Grade',     val: grade || '—' },
             ].map(({ label, val }) => (
@@ -791,7 +1088,15 @@ export default function ReportPage() {
         </div>
 
         {/* ── 6-Axis Communication Radar + Delivery Consistency ───────────── */}
-        {(radarData.length > 0 || deliveryArc.length > 0) && (
+        <SectionErrorBoundary>
+        {failedSections.includes('communication_breakdown') && !stageRetrySuccess['stage3_communication'] ? (
+          <SectionRetryCard
+            sectionLabel="Communication Analysis"
+            onRetry={() => handleRetryStage('stage3_communication')}
+            isRetrying={retryingStage === 'stage3_communication'}
+            retrySuccess={!!stageRetrySuccess['stage3_communication']}
+          />
+        ) : (radarData.length > 0 || deliveryArc.length > 0) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {radarData.length > 0 && (
               <SectionCard icon={<MessageSquare size={16}/>} title="Communication (6-Axis)" color="#22d3ee">
@@ -803,9 +1108,9 @@ export default function ReportPage() {
                       dot={{ r: 3, fill: '#67e8f9' }} />
                   </RadarChart>
                 </ResponsiveContainer>
-                {communication_breakdown && Object.keys(communication_breakdown).length > 0 && (
+                {communication_breakdown && Object.keys(communication_breakdown ?? {}).length > 0 && (
                   <div className="grid grid-cols-2 gap-2 mt-3">
-                    {Object.entries(communication_breakdown).map(([k, v]) => (
+                    {Object.entries(communication_breakdown ?? {}).map(([k, v]) => (
                       <div key={k} className="flex justify-between items-center text-xs">
                         <span className="text-muted truncate mr-2">{k}</span>
                         <span className="font-semibold flex-shrink-0" style={{ color: scoreColor(v) }}>{v}</span>
@@ -908,8 +1213,10 @@ export default function ReportPage() {
             })()}
           </SectionCard>
         )}
+        </SectionErrorBoundary>
 
         {/* ── Filler & Hesitation Heatmap ─────────────────────────────────── */}
+        <SectionErrorBoundary>
         {fillerData.length > 0 && (
           <SectionCard icon={<BarChart2 size={16}/>} title="Filler Word Heatmap" color="#fb923c">
             <p className="text-xs text-muted mb-3">
@@ -927,22 +1234,28 @@ export default function ReportPage() {
             </ResponsiveContainer>
           </SectionCard>
         )}
+        </SectionErrorBoundary>
 
         {/* ── Per-Question Scores Chart ────────────────────────────────────── */}
-        {qaData.length > 0 && (
+        <SectionErrorBoundary>
           <SectionCard icon={<TrendingUp size={16}/>} title="Per-Question Scores" color="#4ade80">
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={qaData} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
-                <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
-                <Tooltip content={<QTooltip />} cursor={{ fill: 'rgba(124,58,237,0.08)' }} />
-                <Bar dataKey="score" radius={[6, 6, 0, 0]}>
-                  {qaData.map((e, i) => <Cell key={i} fill={scoreColor10(e.score)} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            {qaData.length === 0
+              ? <p className="text-muted text-sm text-center py-4">No question data available for this session.</p>
+              : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={qaData} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
+                    <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <Tooltip content={<QTooltip />} cursor={{ fill: 'rgba(124,58,237,0.08)' }} />
+                    <Bar dataKey="score" radius={[6, 6, 0, 0]}>
+                      {qaData.map((e, i) => <Cell key={i} fill={e.skipped || e.score == null ? '#f59e0b' : scoreColor10(e.score)} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )
+            }
           </SectionCard>
-        )}
+        </SectionErrorBoundary>
 
         {/* ── Strong & Weak Areas ─────────────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -1028,6 +1341,7 @@ export default function ReportPage() {
         )}
 
         {/* ── Code Quality Analysis (DSA rounds only) ─────────────────────── */}
+        <SectionErrorBoundary>
         {round_type === 'dsa' && code_quality_metrics && (
           <SectionCard icon={<BarChart2 size={16}/>} title="Code Quality Analysis" color="#a78bfa">
             {/* Aggregate stats row */}
@@ -1047,7 +1361,7 @@ export default function ReportPage() {
 
             {/* Per-question code quality radar */}
             {(() => {
-              const perQ = code_quality_metrics.per_question || []
+              const perQ = code_quality_metrics?.per_question ?? []
               const firstRadar = perQ[0]?.code_quality_radar
               if (!firstRadar) return null
               // Aggregate radar across all questions
@@ -1074,7 +1388,7 @@ export default function ReportPage() {
 
             {/* Per-question expandable cards */}
             <div className="space-y-3">
-              {(code_quality_metrics.per_question || []).map((q, i) => (
+              {(code_quality_metrics?.per_question ?? []).map((q, i) => (
                 <details key={i} className="rounded-lg overflow-hidden" style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.15)' }}>
                   <summary className="px-4 py-3 cursor-pointer text-sm font-medium flex items-center justify-between">
                     <span>{q.question_text ? q.question_text.slice(0, 60) + '…' : `Question ${i + 1}`}</span>
@@ -1116,10 +1430,13 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── Peer Comparison ──────────────────────────────────────────────── */}
+        <SectionErrorBoundary>
         {peer_comparison && (
           <SectionCard icon={<Users size={16}/>} title="Peer Comparison" color="#06b6d4">
-            {peer_comparison.sample_size > 0 ? (
+            {(peer_comparison?.sample_size ?? 0) > 0 ? (
               <>
                 {/* Summary strip */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
@@ -1165,12 +1482,12 @@ export default function ReportPage() {
                 )}
 
                 {/* Grade distribution */}
-                {Object.keys(peer_comparison.grade_distribution || {}).length > 0 && (
+                {Object.keys(peer_comparison?.grade_distribution ?? {}).length > 0 && (
                   <div>
                     <p className="text-xs text-muted uppercase tracking-widest mb-2">Grade Distribution (peers)</p>
                     <div className="flex gap-2 flex-wrap">
-                      {Object.entries(peer_comparison.grade_distribution).map(([g, pct]) => {
-                        const isUser = g === peer_comparison.user_grade
+                      {Object.entries(peer_comparison?.grade_distribution ?? {}).map(([g, pct]) => {
+                        const isUser = g === (peer_comparison?.user_grade ?? '')
                         return (
                           <div key={g}
                             className="flex flex-col items-center px-3 py-2 rounded-xl text-xs"
@@ -1189,19 +1506,30 @@ export default function ReportPage() {
                 )}
               </>
             ) : (
-              <p className="text-sm text-muted">{peer_comparison.insight || 'Not enough peer data yet.'}</p>
+              <div className="space-y-3">
+                <div className="flex items-center gap-4">
+                  <div className="glass p-4 rounded-xl text-center min-w-[90px]">
+                    <p className="text-2xl font-bold" style={{ color: scoreColor(overall) }}>{peer_comparison?.user_grade ?? 'N/A'}</p>
+                    <p className="text-xs text-muted mt-0.5">Your Grade</p>
+                  </div>
+                  <p className="text-sm text-muted flex-1">{peer_comparison?.insight || 'Not enough peer data yet to compute percentile — check back after more users complete this round.'}</p>
+                </div>
+              </div>
             )}
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── Company Fit ─────────────────────────────────────────────────── */}
+        <SectionErrorBoundary>
         {company_fit && (
           <SectionCard icon={<Target size={16}/>} title={`${company_fit.target_company || 'Company'} Fit Calibration`} color="#22d3ee">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               {[
-                { label: 'Your Score', val: `${company_fit.your_score}`, color: scoreColor(company_fit.your_score) },
-                { label: 'Bar Required', val: `${company_fit.bar_score_required}`, color: '#94a3b8' },
-                { label: 'Pass Probability', val: `${company_fit.pass_probability}%`, color: scoreColor(company_fit.pass_probability) },
+                { label: 'Your Score', val: company_fit?.your_score != null ? `${company_fit.your_score}` : '—', color: scoreColor(company_fit?.your_score ?? 0) },
+                { label: 'Bar Required', val: company_fit?.bar_score_required != null ? `${company_fit.bar_score_required}` : '—', color: '#94a3b8' },
+                { label: 'Pass Probability', val: company_fit?.pass_probability != null ? `${company_fit.pass_probability}%` : '—', color: scoreColor(company_fit?.pass_probability ?? 0) },
               ].map(({ label, val, color }) => (
                 <div key={label} className="text-center p-4 rounded-xl"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
@@ -1252,8 +1580,18 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── SWOT Grid ───────────────────────────────────────────────────── */}
-        {swot && Object.keys(swot).length > 0 && (
+        <SectionErrorBoundary>
+        {failedSections.includes('swot') && !stageRetrySuccess['stage4_playbook'] ? (
+          <SectionRetryCard
+            sectionLabel="SWOT Analysis & 30-Day Plan"
+            onRetry={() => handleRetryStage('stage4_playbook')}
+            isRetrying={retryingStage === 'stage4_playbook'}
+            retrySuccess={!!stageRetrySuccess['stage4_playbook']}
+          />
+        ) : swot && Object.keys(swot).length > 0 && (
           <SectionCard icon={<Compass size={16}/>} title="SWOT Analysis" color="#7c3aed">
             <div className="grid grid-cols-2 gap-3">
               {[
@@ -1347,8 +1685,11 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── 30-Day Sprint Plan ──────────────────────────────────────────── */}
-        {thirty_day_plan && Object.keys(thirty_day_plan).some(k => thirty_day_plan[k]?.length > 0) && (
+        <SectionErrorBoundary>
+        {thirty_day_plan && Object.keys(thirty_day_plan ?? {}).some(k => thirty_day_plan[k]?.length > 0) && (
           <SectionCard icon={<Clock size={16}/>} title="30-Day Sprint Plan" color="#22d3ee">
             <div className="space-y-4">
               {['week_1', 'week_2', 'week_3', 'week_4'].map((wk, wi) => {
@@ -1420,7 +1761,10 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── Per-Question Deep Dive ───────────────────────────────────────── */}
+        <SectionErrorBoundary>
         {(per_question_analysis?.length > 0 || question_scores?.length > 0) && (
           <div>
             <h2 className="font-bold mb-4 flex items-center gap-2">
@@ -1430,13 +1774,21 @@ export default function ReportPage() {
               {(per_question_analysis?.length ? per_question_analysis : question_scores).map((q, i) => (
                 <details key={i} className="glass group">
                   <summary className="flex items-center gap-3 p-4 cursor-pointer select-none list-none">
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-lg flex-shrink-0"
-                      style={{ background: `${scoreColor10(q.score)}20`, color: scoreColor10(q.score) }}>
-                      Q{i + 1} · {q.score}/10
-                    </span>
+                    {(q.skipped || q.score == null) ? (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-lg flex-shrink-0 badge badge-yellow">
+                        Q{i + 1} · Skipped
+                      </span>
+                    ) : (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-lg flex-shrink-0"
+                        style={{ background: `${scoreColor10(q.score)}20`, color: scoreColor10(q.score) }}>
+                        Q{i + 1} · {q.score}/10
+                      </span>
+                    )}
                     <p className="text-sm flex-1 line-clamp-1">{q.question_text || q.question || ''}</p>
                     <Chip label={q.category || q.topic || 'General'} size="xs" color="#22d3ee" />
-                    {q.verdict && <Chip label={q.verdict} size="xs" color={scoreColor10(q.score)} />}
+                    {q.verdict && q.verdict !== 'skipped' && (
+                      <Chip label={q.verdict} size="xs" color={scoreColor10(q.score)} />
+                    )}
                     <ChevronRight size={14} className="text-muted group-open:rotate-90 transition-transform" />
                   </summary>
                   <div className="px-4 pb-4 space-y-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
@@ -1446,7 +1798,13 @@ export default function ReportPage() {
                         <Chip label={q.category || q.topic || 'General'} color="#22d3ee" size="xs" />
                       </div>
                     </div>
-                    {q.answer_summary && (
+                    {(q.skipped || q.answer_text === '[SKIPPED]') && (
+                      <div>
+                        <p className="text-xs text-muted uppercase tracking-wider mb-1">Status</p>
+                        <p className="text-sm text-yellow-400">Candidate skipped this question.</p>
+                      </div>
+                    )}
+                    {q.answer_summary && !q.skipped && (
                       <div>
                         <p className="text-xs text-muted uppercase tracking-wider mb-1">Summary</p>
                         <p className="text-sm leading-relaxed text-muted">{q.answer_summary}</p>
@@ -1488,9 +1846,15 @@ export default function ReportPage() {
         )}
 
         {/* ── Adaptive Study Schedule ─────────────────────────────────────── */}
-        {study_schedule?.topics?.length > 0 && (
+        {study_schedule != null && (
           <SectionCard icon={<BookOpen size={16}/>} title="Adaptive Study Schedule" color="#4ade80">
-            {/* Summary line */}
+            {study_schedule.topics?.length === 0 && (
+              <div className="flex items-center gap-3 py-2">
+                <CheckCircle size={18} className="text-green-400 shrink-0" />
+                <p className="text-sm text-muted">No weak areas identified — solid performance across all topics. Nothing to schedule!</p>
+              </div>
+            )}
+            {study_schedule.topics?.length > 0 && (<>
             <div className="flex flex-wrap gap-4 mb-5 text-sm">
               <span className="text-muted">
                 <span className="font-semibold text-white">{study_schedule.topics.length}</span> topics tracked
@@ -1570,48 +1934,65 @@ export default function ReportPage() {
                 </div>
               )
             })()}
+            </>)}
           </SectionCard>
         )}
 
         {/* ── Preparation Checklist ──────────────────────────────────────── */}
-        {reportChecklist?.length > 0 && (
-          <SectionCard icon={<CheckCircle size={16}/>} title="Preparation Checklist" color="#4ade80">
-            <p className="text-xs text-muted mb-4">
-              {reportChecklist.filter(i => i.checked).length} / {reportChecklist.length} completed
-            </p>
-            <div className="space-y-2">
-              {reportChecklist.map((item) => {
-                const catColor = {
-                  'Weak Area Fix':    '#f87171',
-                  'Practice':         '#06b6d4',
-                  'Concept Review':   '#7c3aed',
-                  'Resource':         '#f59e0b',
-                  'Mock Interview':   '#4ade80',
-                  'Company Research': '#a78bfa',
-                }[item.category] || '#94a3b8'
-                const priorityColor = item.priority === 'High' ? '#f87171' : item.priority === 'Medium' ? '#facc15' : '#4ade80'
-                return (
-                  <div key={item.id}
-                    className="flex items-start gap-3 p-3 rounded-xl"
-                    style={{ background: 'rgba(255,255,255,0.03)', opacity: item.checked ? 0.5 : 1 }}>
-                    <div className="w-4 h-4 rounded mt-0.5 flex-shrink-0"
-                      style={{ background: item.checked ? '#4ade80' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
-                      {item.checked && <Check size={12} style={{ color: '#0f172a', margin: 1 }} />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-white" style={{ textDecoration: item.checked ? 'line-through' : 'none' }}>{item.title}</p>
-                      {item.details && <p className="text-xs text-muted mt-0.5 truncate">{item.details}</p>}
-                    </div>
-                    <div className="flex-shrink-0 flex flex-col items-end gap-1">
-                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: `${catColor}20`, color: catColor }}>{item.category}</span>
-                      <span className="text-xs" style={{ color: priorityColor }}>{item.priority}</span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </SectionCard>
-        )}
+        {(checklistItems ?? reportChecklist)?.length > 0 && (() => {
+          const items = checklistItems ?? reportChecklist
+          const CAT_COLOR = {
+            'Weak Area Fix':    '#f87171',
+            'Practice':         '#06b6d4',
+            'Concept Review':   '#7c3aed',
+            'Resource':         '#f59e0b',
+            'Mock Interview':   '#4ade80',
+            'Company Research': '#a78bfa',
+          }
+          const handleToggle = async (item) => {
+            const next = !item.checked
+            // Optimistic update
+            setChecklistItems(prev =>
+              (prev ?? items).map(i => i.id === item.id ? { ...i, checked: next } : i)
+            )
+            if (checklistId) {
+              try { await toggleChecklistItem(checklistId, item.id, next) } catch (_) {}
+            }
+          }
+          return (
+            <SectionCard icon={<CheckCircle size={16}/>} title="Preparation Checklist" color="#4ade80">
+              <p className="text-xs text-muted mb-4">
+                {items.filter(i => i.checked).length} / {items.length} completed
+                {!checklistId && <span className="ml-2 opacity-50">(read-only — log in to save progress)</span>}
+              </p>
+              <div className="space-y-2">
+                {items.map((item) => {
+                  const catColor = CAT_COLOR[item.category] || '#94a3b8'
+                  const priorityColor = item.priority === 'High' ? '#f87171' : item.priority === 'Medium' ? '#facc15' : '#4ade80'
+                  return (
+                    <button key={item.id}
+                      onClick={() => handleToggle(item)}
+                      className="w-full flex items-start gap-3 p-3 rounded-xl text-left transition-opacity hover:opacity-80"
+                      style={{ background: 'rgba(255,255,255,0.03)', opacity: item.checked ? 0.5 : 1 }}>
+                      <div className="w-4 h-4 rounded mt-0.5 flex-shrink-0 flex items-center justify-center"
+                        style={{ background: item.checked ? '#4ade80' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+                        {item.checked && <Check size={12} style={{ color: '#0f172a' }} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-white" style={{ textDecoration: item.checked ? 'line-through' : 'none' }}>{item.title}</p>
+                        {item.details && <p className="text-xs text-muted mt-0.5 truncate">{item.details}</p>}
+                      </div>
+                      <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                        <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: `${catColor}20`, color: catColor }}>{item.category}</span>
+                        <span className="text-xs" style={{ color: priorityColor }}>{item.priority}</span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </SectionCard>
+          )
+        })()}
 
         {/* ── Study Recommendations (legacy) ──────────────────────────────── */}
         {study_recommendations?.length > 0 && (
@@ -1639,17 +2020,20 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
+        </SectionErrorBoundary>
+
         {/* ── Next Interview Blueprint CTA ─────────────────────────────────── */}
+        <SectionErrorBoundary>
         {next_interview_blueprint && (
           <div className="rounded-2xl p-6 text-center"
             style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.15), rgba(34,211,238,0.1))', border: '1px solid rgba(124,58,237,0.3)' }}>
             <Star size={24} className="text-purple-400 mx-auto mb-3" />
             <h3 className="font-bold text-lg mb-1">Your Next Interview</h3>
-            <p className="text-muted text-sm mb-4">{next_interview_blueprint.reason}</p>
+            <p className="text-muted text-sm mb-4">{next_interview_blueprint?.reason || 'Personalized recommendation based on your performance.'}</p>
             <div className="flex flex-wrap justify-center gap-2 mb-4">
-              <Chip label={ROUND_LABELS[next_interview_blueprint.round_type] || next_interview_blueprint.round_type} color="#7c3aed" />
-              <Chip label={next_interview_blueprint.difficulty} color="#22d3ee" />
-              <Chip label={`${next_interview_blueprint.timer_mins}m`} color="#a78bfa" />
+              <Chip label={ROUND_LABELS[next_interview_blueprint?.round_type] || next_interview_blueprint?.round_type || 'Technical'} color="#7c3aed" />
+              <Chip label={next_interview_blueprint?.difficulty || 'Medium'} color="#22d3ee" />
+              <Chip label={`${next_interview_blueprint?.timer_mins ?? 30}m`} color="#a78bfa" />
               {next_interview_blueprint.focus_topics?.map((t, i) => (
                 <Chip key={i} label={t} color="#4ade80" size="xs" />
               ))}
@@ -1659,6 +2043,7 @@ export default function ReportPage() {
             </button>
           </div>
         )}
+        </SectionErrorBoundary>
 
       </div>
     </div>
