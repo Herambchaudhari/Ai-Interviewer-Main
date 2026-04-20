@@ -138,6 +138,13 @@ body {
     box-shadow: var(--shadow-sm);
   }
 
+  /* alias used by admin panel components */
+  .glass-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-sm);
+  }
+
   .glass-hover {
     @apply glass transition-all duration-300;
   }

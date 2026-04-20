@@ -52,7 +52,7 @@ User Auth (Supabase) → Resume/Context Upload → Interview Config
 
 **Entry point:** `main.py` registers all routers.
 
-**Routers** (`routers/`): `session.py` (interview lifecycle: start/answer/skip/end/checkpoint/resume), `report.py`/`reports.py`, `resume.py`, `context_hub.py`, `transcribe.py`, `interview.py`, `portfolio.py`, `news.py`, `progress.py`, `share.py`
+**Routers** (`routers/`): `session.py` (interview lifecycle: start/answer/skip/end/checkpoint/resume), `report.py`/`reports.py`, `resume.py`, `context_hub.py`, `transcribe.py`, `interview.py`, `portfolio.py`, `news.py`, `progress.py`, `share.py`, `admin.py` (hardcoded-credential admin panel: login, all users/sessions/profiles, per-student detail)
 
 **Key Services** (`services/`):
 - `groq_service.py` — LLM inference with streaming (llama-3.3-70b-versatile), API key failover via `api_manager.py`
@@ -69,6 +69,8 @@ User Auth (Supabase) → Resume/Context Upload → Interview Config
 ### Frontend (`frontend/src/`)
 
 **Pages** (`pages/`): `AuthPage.jsx` → `OnboardingPage.jsx`/`Upload.jsx` → `DashboardPage.jsx` → `InterviewPage.jsx` → `InterviewRoom.jsx` (main Q&A) or `CodingPage.jsx` (DSA) → `Report.jsx`/`ReportPage.jsx`
+
+**Admin Pages** (`pages/`): `AdminLoginPage.jsx` (`/admin`) → `AdminDashboardPage.jsx` (`/admin/dashboard`) — hardcoded-credential admin panel with three tabs (Registered Students, Assessment Activity, Resume Uploads) + student detail modal + search by name/email
 
 **Key Components** (`components/`):
 - `InterviewCamera.jsx` + `WebcamFeed.jsx` — MediaPipe-based proctoring (eye tracking, phone detection, posture)

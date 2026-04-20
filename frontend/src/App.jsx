@@ -15,6 +15,8 @@ import SharedReportPage from './pages/SharedReportPage'
 import SettingsPage from './pages/SettingsPage'
 import ContextHubPage from './pages/ContextHubPage'
 import NotFound from './pages/NotFound'
+import AdminLoginPage from './pages/AdminLoginPage'
+import AdminDashboardPage from './pages/AdminDashboardPage'
 
 export default function App() {
   return (
@@ -67,6 +69,10 @@ export default function App() {
         <Route path="/context-hub" element={
           <ProtectedRoute><ContextHubPage /></ProtectedRoute>
         } />
+
+        {/* Admin — separate auth, no Supabase */}
+        <Route path="/admin" element={<AdminLoginPage />} />
+        <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
 
         {/* 404 */}
         <Route path="*" element={<NotFound />} />
