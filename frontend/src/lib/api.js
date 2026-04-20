@@ -166,6 +166,11 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
     return
   }
 
+  // AbortController gives us a hard 5-minute ceiling on the whole request (C1 fix).
+  const SSE_TIMEOUT_MS = 5 * 60 * 1000
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), SSE_TIMEOUT_MS)
+
   const url = `${BASE_URL}/api/v1/report/${sessionId}`
   let response
   try {
@@ -173,13 +178,19 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
       Accept: 'text/event-stream, application/json',
       Authorization: `Bearer ${token}`,
     }
-    response = await fetch(url, { headers })
+    response = await fetch(url, { headers, signal: controller.signal })
   } catch (e) {
-    onError(e.message || 'Network error')
+    clearTimeout(timeoutId)
+    if (e.name === 'AbortError') {
+      onError('Report generation timed out after 5 minutes. Please try again.')
+    } else {
+      onError(e.message || 'Network error')
+    }
     return
   }
 
   if (!response.ok) {
+    clearTimeout(timeoutId)
     if (response.status === 401 || response.status === 403) {
       onError('Session expired or access denied. Please log in again.')
     } else {
@@ -190,10 +201,11 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
 
   const contentType = response.headers.get('content-type') || ''
 
-  // Cached report — return as plain JSON
+  // Cached report — return as plain JSON (persist_status: 'saved' implied)
   if (contentType.includes('application/json')) {
+    clearTimeout(timeoutId)
     const data = await response.json()
-    onComplete(data?.data ?? data)
+    onComplete(data?.data ?? data, 'saved')
     return
   }
 
@@ -201,6 +213,7 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let receivedComplete = false
 
   try {
     while (true) {
@@ -214,9 +227,12 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
         try {
           const event = JSON.parse(line.slice(6))
           if (event.stage === 'complete') {
-            onComplete(event.report)
+            receivedComplete = true
+            clearTimeout(timeoutId)
+            onComplete(event.report, event.persist_status ?? 'saved')
             return
           } else if (event.stage === 'error') {
+            clearTimeout(timeoutId)
             onError(event.error || 'Report generation failed')
             return
           } else {
@@ -225,8 +241,18 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
         } catch (_) { /* ignore malformed SSE lines */ }
       }
     }
+    // Hang guard: stream closed (done=true) without a complete/error event (C1 fix).
+    if (!receivedComplete) {
+      onError('Report generation ended unexpectedly. Please try again.')
+    }
   } catch (e) {
-    onError(e.message || 'Stream read error')
+    if (e.name === 'AbortError') {
+      onError('Report generation timed out after 5 minutes. Please try again.')
+    } else {
+      onError(e.message || 'Stream read error')
+    }
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
 
@@ -234,6 +260,21 @@ export async function getReportWithSSE(sessionId, onProgress, onComplete, onErro
 export async function generateReport(sessionId) {
   const { data } = await api.post('/reports/generate', { session_id: sessionId })
   return data  // { success, data: { report_id, report }, error }
+}
+
+/** POST /api/v1/report/:sessionId/retry-save — retry persisting a report that failed to save.
+ *  Returns { success, data: { saved: true } } on success, throws on network/server error. */
+export async function retrySaveReport(sessionId, reportPayload) {
+  const { data } = await api.post(`/report/${sessionId}/retry-save`, { report: reportPayload })
+  return data  // { success, data: { saved: true }, error }
+}
+
+/** POST /api/v1/report/:sessionId/retry-stages — re-run specific failed LLM stages and merge results.
+ *  stages: string[] — e.g. ["stage3_communication", "stage4_playbook"]
+ *  Returns { success, data: { merged_fields, report_quality, failed_sections, report } } */
+export async function retryStages(sessionId, stages) {
+  const { data } = await api.post(`/report/${sessionId}/retry-stages`, { stages })
+  return data  // { success, data: { merged_fields, report_quality, failed_sections, report } }
 }
 
 /** GET /api/v1/report/:sessionId/cached — fetch cached report only, no generation triggered.

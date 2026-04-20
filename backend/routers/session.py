@@ -785,8 +785,10 @@ async def skip_question(
             "question_id": body.question_id,
             "question":    (current_q or {}).get("question_text", ""),
             "answer":      "[SKIPPED]",
-            "score":       0,
+            "score":       None,
             "skipped":     True,
+            "verdict":     "skipped",
+            "feedback":    "Question skipped by candidate.",
             "category":    q_topic,
         })
         answered_count = len(existing_transcript)

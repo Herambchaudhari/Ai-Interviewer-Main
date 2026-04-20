@@ -27,6 +27,7 @@ from services.db_service import (
     compute_improvement_vs_last, get_past_reports_for_analysis, update_session,
     save_benchmark, save_checklist, get_benchmarks,
     get_audio_signed_url,
+    mark_report_complete, mark_report_persist_failed, mark_report_degraded,
 )
 from services.benchmarking_service import compute_peer_comparison
 from services.spaced_repetition_service import build_study_schedule
@@ -65,6 +66,96 @@ async def _empty_async_dict() -> dict:
     return {}
 
 
+def _normalize_report_payload(payload: dict) -> dict:
+    """
+    Enforce correct types on every report field before the payload leaves the
+    backend.  The frontend destructures these fields with defaults, but a cached
+    report saved before a schema migration — or a report where an LLM stage
+    silently failed — can carry null where an array or dict is expected, crashing
+    the React render.  This normalizer is idempotent: running it twice is safe.
+    """
+    # ── Fields that must always be lists ─────────────────────────────────────
+    _LIST_FIELDS = [
+        "per_question_analysis", "question_scores", "skill_ratings",
+        "strong_areas", "weak_areas", "red_flags", "failure_patterns",
+        "study_recommendations", "interview_tips", "mock_ready_topics",
+        "not_ready_topics", "repeated_offenders", "pattern_groups",
+        "blind_spots", "bs_flag", "skill_decay", "skills_to_work_on",
+        "auto_resources", "follow_up_questions", "category_breakdown",
+        "checklist", "filler_heatmap",
+    ]
+    # ── Fields that must always be dicts ─────────────────────────────────────
+    _DICT_FIELDS = [
+        "hire_signal", "communication_breakdown", "six_axis_radar",
+        "delivery_consistency", "proctoring_summary", "swot",
+        "thirty_day_plan", "cv_audit", "study_roadmap",
+    ]
+    # ── String fields that must not be null ──────────────────────────────────
+    _STR_FIELDS = [
+        "summary", "grade", "hire_recommendation", "difficulty",
+        "compared_to_level", "session_label", "target_company", "candidate_name",
+    ]
+
+    result = dict(payload)
+
+    for field in _LIST_FIELDS:
+        if not isinstance(result.get(field), list):
+            result[field] = []
+
+    for field in _DICT_FIELDS:
+        if not isinstance(result.get(field), dict):
+            result[field] = {}
+
+    for field in _STR_FIELDS:
+        val = result.get(field)
+        if not isinstance(val, str):
+            result[field] = "" if val is None else str(val)
+
+    # ── Nested: code_quality_metrics ─────────────────────────────────────────
+    cqm = result.get("code_quality_metrics")
+    if isinstance(cqm, dict):
+        if not isinstance(cqm.get("per_question"), list):
+            cqm["per_question"] = []
+
+    # ── Nested: peer_comparison ───────────────────────────────────────────────
+    pc = result.get("peer_comparison")
+    if isinstance(pc, dict):
+        if not isinstance(pc.get("grade_distribution"), dict):
+            pc["grade_distribution"] = {}
+        if not isinstance(pc.get("radar_comparison"), list):
+            pc["radar_comparison"] = []
+
+    # ── Nested: next_interview_blueprint ─────────────────────────────────────
+    nib = result.get("next_interview_blueprint")
+    if isinstance(nib, dict):
+        if not isinstance(nib.get("focus_topics"), list):
+            nib["focus_topics"] = []
+
+    # ── Nested: interview_integrity ───────────────────────────────────────────
+    ii = result.get("interview_integrity")
+    if isinstance(ii, dict):
+        if not isinstance(ii.get("highlights"), list):
+            ii["highlights"] = []
+
+    # ── Nested: proctoring_summary ────────────────────────────────────────────
+    ps = result.get("proctoring_summary")
+    if isinstance(ps, dict):
+        if not isinstance(ps.get("counts"), dict):
+            ps["counts"] = {}
+
+    # ── Report quality metadata (migration 011) ───────────────────────────────
+    # Ensures old cached reports (pre-fix) served from DB never crash the new
+    # frontend code that reads these fields.
+    if not isinstance(result.get("report_quality"), str):
+        result["report_quality"] = "full"
+    if not isinstance(result.get("failed_sections"), list):
+        result["failed_sections"] = []
+    if not isinstance(result.get("stage_errors"), dict):
+        result["stage_errors"] = {}
+
+    return result
+
+
 def _is_complete_report(report: dict) -> bool:
     # Only require Stage 1 keys — always generated and always saved.
     # Stages 2-4 keys are bonuses; a report is "complete enough to serve" once
@@ -96,7 +187,8 @@ def _merge_per_question_analysis(
         payload = {**fallback, **(item or {})}
         payload.setdefault("question_id", fallback.get("question_id", f"Q{idx + 1}"))
         payload.setdefault("question_text", fallback.get("question_text", ""))
-        payload.setdefault("score", fallback.get("score", 0))
+        payload.setdefault("score",   fallback.get("score"))       # None preserved for skipped
+        payload.setdefault("skipped", fallback.get("skipped", False))
         payload.setdefault("verdict", fallback.get("verdict", ""))
         payload.setdefault("answer_summary", fallback.get("answer_summary", ""))
         payload.setdefault("category", fallback.get("category", "General"))
@@ -340,15 +432,11 @@ async def _gen_communication(
         "blind_spots": [],
         "what_went_wrong": "Unable to generate behavioral analysis for this session.",
     }
-    try:
-        content = await _achat([{"role": "user", "content": prompt}], temperature=0.3, max_tokens=3500)
-        result = json.loads(_clean(content))
-        for k, v in _EMPTY.items():
-            result.setdefault(k, v)
-        return result
-    except Exception as e:
-        print(f"[report] Stage 3 (communication) failed: {e}")
-        return _EMPTY
+    content = await _achat([{"role": "user", "content": prompt}], temperature=0.3, max_tokens=3500)
+    result = json.loads(_clean(content))
+    for k, v in _EMPTY.items():
+        result.setdefault(k, v)
+    return result
 
 
 # ── Stage 4: Playbook & Resources ────────────────────────────────────────────
@@ -381,15 +469,11 @@ async def _gen_playbook(
         "follow_up_questions": [],
         "next_interview_blueprint": None,
     }
-    try:
-        content = await _achat([{"role": "user", "content": prompt}], temperature=0.4, max_tokens=4000)
-        result = json.loads(_clean(content))
-        for k, v in _EMPTY.items():
-            result.setdefault(k, v)
-        return result
-    except Exception as e:
-        print(f"[report] Stage 4 (playbook) failed: {e}")
-        return _EMPTY
+    content = await _achat([{"role": "user", "content": prompt}], temperature=0.4, max_tokens=4000)
+    result = json.loads(_clean(content))
+    for k, v in _EMPTY.items():
+        result.setdefault(k, v)
+    return result
 
 
 # ── SSE generator ─────────────────────────────────────────────────────────────
@@ -460,21 +544,25 @@ async def _generate_report_sse(session_id: str, user_id: str):
     question_scores = []
     for entry in transcript:
         answer_text = entry.get("answer", "")
+        # Detect skipped questions via the explicit flag or the sentinel answer string
+        is_skipped = entry.get("skipped", False) or answer_text == "[SKIPPED]"
         if entry.get("question_type") == "mcq":
             selected = entry.get("selected_option") or answer_text or "No option selected"
             correct = entry.get("correct_option") or ""
             answer_text = f"Selected: {selected}"
             if correct:
                 answer_text += f" | Correct: {correct}"
+        raw_score = entry.get("score")
         question_scores.append({
             "question_id":        entry.get("question_id", ""),
             "question_text":      entry.get("question", ""),
             "answer_text":        answer_text,
-            "score":              entry.get("score") or 0,
+            "score":              None if is_skipped else raw_score,
+            "skipped":            is_skipped,
             "feedback":           entry.get("feedback", ""),
             "strengths":          entry.get("strengths", []),
             "improvements":       entry.get("improvements", []),
-            "verdict":            entry.get("verdict", ""),
+            "verdict":            "skipped" if is_skipped else entry.get("verdict", ""),
             "key_concept_missed": entry.get("key_concept_missed", ""),
             "answer_summary":     entry.get("answer_summary", ""),
             "category":           entry.get("category", round_type),
@@ -482,8 +570,10 @@ async def _generate_report_sse(session_id: str, user_id: str):
             "question_type":      entry.get("question_type", "speech"),
         })
 
-    valid_scores = [q["score"] for q in question_scores if q["score"]]
-    overall_raw  = round(sum(valid_scores) / len(valid_scores), 1) if valid_scores else 0.0
+    # Only average questions that were answered and evaluated (score is a real number)
+    scored = [q["score"] for q in question_scores
+              if q["score"] is not None and not q.get("skipped")]
+    overall_raw  = round(sum(scored) / len(scored), 1) if scored else 0.0
     overall_pct  = round(overall_raw * 10, 1)
 
     # ── Run voice analysis on stored transcript ───────────────────────────────
@@ -575,10 +665,14 @@ async def _generate_report_sse(session_id: str, user_id: str):
         core_task, cv_task, company_task, return_exceptions=True
     )
 
+    failed_stages: dict[str, str] = {}
+
     if isinstance(core_result, Exception):
+        failed_stages["stage1_core"] = str(core_result)
         print(f"[report/sse] Core failed: {core_result}")
         core_result = {}
     if isinstance(cv_result, Exception):
+        failed_stages["stage2_cv"] = str(cv_result)
         print(f"[report/sse] CV audit failed: {cv_result}")
         cv_result = {}
     if isinstance(company_fit_prelim, Exception):
@@ -643,12 +737,31 @@ async def _generate_report_sse(session_id: str, user_id: str):
     comm_result, playbook_result = await asyncio.gather(
         comm_task, playbook_task, return_exceptions=True
     )
+    _COMM_EMPTY = {
+        "communication_breakdown": {},
+        "six_axis_radar": {},
+        "bs_flag": [],
+        "pattern_groups": [],
+        "blind_spots": [],
+        "what_went_wrong": "",
+    }
+    _PLAYBOOK_EMPTY = {
+        "swot": {},
+        "skills_to_work_on": [],
+        "thirty_day_plan": {},
+        "auto_resources": [],
+        "follow_up_questions": [],
+        "next_interview_blueprint": None,
+    }
+
     if isinstance(comm_result, Exception):
+        failed_stages["stage3_communication"] = str(comm_result)
         print(f"[report/sse] Stage 3 failed: {comm_result}")
-        comm_result = {}
+        comm_result = _COMM_EMPTY
     if isinstance(playbook_result, Exception):
+        failed_stages["stage4_playbook"] = str(playbook_result)
         print(f"[report/sse] Stage 4 failed: {playbook_result}")
-        playbook_result = {}
+        playbook_result = _PLAYBOOK_EMPTY
 
     yield _sse({"stage": "company_fit", "progress": 70, "label": "Calibrating against hiring bar..."})
 
@@ -750,6 +863,32 @@ async def _generate_report_sse(session_id: str, user_id: str):
             "target_company": target_company,
             "raw_context": market_context[:800],
         }
+
+    # ── Compute report quality from which stages failed ───────────────────────
+    _core_failed = "stage1_core" in failed_stages or "stage2_cv" in failed_stages
+    _secondary_failed = "stage3_communication" in failed_stages or "stage4_playbook" in failed_stages
+
+    if _core_failed:
+        report_quality = "degraded"
+    elif _secondary_failed:
+        report_quality = "partial"
+    else:
+        report_quality = "full"
+
+    # Map failed stage keys to human-readable section names
+    _STAGE_SECTION_MAP = {
+        "stage1_core": ["overall_score", "radar_scores", "grade", "hire_recommendation",
+                        "strong_areas", "weak_areas", "failure_patterns", "per_question_analysis"],
+        "stage2_cv":   ["cv_audit", "study_roadmap", "study_recommendations",
+                        "mock_ready_topics", "not_ready_topics"],
+        "stage3_communication": ["communication_breakdown", "six_axis_radar", "bs_flag",
+                                 "pattern_groups", "blind_spots", "what_went_wrong"],
+        "stage4_playbook": ["swot", "thirty_day_plan", "skills_to_work_on",
+                            "auto_resources", "follow_up_questions", "next_interview_blueprint"],
+    }
+    failed_sections: list[str] = []
+    for stage_key in failed_stages:
+        failed_sections.extend(_STAGE_SECTION_MAP.get(stage_key, []))
 
     # ── Assemble final payload ────────────────────────────────────────────────
     report_payload = {
@@ -859,16 +998,81 @@ async def _generate_report_sse(session_id: str, user_id: str):
 
         # Meta
         "confidence_score": 85,
+
+        # ── Report quality metadata ──
+        "report_quality":   report_quality,
+        "failed_sections":  failed_sections,
+        "stage_errors":     failed_stages,
     }
 
+    # ── Normalize types before persist and emit ───────────────────────────────
+    report_payload = _normalize_report_payload(report_payload)
+
     # ── Persist ───────────────────────────────────────────────────────────────
+    # Each DB call is isolated so a failure in status-update calls does NOT
+    # falsely report the whole persist as failed. The report row existence is
+    # the source of truth for has_report on the dashboard (Bug #2 fix) — so
+    # even if mark/update_session fail, the user still sees the View Report button.
+    persist_ok = False
+    persist_error_msg = None
+
+    # Step 1 — Save the report row. This is the only call that sets persist_ok.
     try:
         save_report(session_id, report_payload)
-        update_session(session_id, {"status": "completed"})
+        persist_ok = True
     except Exception as e:
-        print(f"[report/sse] Persist failed: {e}")
+        persist_error_msg = str(e)
+        print(f"[report/sse] save_report failed: {e}")
+        try:
+            mark_report_persist_failed(session_id, persist_error_msg)
+        except Exception:
+            pass  # DB is truly unavailable; still deliver the report to the user
 
-    yield _sse({"stage": "complete", "progress": 100, "report": report_payload})
+    # Step 2 — Update report_status column. Best-effort; does NOT affect persist_ok.
+    if persist_ok:
+        try:
+            if report_quality == "degraded":
+                mark_report_degraded(session_id, failed_stages)
+            else:
+                mark_report_complete(session_id)
+        except Exception as e:
+            print(f"[report/sse] mark_report_status failed (non-fatal): {e}")
+
+    # Step 3 — Update session status. Best-effort; does NOT affect persist_ok.
+    if persist_ok:
+        try:
+            status_val = "report_degraded" if report_quality == "degraded" else "completed"
+            update_session(session_id, {"status": status_val})
+        except Exception as e:
+            print(f"[report/sse] update_session failed (non-fatal): {e}")
+
+    yield _sse({
+        "stage": "complete",
+        "progress": 100,
+        "report": report_payload,
+        "persist_status": "saved" if persist_ok else "failed",
+    })
+
+
+async def _safe_generate_report_sse(session_id: str, user_id: str):
+    """
+    Thin safety wrapper around _generate_report_sse.
+    If the inner generator raises an unhandled exception at any point, this
+    wrapper catches it and yields a terminal {"stage": "error"} event so the
+    frontend never hangs on an abruptly closed stream (C1 fix).
+    """
+    def _sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
+
+    try:
+        async for chunk in _generate_report_sse(session_id, user_id):
+            yield chunk
+    except Exception as e:
+        print(f"[report/sse] Unhandled generator crash for session {session_id}: {e}")
+        yield _sse({
+            "stage": "error",
+            "error": "An unexpected error occurred during report generation. Please try again.",
+        })
 
 
 # ── GET /api/v1/report/:session_id  (SSE stream) ─────────────────────────────
@@ -888,7 +1092,7 @@ async def get_or_generate_report(
     try:
         cached = get_report(session_id)
         if cached and _is_complete_report(cached):
-            return _ok(data=cached)
+            return _ok(data=_normalize_report_payload(cached))
         if cached:
             # A row exists but is still too sparse (e.g. a schema migration column
             # was just added). Log and fall through to regeneration only when
@@ -917,7 +1121,7 @@ async def get_or_generate_report(
 
     # ── Stream SSE generation ─────────────────────────────────────────────────
     return StreamingResponse(
-        _generate_report_sse(session_id, user["user_id"]),
+        _safe_generate_report_sse(session_id, user["user_id"]),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -941,10 +1145,211 @@ async def get_cached_report(
             session = get_session(session_id)
             if session and session.get("user_id") != user["user_id"]:
                 return _err("Access denied.", status=403)
-        return _ok(data=cached)
+        return _ok(data=_normalize_report_payload(cached))
     except RuntimeError:
         if _DEBUG:
             return _ok(data=_mock_report(session_id))
         return _err("Database not configured. Set SUPABASE_URL and SUPABASE_KEY.", status=503)
     except Exception as e:
         return _err(str(e), status=500)
+
+
+# ── POST /api/v1/report/:session_id/retry-save ────────────────────────────────
+@router.post("/{session_id}/retry-save")
+async def retry_save_report(
+    session_id: str,
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Called by the frontend when a persist_failed SSE event was received.
+    Accepts the full report payload and attempts to save it to the database.
+    """
+    try:
+        session = get_session(session_id)
+        if not session:
+            return _err("Session not found.", status=404)
+        if session.get("user_id") != user["user_id"]:
+            return _err("Access denied.", status=403)
+    except RuntimeError:
+        return _err("Database not configured.", status=503)
+    except Exception as e:
+        return _err(str(e), status=500)
+
+    report_payload = body.get("report")
+    if not report_payload or not isinstance(report_payload, dict):
+        return _err("Missing or invalid report payload.", status=422)
+
+    # Step 1 — Save the report row. Only this determines the success response.
+    try:
+        save_report(session_id, report_payload)
+    except Exception as e:
+        try:
+            mark_report_persist_failed(session_id, str(e))
+        except Exception:
+            pass
+        return _err(f"Save failed: {e}", status=503)
+
+    # Step 2 — Update report_status. Best-effort; does not affect the response.
+    report_quality = report_payload.get("report_quality", "full")
+    try:
+        if report_quality == "degraded":
+            mark_report_degraded(session_id, report_payload.get("stage_errors") or {})
+        else:
+            mark_report_complete(session_id)
+    except Exception as e:
+        print(f"[retry-save] mark_report_status failed (non-fatal): {e}")
+
+    # Step 3 — Update session status. Best-effort; does not affect the response.
+    try:
+        status_val = "report_degraded" if report_quality == "degraded" else "completed"
+        update_session(session_id, {"status": status_val})
+    except Exception as e:
+        print(f"[retry-save] update_session failed (non-fatal): {e}")
+
+    return _ok(data={"saved": True})
+
+
+# ── POST /api/v1/report/:session_id/retry-stages ─────────────────────────────
+@router.post("/{session_id}/retry-stages")
+async def retry_failed_stages(
+    session_id: str,
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Re-runs only the specified failed stages (stage3_communication, stage4_playbook)
+    and merges the results back into the stored report payload.
+    Called by the frontend SectionRetryCard when a user clicks "Regenerate Section".
+    """
+    try:
+        session = get_session(session_id)
+        if not session:
+            return _err("Session not found.", status=404)
+        if session.get("user_id") != user["user_id"]:
+            return _err("Access denied.", status=403)
+    except RuntimeError:
+        return _err("Database not configured.", status=503)
+    except Exception as e:
+        return _err(str(e), status=500)
+
+    stages = body.get("stages", [])
+    if not stages or not isinstance(stages, list):
+        return _err("Missing or invalid 'stages' list.", status=422)
+
+    valid_stages = {"stage3_communication", "stage4_playbook"}
+    unknown = set(stages) - valid_stages
+    if unknown:
+        return _err(f"Unknown stages: {sorted(unknown)}. Valid: {sorted(valid_stages)}", status=422)
+
+    # Load existing partial report
+    cached = get_report(session_id)
+    if not cached:
+        return _err("No existing report found to merge into.", status=404)
+
+    # Pull context needed to re-run stages
+    question_scores = cached.get("question_scores") or []
+    voice_metrics = cached.get("voice_metrics")
+    delivery_consistency = cached.get("delivery_consistency")
+    round_type = cached.get("round_type", "technical_fundamentals")
+    overall_pct = cached.get("overall_score", 0.0)
+    weak_areas = cached.get("weak_areas", [])
+    strong_areas = cached.get("strong_areas", [])
+    failure_patterns = cached.get("failure_patterns", [])
+    company_fit = cached.get("company_fit") or {}
+    target_company = cached.get("target_company", "")
+    candidate_year = session.get("candidate_year", "")
+
+    merged_fields: list[str] = []
+    new_failed_stages: dict[str, str] = dict(cached.get("stage_errors") or {})
+
+    # Re-run stage3 if requested
+    if "stage3_communication" in stages:
+        try:
+            comm_result = await _gen_communication(
+                question_scores=question_scores,
+                voice_metrics=voice_metrics,
+                delivery_consistency=delivery_consistency,
+                round_type=round_type,
+                overall_score=overall_pct,
+            )
+            for field in ["communication_breakdown", "six_axis_radar", "bs_flag",
+                          "pattern_groups", "blind_spots", "what_went_wrong"]:
+                cached[field] = comm_result.get(field, cached.get(field))
+            merged_fields.extend(["communication_breakdown", "six_axis_radar", "bs_flag",
+                                   "pattern_groups", "blind_spots", "what_went_wrong"])
+            new_failed_stages.pop("stage3_communication", None)
+        except Exception as e:
+            new_failed_stages["stage3_communication"] = str(e)
+            print(f"[retry-stages] Stage 3 retry failed: {e}")
+
+    # Re-run stage4 if requested
+    if "stage4_playbook" in stages:
+        try:
+            playbook_result = await _gen_playbook(
+                weak_areas=weak_areas,
+                strong_areas=strong_areas,
+                pattern_groups=failure_patterns,
+                company_fit=company_fit,
+                round_type=round_type,
+                overall_score=overall_pct,
+                target_company=target_company,
+                candidate_year=candidate_year,
+            )
+            for field in ["swot", "skills_to_work_on", "thirty_day_plan",
+                          "auto_resources", "follow_up_questions", "next_interview_blueprint"]:
+                cached[field] = playbook_result.get(field, cached.get(field))
+            merged_fields.extend(["swot", "skills_to_work_on", "thirty_day_plan",
+                                   "auto_resources", "follow_up_questions", "next_interview_blueprint"])
+            new_failed_stages.pop("stage4_playbook", None)
+        except Exception as e:
+            new_failed_stages["stage4_playbook"] = str(e)
+            print(f"[retry-stages] Stage 4 retry failed: {e}")
+
+    # Recompute quality after retry
+    _core_still_failed = any(k in new_failed_stages for k in ("stage1_core", "stage2_cv"))
+    _secondary_still_failed = any(k in new_failed_stages for k in ("stage3_communication", "stage4_playbook"))
+    if _core_still_failed:
+        new_quality = "degraded"
+    elif _secondary_still_failed:
+        new_quality = "partial"
+    else:
+        new_quality = "full"
+
+    # Rebuild failed_sections list
+    _STAGE_SECTION_MAP = {
+        "stage1_core": ["overall_score", "radar_scores", "grade", "hire_recommendation",
+                        "strong_areas", "weak_areas", "failure_patterns", "per_question_analysis"],
+        "stage2_cv":   ["cv_audit", "study_roadmap", "study_recommendations",
+                        "mock_ready_topics", "not_ready_topics"],
+        "stage3_communication": ["communication_breakdown", "six_axis_radar", "bs_flag",
+                                 "pattern_groups", "blind_spots", "what_went_wrong"],
+        "stage4_playbook": ["swot", "thirty_day_plan", "skills_to_work_on",
+                            "auto_resources", "follow_up_questions", "next_interview_blueprint"],
+    }
+    new_failed_sections: list[str] = []
+    for stage_key in new_failed_stages:
+        new_failed_sections.extend(_STAGE_SECTION_MAP.get(stage_key, []))
+
+    cached["report_quality"] = new_quality
+    cached["failed_sections"] = new_failed_sections
+    cached["stage_errors"] = new_failed_stages
+
+    # Normalize and persist
+    cached = _normalize_report_payload(cached)
+    try:
+        save_report(session_id, cached)
+        if new_quality != "degraded":
+            mark_report_complete(session_id)
+            update_session(session_id, {"status": "completed"})
+        else:
+            mark_report_degraded(session_id, new_failed_stages)
+    except Exception as e:
+        print(f"[retry-stages] Persist after retry failed: {e}")
+
+    return _ok(data={
+        "merged_fields": merged_fields,
+        "report_quality": new_quality,
+        "failed_sections": new_failed_sections,
+        "report": cached,
+    })
