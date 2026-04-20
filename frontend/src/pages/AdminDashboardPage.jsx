@@ -48,19 +48,24 @@ function gradeColor(grade) {
 }
 
 function getActivityStatus(user, sessionsByUser, onlineIds) {
-  if (onlineIds.includes(user.id)) return { label: 'Active Now', color: '#4ade80', dot: '#4ade80', pulse: true }
-
+  if (onlineIds.includes(user.id)) return {
+    label: 'Active Now', pulse: true,
+    pill: 'activity-pill-green', dot: 'activity-dot-green',
+  }
   const userSessions = sessionsByUser[user.id] || []
   const timestamps = [
     user.last_sign_in_at ? new Date(user.last_sign_in_at) : null,
     userSessions[0]?.created_at ? new Date(userSessions[0].created_at) : null,
   ].filter(Boolean)
-  if (!timestamps.length) return { label: 'Inactive', color: '#6b7280', dot: '#6b7280', pulse: false }
+  if (!timestamps.length) return {
+    label: 'Inactive', pulse: false,
+    pill: 'activity-pill-grey', dot: 'activity-dot-grey',
+  }
   const latest = new Date(Math.max(...timestamps))
   const hoursAgo = (Date.now() - latest) / 36e5
-  if (hoursAgo < 24)  return { label: 'Active Today',      color: '#a78bfa', dot: '#a78bfa', pulse: false }
-  if (hoursAgo < 168) return { label: 'Active This Week',  color: '#facc15', dot: '#facc15', pulse: false }
-  return { label: 'Inactive', color: '#6b7280', dot: '#6b7280', pulse: false }
+  if (hoursAgo < 24)  return { label: 'Active Today',     pulse: false, pill: 'activity-pill-violet', dot: 'activity-dot-violet' }
+  if (hoursAgo < 168) return { label: 'Active This Week', pulse: false, pill: 'activity-pill-amber',  dot: 'activity-dot-amber'  }
+  return { label: 'Inactive', pulse: false, pill: 'activity-pill-grey', dot: 'activity-dot-grey' }
 }
 
 function hireColor(hr) {
@@ -1167,19 +1172,19 @@ export default function AdminDashboardPage() {
 
   // ── Stat cards ────────────────────────────────────────────────────────────
   const stats = [
-    { label: 'Registered Students', value: users.length,           icon: Users,         color: 'text-violet-400', bg: 'bg-violet-500/20 border-violet-500/30' },
-    { label: 'Total Sessions',      value: sessions.length,        icon: ClipboardList, color: 'text-blue-400',   bg: 'bg-blue-500/20 border-blue-500/30' },
-    { label: 'Resume Uploads',      value: profiles.length,        icon: FileText,      color: 'text-emerald-400', bg: 'bg-emerald-500/20 border-emerald-500/30' },
-    { label: 'Active Students',     value: activeStudents.length,  icon: TrendingUp,    color: 'text-yellow-400', bg: 'bg-yellow-500/20 border-yellow-500/30' },
+    { label: 'Registered Students', value: users.length,          icon: Users,         color: isDark ? 'text-violet-400' : 'text-violet-600', iconBg: isDark ? 'bg-violet-500/15 border-violet-500/25' : 'bg-violet-100 border-violet-200',  gradient: 'linear-gradient(90deg,#5b5ef6,#7c3aed)' },
+    { label: 'Total Sessions',      value: sessions.length,       icon: ClipboardList, color: isDark ? 'text-blue-400'   : 'text-blue-600',   iconBg: isDark ? 'bg-blue-500/15 border-blue-500/25'     : 'bg-blue-100 border-blue-200',      gradient: 'linear-gradient(90deg,#3b82f6,#06b6d4)' },
+    { label: 'Resume Uploads',      value: profiles.length,       icon: FileText,      color: isDark ? 'text-emerald-400': 'text-emerald-600', iconBg: isDark ? 'bg-emerald-500/15 border-emerald-500/25': 'bg-emerald-100 border-emerald-200', gradient: 'linear-gradient(90deg,#10b981,#06b6d4)' },
+    { label: 'Active Students',     value: activeStudents.length, icon: TrendingUp,    color: isDark ? 'text-amber-400'  : 'text-amber-600',  iconBg: isDark ? 'bg-yellow-500/15 border-yellow-500/25'  : 'bg-amber-100 border-amber-200',    gradient: 'linear-gradient(90deg,#f59e0b,#f97316)' },
   ]
 
   // ── Row components ─────────────────────────────────────────────────────────
   const StudentRow = ({ user, extra, openTab = 'overview' }) => (
-    <tr className="border-t border-white/5 hover:bg-[var(--color-surface-2)] transition-colors">
+    <tr className="admin-row">
       <td className="px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center flex-shrink-0">
-            <span className="text-violet-300 text-xs font-bold uppercase">
+          <div className="w-8 h-8 rounded-full admin-avatar flex items-center justify-center flex-shrink-0">
+            <span className={`text-xs font-bold uppercase ${isDark ? 'text-violet-300' : 'text-violet-600'}`}>
               {(user.name || user.email || '?')[0]}
             </span>
           </div>
@@ -1194,7 +1199,7 @@ export default function AdminDashboardPage() {
       <td className="px-4 py-3">
         <button
           onClick={() => setSelectedUser({ id: user.id, tab: openTab, visibleTabs: [openTab] })}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 text-violet-300 text-xs font-medium transition-all"
+          className="admin-show-btn"
         >
           <Eye className="w-3.5 h-3.5" />
           Show
@@ -1204,13 +1209,13 @@ export default function AdminDashboardPage() {
   )
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}>
+    <div className="admin-bg" style={{ color: 'var(--color-text)' }}>
       {/* Navbar */}
-      <header className="border-b border-[var(--color-border)] backdrop-blur-sm sticky top-0 z-30" style={{ background: 'var(--color-surface)' }}>
+      <header className="admin-header sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-violet-500/20 border border-violet-500/30">
-              <Shield className="w-5 h-5 text-violet-400" />
+            <div className="p-2 rounded-xl admin-logo-badge">
+              <Shield className="w-5 h-5 text-violet-500" />
             </div>
             <div>
               <h1 className="text-[var(--color-text)] font-bold text-lg leading-none">Admin Panel</h1>
@@ -1218,7 +1223,7 @@ export default function AdminDashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={loadData} disabled={loading} className="flex items-center gap-2 px-3 py-2 rounded-lg text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)] transition-all text-sm">
+            <button onClick={loadData} disabled={loading} className="flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-sm font-medium" style={{ color: 'var(--color-muted)' }} onMouseEnter={e => { e.currentTarget.style.color='#5b5ef6'; e.currentTarget.style.background='rgba(91,94,246,0.07)'; }} onMouseLeave={e => { e.currentTarget.style.color='var(--color-muted)'; e.currentTarget.style.background=''; }}>
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
@@ -1241,14 +1246,14 @@ export default function AdminDashboardPage() {
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {stats.map(s => (
-            <div key={s.label} className="glass-card rounded-xl p-4">
-              <div className="flex items-center gap-3 mb-2">
-                <div className={`p-2 rounded-xl border ${s.bg}`}>
+            <div key={s.label} className="admin-stat-card" style={{ '--card-accent': s.gradient }}>
+              <div className="flex items-center justify-between mb-3">
+                <div className={`p-2 rounded-xl border ${s.iconBg}`}>
                   <s.icon className={`w-4 h-4 ${s.color}`} />
                 </div>
               </div>
-              <p className={`text-2xl font-bold ${s.color}`}>{loading ? '—' : s.value}</p>
-              <p className="text-[var(--color-muted)] text-xs mt-1">{s.label}</p>
+              <p className={`text-3xl font-bold tracking-tight ${s.color}`}>{loading ? '—' : s.value}</p>
+              <p className="text-[var(--color-muted)] text-xs mt-1.5 font-medium">{s.label}</p>
             </div>
           ))}
         </div>
@@ -1261,19 +1266,17 @@ export default function AdminDashboardPage() {
         )}
 
         {/* Search + Tabs */}
-        <div className="glass-card rounded-2xl overflow-hidden">
-          <div className="p-6 border-b border-[var(--color-border)]">
+        <div className="admin-data-card">
+          <div className="p-5 border-b" style={{ borderColor: 'rgba(91,94,246,0.08)' }}>
             <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
               {/* Tabs */}
-              <div className="flex gap-1 bg-[var(--color-surface-2)] rounded-xl p-1">
+              <div className="flex gap-1 admin-tab-bar">
                 {TABS.map(t => (
                   <button
                     key={t.id}
                     onClick={() => setActiveTab(t.id)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeTab === t.id
-                        ? 'bg-violet-500 text-[var(--color-text)]shadow-lg shadow-violet-500/25'
-                        : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
+                    className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-all ${
+                      activeTab === t.id ? 'admin-tab-active' : 'admin-tab-inactive'
                     }`}
                   >
                     <t.icon className="w-4 h-4" />
@@ -1284,13 +1287,13 @@ export default function AdminDashboardPage() {
 
               {/* Search */}
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-muted-light)]" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-muted-light)] pointer-events-none" />
                 <input
                   type="text"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder="Search by name or email…"
-                  className="input-field pl-9 pr-9 w-64 text-sm"
+                  className="admin-search"
                 />
                 {search && (
                   <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-muted-light)] hover:text-[var(--color-text-2)]">
@@ -1313,12 +1316,12 @@ export default function AdminDashboardPage() {
                 {activeTab === 'registered' && (
                   <table className="w-full">
                     <thead>
-                      <tr className="border-b border-[var(--color-border)]">
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Student</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Joined</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Sessions</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Last Active</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Actions</th>
+                      <tr className="admin-thead-row">
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-[0.07em]">Student</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-[0.07em]">Joined</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-[0.07em]">Sessions</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-[0.07em]">Last Active</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-[0.07em]">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1327,11 +1330,11 @@ export default function AdminDashboardPage() {
                       ) : filteredUsers.map(u => {
                         const activity = getActivityStatus(u, sessionsByUser, onlineIds)
                         return (
-                          <tr key={u.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-2)] transition-colors">
+                          <tr key={u.id} className="admin-row">
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center flex-shrink-0">
-                                  <span className="text-violet-300 text-xs font-bold uppercase">
+                                <div className="w-8 h-8 rounded-full admin-avatar flex items-center justify-center flex-shrink-0">
+                                  <span className={`text-xs font-bold uppercase ${isDark ? 'text-violet-300' : 'text-violet-600'}`}>
                                     {(displayName(u) || u.email || '?')[0]}
                                   </span>
                                 </div>
@@ -1343,23 +1346,28 @@ export default function AdminDashboardPage() {
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-[var(--color-muted)] text-sm">{fmt(u.created_at)}</td>
-                            <td className="px-4 py-3 text-[var(--color-text-2)] text-sm">{sessionsByUser[u.id]?.length || 0}</td>
+                            <td className="px-4 py-3 text-[var(--color-muted)] text-sm tabular-nums">{fmt(u.created_at)}</td>
                             <td className="px-4 py-3">
-                              <div className="flex items-center gap-2" title={activity.label}>
-                                <span className="relative flex h-2.5 w-2.5">
+                              {(sessionsByUser[u.id]?.length || 0) > 0
+                                ? <span className="session-count-badge">{sessionsByUser[u.id].length}</span>
+                                : <span className="text-[var(--color-muted-light)] text-sm">—</span>
+                              }
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`activity-pill ${activity.pill}`}>
+                                <span className="relative flex h-2 w-2 flex-shrink-0">
                                   {activity.pulse && (
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: activity.dot }} />
+                                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 ${activity.dot}`} />
                                   )}
-                                  <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ backgroundColor: activity.dot }} />
+                                  <span className={`relative inline-flex rounded-full h-2 w-2 ${activity.dot}`} />
                                 </span>
-                                <span className="text-xs" style={{ color: activity.color }}>{activity.label}</span>
-                              </div>
+                                {activity.label}
+                              </span>
                             </td>
                             <td className="px-4 py-3">
                               <button
                                 onClick={() => setSelectedUser({ id: u.id, tab: 'overview', visibleTabs: ['overview', 'resume', 'sessions'] })}
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 text-violet-300 text-xs font-medium transition-all"
+                                className="admin-show-btn"
                               >
                                 <Eye className="w-3.5 h-3.5" />
                                 Show
@@ -1387,12 +1395,12 @@ export default function AdminDashboardPage() {
                 {activeTab === 'resumes' && (
                   <table className="w-full">
                     <thead>
-                      <tr className="border-b border-[var(--color-border)]">
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Student</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Joined</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Resumes Uploaded</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">First Upload</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wider">Action</th>
+                      <tr className="admin-thead-row">
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-[0.07em]">Student</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-[0.07em]">Joined</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-[0.07em]">Resumes Uploaded</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-[0.07em]">First Upload</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-[0.07em]">Action</th>
                       </tr>
                     </thead>
                     <tbody>
