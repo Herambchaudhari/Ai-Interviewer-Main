@@ -10,6 +10,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { updateProfile } from '../lib/api'
+import { supabase } from '../lib/supabase'
 import { COMPANY_SECTORS } from '../constants/companies'
 import {
   Settings, GraduationCap, Building2, FileText,
@@ -106,6 +107,19 @@ export default function SettingsPage() {
     }
 
     localStorage.setItem('student_meta', JSON.stringify(studentMeta))
+
+    // Save to Supabase user_metadata so admin can always see it
+    await supabase.auth.updateUser({
+      data: {
+        name:             studentMeta.name,
+        full_name:        studentMeta.name,   // keep in sync with signup metadata key
+        year:             studentMeta.year,
+        branch:           studentMeta.branch,
+        cgpa:             studentMeta.cgpa,
+        target_sectors:   studentMeta.target_sectors,
+        target_companies: studentMeta.target_companies,
+      }
+    })
 
     if (profileId) {
       try { await updateProfile(profileId, studentMeta) } catch {}

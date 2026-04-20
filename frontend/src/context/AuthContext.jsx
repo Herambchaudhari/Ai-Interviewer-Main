@@ -1,5 +1,8 @@
 import { createContext, useContext, useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import axios from 'axios'
+
+const API = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/v1` : '/api/v1'
 
 const AuthContext = createContext(null)
 
@@ -8,6 +11,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // Auth state listener
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s)
@@ -22,11 +26,27 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Heartbeat — fires immediately when user is known, then every 20s
+  useEffect(() => {
+    const userId = user?.id
+    if (!userId) return
+
+    const beat = () => {
+      axios.post(`${API}/admin/heartbeat`, { user_id: userId })
+        .catch(e => console.error('[heartbeat error]', e.response?.status, e.message))
+    }
+
+    beat()
+    const id = setInterval(beat, 20000)
+    return () => clearInterval(id)
+  }, [user?.id])
+
   const signInWithEmail = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
     return data
   }
+
 
   const signUpWithEmail = async (email, password, name = '') => {
     const { data, error } = await supabase.auth.signUp({

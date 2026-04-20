@@ -12,8 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
-from routers import resume, interview, transcribe, report, reports, session, context_hub, portfolio, news, progress, share
-from routers import admin
+from routers import resume, interview, transcribe, report, reports, session, context_hub, portfolio, news, progress, share, admin
 
 logger = logging.getLogger(__name__)
 
