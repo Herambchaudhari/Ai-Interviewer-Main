@@ -9,22 +9,44 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let mounted = true
+    let resolvedByListener = false
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      if (!mounted) return
+      resolvedByListener = true
       setSession(s)
       setUser(s?.user ?? null)
-      if (s?.access_token) {
-        localStorage.setItem('access_token', s.access_token)
-      } else {
-        localStorage.removeItem('access_token')
-      }
+      if (s?.access_token) localStorage.setItem('access_token', s.access_token)
+      else localStorage.removeItem('access_token')
       setLoading(false)
     })
-    return () => subscription.unsubscribe()
+
+    // Guarantee localStorage token is present before any component mounts and fires an API call
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (!mounted) return
+      if (s?.access_token) localStorage.setItem('access_token', s.access_token)
+      else localStorage.removeItem('access_token')
+      if (!resolvedByListener) {
+        setSession(s)
+        setUser(s?.user ?? null)
+        setLoading(false)
+      }
+    })
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   const signInWithEmail = async (email, password) => {
+    setLoading(true)
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
+    if (error) {
+      setLoading(false)
+      throw error
+    }
     return data
   }
 

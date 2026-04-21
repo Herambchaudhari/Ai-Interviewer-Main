@@ -12,19 +12,51 @@ const api = axios.create({ baseURL: `${BASE_URL}/api/v1` })
 
 // Attach Supabase JWT on every request
 api.interceptors.request.use(async (config) => {
-  const { data: { session } } = await supabase.auth.getSession()
-  if (session?.access_token) {
-    config.headers.Authorization = `Bearer ${session.access_token}`
+  let token = null
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.access_token) {
+      token = session.access_token
+      localStorage.setItem('access_token', token)
+    } else {
+      // getSession() returned null — could be a brief post-login race.
+      // Fall back to the token stored by onAuthStateChange rather than
+      // sending the request without auth (which would cause a 401 loop).
+      token = localStorage.getItem('access_token')
+    }
+  } catch (_) {
+    token = localStorage.getItem('access_token')
   }
+  if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 
-// Response interceptor — log errors and re-throw cleanly
+// Response interceptor — retry once on 401 with a fresh token, then sign out
+let _signingOut = false
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const msg = error.response?.data?.error || error.response?.data?.detail || error.message
     console.error('[API Error]', msg, error.config?.url)
+    if (error.response?.status === 401 && !_signingOut && !error.config?._retry) {
+      error.config._retry = true
+      try {
+        const { data: { session } } = await supabase.auth.refreshSession()
+        if (session?.access_token) {
+          localStorage.setItem('access_token', session.access_token)
+          error.config.headers.Authorization = `Bearer ${session.access_token}`
+          return api.request(error.config)
+        }
+      } catch (_) {}
+      _signingOut = true
+      try { await supabase.auth.signOut() } catch (_) {}
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('profile_id')
+      localStorage.removeItem('parsed_profile')
+      localStorage.removeItem('student_meta')
+      sessionStorage.setItem('session_expired', '1')
+      window.location.href = '/auth'
+    }
     return Promise.reject(error)
   }
 )

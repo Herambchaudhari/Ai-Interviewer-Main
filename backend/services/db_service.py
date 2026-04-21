@@ -309,8 +309,7 @@ def get_active_sessions(user_id: str) -> list:
             _db()
             .table("sessions")
             .select(
-                "id, round_type, difficulty, target_company, target_role, "
-                "current_question_index, last_checkpoint_at, created_at, context_bundle"
+                "id, round_type, difficulty, current_question_index, created_at"
             )
             .eq("user_id", user_id)
             .eq("status", "active")

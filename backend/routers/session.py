@@ -334,6 +334,24 @@ async def start_session(
     )
 
 
+@router.get("/active")
+async def list_active_sessions(
+    user: dict = Depends(get_current_user),
+):
+    """
+    Return all incomplete sessions for the current user (newest first).
+    Registered BEFORE /{session_id} so 'active' is not swallowed as a session ID.
+    """
+    try:
+        sessions = get_active_sessions(user["user_id"])
+    except RuntimeError as e:
+        return _err(str(e), status=503)
+    except Exception as e:
+        return _err(f"Could not fetch active sessions: {e}", status=500)
+
+    return _ok(data={"sessions": sessions})
+
+
 @router.get("/{session_id}")
 async def get_session_endpoint(
     session_id: str,
@@ -1165,24 +1183,6 @@ async def save_session_checkpoint(
         return _err("Session not found or access denied.", status=404)
 
     return _ok(data={"session_id": session_id, "checkpointed": True})
-
-
-@router.get("/active")
-async def list_active_sessions(
-    user: dict = Depends(get_current_user),
-):
-    """
-    Return all incomplete sessions for the current user (newest first).
-    Used by the frontend to offer a 'Resume interview?' prompt.
-    """
-    try:
-        sessions = get_active_sessions(user["user_id"])
-    except RuntimeError as e:
-        return _err(str(e), status=503)
-    except Exception as e:
-        return _err(f"Could not fetch active sessions: {e}", status=500)
-
-    return _ok(data={"sessions": sessions})
 
 
 @router.get("/{session_id}/resume")

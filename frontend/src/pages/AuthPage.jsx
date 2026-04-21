@@ -12,7 +12,7 @@ import toast from 'react-hot-toast'
 
 export default function AuthPage() {
   const navigate = useNavigate()
-  const { user, signInWithEmail, signUpWithEmail } = useAuth()
+  const { user, loading: authLoading, signInWithEmail, signUpWithEmail } = useAuth()
 
   const [mode, setMode]               = useState('signin')
   const [name, setName]               = useState('')
@@ -23,10 +23,10 @@ export default function AuthPage() {
   const [loading, setLoading]         = useState(false)
   const [error, setError]             = useState(null)
 
-  // If already logged in, redirect
+  // Navigate after auth state settles — never before (avoids race with onAuthStateChange)
   useEffect(() => {
-    if (user) navigate('/dashboard', { replace: true })
-  }, [user, navigate])
+    if (!authLoading && user) navigate('/dashboard', { replace: true })
+  }, [authLoading, user, navigate])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -51,7 +51,7 @@ export default function AuthPage() {
       } else {
         await signInWithEmail(email, password)
         toast.success('Welcome back! 🎉')
-        navigate('/dashboard')
+        // navigate is handled by the useEffect above, after onAuthStateChange settles
       }
     } catch (err) {
       const msg = err.message || 'Authentication failed'
