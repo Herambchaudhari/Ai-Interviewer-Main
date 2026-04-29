@@ -1748,14 +1748,18 @@ def update_checklist_item(checklist_id: str, item_id: str, checked: bool) -> boo
 
 # ── Share Report ───────────────────────────────────────────────────────────────
 
-def generate_share_token(session_id: str) -> Optional[dict]:
+def generate_share_token(session_id: str, user_id: str) -> Optional[dict]:
     """
     Generate (or reuse) a share token for a report.
-    Returns { share_token, share_url_path } or None on error.
+    Defence-in-depth: verifies session is owned by user_id before mutating.
+    Returns { share_token, report_id } or None on error / not found / not owned.
     """
     try:
         import secrets
-        # Check if a share token already exists for this session
+        sess = get_session(session_id)
+        if not sess or sess.get("user_id") != user_id:
+            return None
+
         existing = (
             _db().table("reports")
             .select("id, share_token, share_enabled")
@@ -1770,10 +1774,10 @@ def generate_share_token(session_id: str) -> Optional[dict]:
         if not token:
             token = secrets.token_urlsafe(24)
 
-        _db().table("reports").update({
+        (_db().table("reports").update({
             "share_token":   token,
             "share_enabled": True,
-        }).eq("session_id", session_id).execute()
+        }).eq("session_id", session_id).execute())
 
         return {"share_token": token, "report_id": existing.data["id"]}
     except Exception as e:
@@ -1801,12 +1805,19 @@ def get_report_by_share_token(token: str) -> Optional[dict]:
         return None
 
 
-def disable_share_token(session_id: str) -> bool:
-    """Revoke the public share link for a report."""
+def disable_share_token(session_id: str, user_id: str) -> bool:
+    """
+    Revoke the public share link for a report.
+    Defence-in-depth: verifies session is owned by user_id before mutating.
+    """
     try:
-        _db().table("reports").update({
+        sess = get_session(session_id)
+        if not sess or sess.get("user_id") != user_id:
+            return False
+
+        (_db().table("reports").update({
             "share_enabled": False,
-        }).eq("session_id", session_id).execute()
+        }).eq("session_id", session_id).execute())
         return True
     except Exception as e:
         print(f"[disable_share_token] error: {e}")

@@ -3,7 +3,7 @@
  * Dark theme, glass card, professional look.
  */
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { Brain, Mail, Lock, User, Eye, EyeOff, Sparkles, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -147,6 +147,18 @@ export default function AuthPage() {
                 </button>
               </div>
             </div>
+
+            {/* Forgot password (signin only) */}
+            {mode === 'signin' && (
+              <div className="flex justify-end -mt-1">
+                <Link
+                  to="/forgot-password"
+                  className="text-xs text-purple-400 hover:text-purple-300 font-semibold transition-colors"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+            )}
 
             {/* Confirm password (signup only) */}
             {mode === 'signup' && (

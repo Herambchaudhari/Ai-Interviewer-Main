@@ -56,6 +56,20 @@ export function AuthProvider({ children }) {
     return data
   }
 
+  const sendPasswordReset = async (email) => {
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+    if (error) throw error
+    return data
+  }
+
+  const updatePassword = async (newPassword) => {
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) throw error
+    return data
+  }
+
   // OAuth disabled — re-enable when Google OAuth is configured in Supabase
   // const signInWithGoogle = async () => {
   //   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -79,6 +93,7 @@ export function AuthProvider({ children }) {
   const value = {
     user, session, loading,
     signInWithEmail, signUpWithEmail, signOut,
+    sendPasswordReset, updatePassword,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
