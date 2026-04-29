@@ -225,6 +225,12 @@ async def get_report_endpoint(
 ):
     """Fetch a saved report for the given session."""
     try:
+        session = get_session(session_id)
+        if not session:
+            return _err("Session not found.", status=404)
+        if session.get("user_id") != user["user_id"]:
+            return _err("Access denied.", status=403)
+
         cached = get_report(session_id)
         if cached:
             return _ok(data=cached)

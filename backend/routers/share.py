@@ -14,6 +14,7 @@ from services.db_service import (
     generate_share_token,
     get_report_by_share_token,
     disable_share_token,
+    get_session,
 )
 from routers.session import get_current_user   # reuse existing JWT dep
 
@@ -24,8 +25,14 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 # ── Generate / refresh share token ────────────────────────────────────────────
 @router.post("/{session_id}")
-async def create_share_link(session_id: str, user_id: str = Depends(get_current_user)):
-    result = generate_share_token(session_id)
+async def create_share_link(session_id: str, user: dict = Depends(get_current_user)):
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if session.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    result = generate_share_token(session_id, user["user_id"])
     if not result:
         raise HTTPException(status_code=404, detail="Report not found for this session.")
 
@@ -44,8 +51,14 @@ async def create_share_link(session_id: str, user_id: str = Depends(get_current_
 
 # ── Revoke share link ─────────────────────────────────────────────────────────
 @router.delete("/{session_id}")
-async def revoke_share_link(session_id: str, user_id: str = Depends(get_current_user)):
-    ok = disable_share_token(session_id)
+async def revoke_share_link(session_id: str, user: dict = Depends(get_current_user)):
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if session.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    ok = disable_share_token(session_id, user["user_id"])
     if not ok:
         raise HTTPException(status_code=404, detail="Could not revoke share link.")
     return {"success": True, "data": {"revoked": True}, "error": None}
