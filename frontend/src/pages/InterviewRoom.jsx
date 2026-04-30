@@ -79,7 +79,8 @@ function TimerDisplay({ timeLeft, formattedTime, colorState, totalSeconds }) {
 export default function InterviewRoom() {
   const { sessionId } = useParams()
   const navigate      = useNavigate()
-  const [endingSession, setEndingSession] = useState(false)
+  const [endingSession,    setEndingSession]    = useState(false)
+  const [showEndConfirm,   setShowEndConfirm]   = useState(false)
   const endInterviewRef = useRef(null)
   const webcamVideoRef = useRef(null)
   const lastProctorToastRef = useRef('')
@@ -127,7 +128,19 @@ export default function InterviewRoom() {
   // ── Hooks ─────────────────────────────────────────────────────────────────
   const { isRecording, startRecording, stopRecording, resetRecording } = useAudioRecorder(120)
 
-  const totalSecs  = session ? (session.timer_minutes || 30) * 60 : 1800
+  // Read timer duration synchronously so useTimer initialises with the correct value.
+  // session state is null at mount (loaded via useEffect), so we can't rely on it here.
+  const totalSecs = (() => {
+    try {
+      const raw = sessionStorage.getItem(`session_${sessionId}`)
+      if (raw) {
+        const s = JSON.parse(raw)
+        const mins = s.timer_minutes || s.timer_mins || 30
+        return Math.max(300, mins * 60)   // minimum 5 minutes
+      }
+    } catch {}
+    return 1800  // 30-min fallback
+  })()
   const storageKey = sessionId ? `timer_${sessionId}` : null
 
   const handleWarning = useCallback(() => {
@@ -262,6 +275,8 @@ export default function InterviewRoom() {
   useEffect(() => {
     if (!isMCQ || !currentQ || mcqTimeLeft > 0 || status === 'evaluating' || status === 'done') return
     if (mcqAutoSubmitRef.current === currentQ.id) return
+    // Guard: only auto-submit if not already being submitted manually
+    if (status === 'processing') return
     mcqAutoSubmitRef.current = currentQ.id
     toast('Question timed out. Submitting current selection...', { icon: '⏱️', duration: 2200 })
     handleSubmit(false, null, { timedOut: true })
@@ -297,7 +312,7 @@ export default function InterviewRoom() {
           question_difficulty: difficulty,
           round_type:          roundType,
           is_follow_up:        currentQ?.is_follow_up || false,
-          candidate_year:      JSON.parse(sessionStorage.getItem('student_meta') || '{}')?.year || null,
+          candidate_year:      JSON.parse(localStorage.getItem('student_meta') || '{}')?.year || null,
         })
         setStatus('idle')
       } catch {
@@ -587,6 +602,40 @@ export default function InterviewRoom() {
         </div>
       )}
 
+      {/* ── End Interview Confirmation Modal ─────────────────────────────── */}
+      {showEndConfirm && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
+          <div className="glass max-w-sm w-full p-7 text-center"
+            style={{ border: '1px solid rgba(239,68,68,0.35)' }}>
+            <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center"
+              style={{ background: 'rgba(239,68,68,0.15)' }}>
+              <Flag size={24} className="text-red-400" />
+            </div>
+            <h2 className="text-xl font-bold mb-2">End Interview?</h2>
+            <p className="text-muted text-sm leading-relaxed mb-6">
+              You have answered <strong>{qIndex}</strong> of <strong>{total}</strong> questions.
+              Ending now will generate your report based on answers submitted so far.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowEndConfirm(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:bg-white/5"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-muted)' }}>
+                Keep Going
+              </button>
+              <button
+                onClick={() => { setShowEndConfirm(false); endInterview('manual') }}
+                disabled={endingSession}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.45)', color: '#f87171' }}>
+                {endingSession ? 'Ending…' : 'End & Get Report'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-6 py-3 border-b flex-shrink-0"
         style={{ borderColor: 'var(--color-border)' }}>
@@ -629,7 +678,7 @@ export default function InterviewRoom() {
           <TimerDisplay timeLeft={timeLeft} formattedTime={formattedTime}
             colorState={colorState} totalSeconds={totalSecs} />
           <button id="end-interview-btn"
-            onClick={handleManualEndAttempt}
+            onClick={() => setShowEndConfirm(true)}
             className="btn-secondary text-xs py-2 px-3">
             <Flag size={13} /> End
           </button>

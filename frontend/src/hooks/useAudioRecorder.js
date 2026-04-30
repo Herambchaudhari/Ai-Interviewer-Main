@@ -80,6 +80,7 @@ export function useAudioRecorder(maxDuration = DEFAULT_MAX_DURATION) {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     } catch (err) {
+      chunksRef.current = []   // clear any stale chunks from a previous failed attempt
       const msg = err.name === 'NotAllowedError'
         ? 'Microphone permission denied. Please allow access in browser settings.'
         : `Could not access microphone: ${err.message}`

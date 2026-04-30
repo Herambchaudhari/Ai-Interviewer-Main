@@ -205,6 +205,63 @@ _TIME_LIMITS = {
     "hard":   240,
 }
 
+_ELO_START = 1200
+
+_EVAL_DIMENSIONS = [
+    "technical_accuracy", "depth_completeness", "communication_clarity",
+    "confidence_delivery", "example_quality", "structure",
+]
+
+
+def _compute_question_quotas(num_questions: int, round_type: str) -> dict:
+    """
+    Technical: 20% CS core from DB · 50% role-based LLM · 30% resume LLM
+    HR:        30% behavioral from DB · 70% resume-based LLM
+    DSA/MCQ:   0% DB (all LLM-generated or pre-built bank)
+    """
+    if round_type == "technical":
+        db_q     = max(1, round(num_questions * 0.20))
+        resume_q = max(1, round(num_questions * 0.30))
+        live_q   = num_questions - db_q - resume_q
+        return {"db": db_q, "live": max(0, live_q), "resume": resume_q}
+    elif round_type == "hr":
+        db_q     = max(1, round(num_questions * 0.30))
+        resume_q = num_questions - db_q
+        return {"db": db_q, "live": 0, "resume": max(0, resume_q)}
+    else:
+        # DSA / MCQ — no DB questions from question_bank
+        return {"db": 0, "live": num_questions, "resume": 0}
+
+
+def _compute_initial_ability_vector() -> dict:
+    return {
+        "scores": {dim: _ELO_START for dim in _EVAL_DIMENSIONS},
+        "answered_count": 0,
+    }
+
+
+def _update_ability_vector(ability_vector: dict, evaluation: dict) -> dict:
+    """ELO-style update: adjust each dimension score based on the answer quality."""
+    if not isinstance(ability_vector, dict):
+        ability_vector = _compute_initial_ability_vector()
+
+    scores  = dict(ability_vector.get("scores") or {dim: _ELO_START for dim in _EVAL_DIMENSIONS})
+    count   = (ability_vector.get("answered_count") or 0) + 1
+    raw_score = float(evaluation.get("score") or 5)
+
+    # K-factor: aggressive early (fewer answered), conservative later
+    K = 48 if count <= 3 else 32 if count <= 6 else 20
+
+    # Expected score on a 0-10 scale mapped to 0-1
+    for dim in _EVAL_DIMENSIONS:
+        dim_score = float((evaluation.get("dimension_scores") or {}).get(dim, raw_score))
+        # ELO expected vs actual (both normalised 0-1)
+        expected  = 1 / (1 + 10 ** ((1200 - scores.get(dim, _ELO_START)) / 400))
+        actual    = dim_score / 10.0
+        scores[dim] = round(scores.get(dim, _ELO_START) + K * (actual - expected), 2)
+
+    return {"scores": scores, "answered_count": count}
+
 
 @router.post("/start")
 async def start_session(
@@ -284,6 +341,18 @@ async def start_session(
     first_q["time_limit_secs"] = time_limit
     questions = [first_q]
 
+    # ── Compute question quotas + initial ability vector ─────────────────────
+    quotas  = _compute_question_quotas(body.num_questions, round_type)
+    ability = _compute_initial_ability_vector()
+
+    # ── Tag the first question with its source (may be db or live) ────────────
+    # First question is always LLM-generated (resume intro / role opener)
+    # Count it against the resume or live bucket depending on round_type
+    if round_type == "hr":
+        initial_counters = {"db": 0, "live": 0, "resume": 1}
+    else:
+        initial_counters = {"db": 0, "live": 0, "resume": 1}
+
     # ── Save session ───────────────────────────────────────────────────────
     session_data = {
         "user_id":               user["user_id"],
@@ -299,11 +368,14 @@ async def start_session(
         "target_company":        context.get("target_company", ""),
         "target_role":           context.get("job_role", ""),
         "current_question_index": 0,
-        "context_bundle":        context,      # full assembled context for adaptive engine
+        "context_bundle":        context,
         "conversation_history":  [],
         "detected_weaknesses":   {},
         "avoided_topics":        [],
         "target_interview_date": body.target_interview_date or None,
+        "question_quotas":       quotas,
+        "question_counters":     initial_counters,
+        "ability_vector":        ability,
     }
 
     # Save session
@@ -587,11 +659,16 @@ async def submit_answer(
             detected_weaknesses, q_topic, float(evaluation.get("score") or 5)
         )
 
+        # Update ability vector (ELO-style)
+        ability_vector = dict(session.get("ability_vector") or {})
+        ability_vector = _update_ability_vector(ability_vector, evaluation)
+
         update_session(body.session_id, {
             "transcript":            existing_transcript,
             "scores":                existing_scores,
             "current_question_index": q_index + 1,
             "detected_weaknesses":   detected_weaknesses,
+            "ability_vector":        ability_vector,
         })
     except Exception as e:
         print(f"[submit_answer] persist failed: {e}")

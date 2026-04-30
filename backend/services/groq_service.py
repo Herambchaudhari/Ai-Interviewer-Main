@@ -1372,7 +1372,7 @@ async def _gen_core(
         content = await _achat(
             [{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=4500,
+            max_tokens=6000,   # increased: 15Q sessions need ~5,500 tokens
         )
         result = json.loads(_clean(content))
 
@@ -1391,8 +1391,10 @@ async def _gen_core(
                 for i, q in enumerate(question_scores)
             ]
 
-        # Fill defaults for new fields if LLM skipped them
-        result.setdefault("hire_signal", _EMPTY_HIRE_SIGNAL)
+        # Fill defaults for new fields if LLM skipped or returned empty objects
+        hs = result.get("hire_signal")
+        if not isinstance(hs, dict) or len(hs) < 3:
+            result["hire_signal"] = _EMPTY_HIRE_SIGNAL
         result.setdefault("failure_patterns", [])
         # Use per-category fallback so all axes don't get the same value
         if not result.get("radar_scores"):

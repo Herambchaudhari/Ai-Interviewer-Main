@@ -11,26 +11,41 @@ from typing import Optional
 _ROUND_INSTRUCTIONS = {
     "technical": (
         "ROUND: TECHNICAL\n"
-        "QUESTION DISTRIBUTION (STRICT - you MUST follow this ratio across the full interview):\n"
-        "  * 50% CORE CS AND ROLE FUNDAMENTALS - OOP (classes, inheritance, polymorphism, SOLID), DBMS (SQL, normalization, ACID, indexing, transactions), "
-        "OS (processes, threads, scheduling, memory management, deadlocks, paging), "
-        "Computer Networks (OSI model, TCP/IP, HTTP/S, DNS, sockets).\n"
-        "  * 50% PROJECT AND RESUME DEEP-DIVES - tied directly to the candidate's listed projects and skills. "
-        "Reference their actual projects by name (e.g. 'In your {project} you used {tech}. How did you handle X?'). "
-        "Cover language internals, frameworks they listed, architecture decisions they made.\n"
-        "  * NO EXTRA ALGORITHMIC BUCKET - stay focused on a balanced mix of resume-backed deep dives and core or role fundamentals.\n\n"
-        "- Probe depth: start broad, drill down based on their answer.\n"
-        "- Mix conceptual ('What is X?') and applied ('How would you use X to solve Y?') questions.\n"
-        "- CRITICAL: Keep the interview explicitly aligned to the candidate's target role, such as frontend, backend, full-stack, data, ML, DevOps, or mobile.\n"
-        "- You MUST ask both resume-based questions and standalone role or CS fundamentals questions "
-        "(e.g. 'Explain normalisation in DBMS', 'What is a deadlock?', 'How does browser rendering work?') that are NOT tied to their resume."
+        "QUESTION DISTRIBUTION (STRICT — the adaptive engine enforces this via quota, "
+        "but your LLM-generated questions must also respect this split):\n"
+        "  * 20% CORE CS (served from question bank automatically — you may receive a "
+        "DB question as context; treat it as given)\n"
+        "  * 50% ROLE-BASED FUNDAMENTALS — OOP (inheritance, polymorphism, SOLID), "
+        "DBMS (SQL, normalization, ACID, indexing, transactions), "
+        "OS (processes, threads, scheduling, memory management, deadlocks), "
+        "Computer Networks (TCP/IP, HTTP/S, DNS, sockets, REST). "
+        "Align to the candidate's target role (backend, frontend, full-stack, ML, etc).\n"
+        "  * 30% RESUME DEEP-DIVES — tied directly to the candidate's listed projects and skills. "
+        "Reference their actual projects by name (e.g. 'In your {project} you used {tech} — "
+        "how did you handle X?'). Cover language internals, frameworks listed, architecture decisions.\n\n"
+        "- When the adaptive engine directive says RESUME_DEEP_DIVE, you MUST generate a resume question.\n"
+        "- Probe depth: start broad, drill down based on their answer quality.\n"
+        "- Mix conceptual ('What is X?') and applied ('How would you use X in your project?').\n"
+        "- CRITICAL: Align to the candidate's target role explicitly."
     ),
     "hr": (
         "ROUND: HR / BEHAVIOURAL\n"
-        "- Use STAR-method oriented questions (Situation, Task, Action, Result).\n"
-        "- Reference their actual job experience and projects to personalise every question.\n"
-        "- Cover: teamwork, conflict resolution, leadership, failure/learning, time management.\n"
-        "- Avoid generic questions - tie every question to something in their resume."
+        "QUESTION DISTRIBUTION (STRICT — follow this across the full interview):\n"
+        "  * 30% GENERIC BEHAVIORAL — cover STAR categories: Leadership, Conflict Resolution, "
+        "Failure & Learning, Teamwork, Initiative, Time Management, Adaptability, Communication. "
+        "Each category at most once. Do NOT repeat a category already covered.\n"
+        "  * 70% RESUME GRILLING — tie directly to the candidate's stated experience, projects, "
+        "and skills. Ask them to reflect on a specific situation from THEIR resume using STAR. "
+        "E.g. 'In your NurseConnect project you led the geo-location feature — tell me about a "
+        "time that feature hit a problem and how you resolved it.'\n\n"
+        "STAR ENFORCEMENT: Every behavioral question must be answerable with a STAR story. "
+        "Do NOT ask 'how would you...' (hypothetical) — ask 'tell me about a time you...' (real). "
+        "Follow up on vague answers: 'What was the specific outcome?' or 'What did YOU do vs the team?'\n\n"
+        "CATEGORY TRACKER: Before generating a question, check the conversation history. "
+        "If Leadership has been covered, pick a different category next. "
+        "Rotate through categories systematically — do not repeat.\n\n"
+        "TONE: Professional but warm. Probe for specifics. Never accept 'we did X' — always "
+        "redirect to 'what did YOU specifically do?'"
     ),
     "dsa": (
         "ROUND: DSA / CODING\n"
@@ -250,8 +265,10 @@ def _fmt_education(edu: list) -> str:
 
 
 def _fmt_history(history: list) -> str:
+    # Cap at last 4 exchanges (8 turns) to keep prompt size bounded.
+    # Earlier exchanges are summarised in the score annotations on each answer.
     lines = []
-    for turn in (history or [])[-10:]:
+    for turn in (history or [])[-8:]:
         role = turn.get("role", "")
         content = (turn.get("content") or "")[:300]
         prefix = "Alex:" if role == "assistant" else "Candidate:"

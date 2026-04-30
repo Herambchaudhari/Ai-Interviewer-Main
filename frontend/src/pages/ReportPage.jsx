@@ -5,21 +5,27 @@
  * Sections (in render order):
  *  1. SSE Loading State  (while generating)
  *  2. What Went Wrong callout
- *  3. Score Header + Improvement Delta
- *  4. Repeated Offenders alert
- *  5. 6-Axis Communication Radar + Delivery Consistency
- *  6. Filler & Hesitation Heatmap
- *  7. Per-Question Deep Dive
- *  8. Root Cause Pattern Groups + B.S. Detector
- *  9. Company Fit Calibration (if target_company set)
- * 10. SWOT Analysis
- * 11. Skill Decay Alerts
- * 12. CV Audit
- * 13. Skills to Work On
- * 14. 30-Day Sprint Plan
- * 15. Follow-Up Questions
- * 16. Next Interview Blueprint CTA
- * 17. Study Recommendations (legacy)
+ *  3. Repeated Offenders (deferred — only when data exists across sessions)
+ *  4. Score Header + Improvement Delta
+ *  5. Failure Patterns (promoted — root causes of low-scoring answers)
+ *  6. Two-Radar Grid: Technical Knowledge Breakdown + Hire Signal Radar
+ *  7. 6-Axis Communication Radar + Delivery Consistency
+ *  8. MCQ Category Breakdown (mcq_practice only)
+ *  9. Filler & Hesitation Heatmap
+ * 10. Per-Question Scores
+ * 11. Verbal Category Breakdown (non-mcq rounds, deterministic)
+ * 12. Strong & Weak Areas
+ * 13. Code Quality (DSA only)
+ * 14. Company Fit (if target_company set)
+ * 15. Skill Decay (deferred — only when cross-session data exists)
+ * 16. CV Audit
+ * 17. Skills to Work On
+ * 18. 30-Day Sprint Plan
+ * 19. Follow-Up Questions
+ * 20. Per-Question Deep Dive
+ * 21. Preparation Checklist
+ * 22. Interview Integrity (proctoring — at bottom)
+ * 23. Next Interview Blueprint CTA
  */
 import './print.css'
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -32,11 +38,12 @@ import {
 import { getReportWithSSE, getCachedReportOnly, generateShareLink, getUserChecklists, toggleChecklistItem, retrySaveReport, retryStages } from '../lib/api'
 import SectionErrorBoundary from '../components/SectionErrorBoundary'
 import SectionRetryCard from '../components/SectionRetryCard'
+import HireSignalRadar from '../components/charts/HireSignalRadar'
 import {
   Trophy, TrendingUp, TrendingDown, BookOpen, ChevronRight,
   Star, RotateCcw, Home, CheckCircle, XCircle, AlertTriangle,
   Target, Zap, Brain, ArrowUp, ArrowDown, Minus, Shield,
-  MessageSquare, BarChart2, Compass, Clock, Flame, Eye,
+  MessageSquare, BarChart2, Clock, Flame, Eye,
   Share2, Download, Play, Pause, Volume2, X, Copy, Check, Users,
 } from 'lucide-react'
 
@@ -1001,41 +1008,6 @@ export default function ReportPage() {
         )}
 
         {/* ── Hero Score Card ─────────────────────────────────────────────── */}
-        {interview_integrity && (
-          <SectionCard icon={<Shield size={16}/>} title="Interview Integrity" color="#22d3ee">
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
-              {[
-                { label: 'Status', value: interview_integrity?.status ?? 'Unknown', color: interview_integrity?.status === 'Clear' ? '#4ade80' : interview_integrity?.status === 'Minor Concerns' ? '#facc15' : '#f87171' },
-                { label: 'Integrity Score', value: `${interview_integrity?.score ?? '—'}/100`, color: scoreColor(interview_integrity?.score ?? 0) },
-                { label: 'Flagged Events', value: interview_integrity?.total_incidents ?? 0, color: '#f97316' },
-                { label: 'Camera Uptime', value: `${Math.round((proctoring_summary?.camera_uptime_ratio || 0) * 100)}%`, color: '#22d3ee' },
-              ].map(card => (
-                <div key={card.label} className="rounded-xl p-4"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
-                  <p className="text-xs text-muted uppercase tracking-wider mb-1">{card.label}</p>
-                  <p className="text-lg font-bold" style={{ color: card.color }}>{card.value}</p>
-                </div>
-              ))}
-            </div>
-            <p className="text-sm text-muted leading-relaxed mb-4">{interview_integrity?.summary || 'No integrity summary available.'}</p>
-            {proctoring_summary?.counts && Object.keys(proctoring_summary.counts).length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-4">
-                {Object.entries(proctoring_summary?.counts ?? {}).map(([key, value]) => (
-                  <Chip key={key} label={`${key.replaceAll('_', ' ')}: ${value}`} color={value ? '#f97316' : '#64748b'} size="xs" />
-                ))}
-              </div>
-            )}
-            <div className="space-y-2">
-              {interview_integrity.highlights?.map((item, index) => (
-                <div key={index} className="flex gap-2 text-sm">
-                  <AlertTriangle size={14} className="text-amber-300 flex-shrink-0 mt-0.5" />
-                  <p className="text-muted">{item}</p>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        )}
-
         <div className="glass p-8 flex flex-col sm:flex-row items-center gap-8">
           <ScoreRing score={overall} size={140} max={100} />
           <div className="flex-1 text-center sm:text-left">
@@ -1086,6 +1058,63 @@ export default function ReportPage() {
             ))}
           </div>
         </div>
+
+        {/* ── Failure Patterns ─────────────────────────────────────────────── */}
+        {failure_patterns?.length > 0 && (
+          <SectionCard icon={<AlertTriangle size={16}/>} title="What Went Wrong — Root Causes" color="#f87171">
+            <p className="text-xs text-muted mb-3">These are the core patterns behind your low-scoring answers.</p>
+            <div className="space-y-3">
+              {failure_patterns.map((p, i) => {
+                const text   = typeof p === 'string' ? p : p.pattern || ''
+                const desc   = typeof p === 'object' ? (p.description || p.fix || '') : ''
+                const affect = typeof p === 'object' ? (p.questions_affected || []) : []
+                return (
+                  <div key={i} className="p-4 rounded-xl"
+                    style={{ background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)' }}>
+                    <p className="font-semibold text-sm text-red-300 mb-1">{text}</p>
+                    {affect.length > 0 && (
+                      <p className="text-xs text-muted mb-1">Affected: {affect.join(', ')}</p>
+                    )}
+                    {desc && <p className="text-sm text-muted">{desc}</p>}
+                  </div>
+                )
+              })}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Two-Radar Grid: Technical Knowledge + Hire Signal ────────────── */}
+        <SectionErrorBoundary>
+        {(legacyRadarData.length > 0 || Object.keys(hire_signal || {}).length >= 3) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {legacyRadarData.length > 0 && (
+              <SectionCard icon={<Brain size={16}/>} title="Technical Knowledge Breakdown" color="#7c3aed">
+                <p className="text-xs text-muted mb-3">
+                  Performance across core CS domains covered in this session.
+                </p>
+                <ResponsiveContainer width="100%" height={260}>
+                  <RadarChart data={legacyRadarData} margin={{ top: 0, right: 30, bottom: 0, left: 30 }}>
+                    <PolarGrid stroke="rgba(255,255,255,0.08)" />
+                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                    <Radar name="Score" dataKey="A" stroke="#7c3aed" fill="#7c3aed" fillOpacity={0.2}
+                      dot={{ r: 3, fill: '#a78bfa' }} />
+                    <Tooltip formatter={(v) => [`${v}/10`, 'Score']}
+                      contentStyle={{ background: '#1e1e2e', border: '1px solid #7c3aed40', borderRadius: 8 }} />
+                  </RadarChart>
+                </ResponsiveContainer>
+              </SectionCard>
+            )}
+            {Object.keys(hire_signal || {}).length >= 3 && (
+              <SectionCard icon={<Target size={16}/>} title="Hire Signal" color="#f59e0b">
+                <p className="text-xs text-muted mb-3">
+                  How a hiring manager would rate your readiness across 5 dimensions.
+                </p>
+                <HireSignalRadar hireSignal={hire_signal} />
+              </SectionCard>
+            )}
+          </div>
+        )}
+        </SectionErrorBoundary>
 
         {/* ── 6-Axis Communication Radar + Delivery Consistency ───────────── */}
         <SectionErrorBoundary>
@@ -1257,6 +1286,37 @@ export default function ReportPage() {
           </SectionCard>
         </SectionErrorBoundary>
 
+        {/* ── Verbal Category Breakdown ────────────────────────────────────── */}
+        {round_type !== 'mcq_practice' && category_breakdown?.length > 0 && (
+          <SectionCard icon={<BarChart2 size={16}/>} title="Performance by Topic Category" color="#7c3aed">
+            <p className="text-xs text-muted mb-3">
+              Average score per CS pillar — shows exactly where preparation is needed.
+            </p>
+            <div className="space-y-3">
+              {category_breakdown.map((cat, i) => {
+                const score = cat.avg_score ?? cat.accuracy ?? 0
+                const pct   = Math.min(100, Math.max(0, score))
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-sm text-muted w-24 truncate flex-shrink-0">{cat.category}</span>
+                    <div className="flex-1 bg-white/5 rounded-full h-2">
+                      <div className="h-2 rounded-full transition-all"
+                        style={{ width: `${pct}%`, background: scoreColor(pct) }} />
+                    </div>
+                    <span className="text-xs font-semibold w-10 text-right flex-shrink-0"
+                      style={{ color: scoreColor(pct) }}>
+                      {pct.toFixed(0)}%
+                    </span>
+                    {cat.verdict && (
+                      <span className="text-xs text-muted flex-shrink-0 w-20 text-right truncate">{cat.verdict}</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </SectionCard>
+        )}
+
         {/* ── Strong & Weak Areas ─────────────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <SectionCard icon={<CheckCircle size={16}/>} title="Strong Areas" color="#4ade80">
@@ -1296,49 +1356,6 @@ export default function ReportPage() {
           </SectionCard>
         </div>
 
-        {/* ── Root Cause Pattern Groups ────────────────────────────────────── */}
-        {pattern_groups?.length > 0 && (
-          <SectionCard icon={<Brain size={16}/>} title="Root Cause Analysis" color="#e879f9">
-            <div className="space-y-4">
-              {pattern_groups.map((p, i) => (
-                <div key={i} className="p-4 rounded-xl"
-                  style={{ background: `rgba(232,121,249,0.06)`, border: '1px solid rgba(232,121,249,0.2)' }}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Chip label={p.severity || 'medium'} color={p.severity === 'critical' ? '#f87171' : p.severity === 'high' ? '#fb923c' : '#facc15'} />
-                    <p className="font-semibold text-sm">{p.pattern}</p>
-                  </div>
-                  {p.questions_affected?.length > 0 && (
-                    <p className="text-xs text-muted mb-1">Affects: {p.questions_affected.join(', ')}</p>
-                  )}
-                  <p className="text-sm text-muted"><span className="text-white">Root cause:</span> {p.core_gap}</p>
-                  {p.evidence && <p className="text-xs text-muted mt-1 italic">"{p.evidence}"</p>}
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        )}
-
-        {/* ── B.S. Detector ───────────────────────────────────────────────── */}
-        {bs_flag?.length > 0 && (
-          <div className="rounded-2xl p-5"
-            style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
-            <h2 className="font-bold mb-3 flex items-center gap-2 text-red-400">
-              <Shield size={16} /> Evasion Detected
-            </h2>
-            <p className="text-xs text-muted mb-3">Questions where you rambled without giving a real answer:</p>
-            <div className="space-y-3">
-              {bs_flag.map((f, i) => (
-                <div key={i} className="flex gap-3">
-                  <Chip label={f.question_id} color="#f87171" />
-                  <div>
-                    <p className="text-sm">{f.flag_reason}</p>
-                    <p className="text-xs text-muted">Detection confidence: {f.confidence}%</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* ── Code Quality Analysis (DSA rounds only) ─────────────────────── */}
         <SectionErrorBoundary>
@@ -1582,37 +1599,7 @@ export default function ReportPage() {
 
         </SectionErrorBoundary>
 
-        {/* ── SWOT Grid ───────────────────────────────────────────────────── */}
         <SectionErrorBoundary>
-        {failedSections.includes('swot') && !stageRetrySuccess['stage4_playbook'] ? (
-          <SectionRetryCard
-            sectionLabel="SWOT Analysis & 30-Day Plan"
-            onRetry={() => handleRetryStage('stage4_playbook')}
-            isRetrying={retryingStage === 'stage4_playbook'}
-            retrySuccess={!!stageRetrySuccess['stage4_playbook']}
-          />
-        ) : swot && Object.keys(swot).length > 0 && (
-          <SectionCard icon={<Compass size={16}/>} title="SWOT Analysis" color="#7c3aed">
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { key: 'strengths',     label: 'Strengths',     color: '#4ade80', icon: '↑' },
-                { key: 'weaknesses',    label: 'Weaknesses',    color: '#f87171', icon: '↓' },
-                { key: 'opportunities', label: 'Opportunities', color: '#22d3ee', icon: '→' },
-                { key: 'threats',       label: 'Threats',       color: '#fb923c', icon: '⚠' },
-              ].map(({ key, label, color, icon }) => (
-                <div key={key} className="p-4 rounded-xl"
-                  style={{ background: `${color}08`, border: `1px solid ${color}25` }}>
-                  <p className="text-xs font-bold mb-2" style={{ color }}>{icon} {label}</p>
-                  <ul className="space-y-1">
-                    {(swot[key] || []).map((item, i) => (
-                      <li key={i} className="text-xs text-muted">• {item}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        )}
 
         {/* ── Skill Decay Alerts ──────────────────────────────────────────── */}
         {skill_decay?.length > 0 && (
@@ -1845,8 +1832,8 @@ export default function ReportPage() {
           </div>
         )}
 
-        {/* ── Adaptive Study Schedule ─────────────────────────────────────── */}
-        {study_schedule != null && (
+        {/* Adaptive Study Schedule — deferred (needs 3+ sessions to be meaningful) */}
+        {false && study_schedule != null && (
           <SectionCard icon={<BookOpen size={16}/>} title="Adaptive Study Schedule" color="#4ade80">
             {study_schedule.topics?.length === 0 && (
               <div className="flex items-center gap-3 py-2">
@@ -1994,33 +1981,44 @@ export default function ReportPage() {
           )
         })()}
 
-        {/* ── Study Recommendations (legacy) ──────────────────────────────── */}
-        {study_recommendations?.length > 0 && (
-          <SectionCard icon={<BookOpen size={16}/>} title="Study Recommendations" color="#f59e0b">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {study_recommendations.map((r, i) => {
-                const topic = typeof r === 'string' ? r : r.topic
-                const priority = r.priority
-                const reason = r.reason
-                return (
-                  <div key={i} className="p-3 rounded-xl"
-                    style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                    <div className="flex items-start gap-2 mb-1">
-                      <span className="text-amber-400 font-bold text-sm flex-shrink-0">{i + 1}.</span>
-                      <div>
-                        <p className="text-sm font-medium leading-snug">{topic}</p>
-                        {priority && <Chip label={priority} size="xs" color={priority === 'High' ? '#f87171' : '#facc15'} />}
-                        {reason && <p className="text-xs text-muted mt-1">{reason}</p>}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
+
+        </SectionErrorBoundary>
+
+        {/* ── Interview Integrity (proctoring) — shown at bottom ──────────── */}
+        {interview_integrity && (
+          <SectionCard icon={<Shield size={16}/>} title="Interview Integrity" color="#22d3ee">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
+              {[
+                { label: 'Status', value: interview_integrity?.status ?? 'Unknown', color: interview_integrity?.status === 'Clear' ? '#4ade80' : interview_integrity?.status === 'Minor Concerns' ? '#facc15' : '#f87171' },
+                { label: 'Integrity Score', value: `${interview_integrity?.score ?? '—'}/100`, color: scoreColor(interview_integrity?.score ?? 0) },
+                { label: 'Flagged Events', value: interview_integrity?.total_incidents ?? 0, color: '#f97316' },
+                { label: 'Camera Uptime', value: `${Math.round((proctoring_summary?.camera_uptime_ratio || 0) * 100)}%`, color: '#22d3ee' },
+              ].map(card => (
+                <div key={card.label} className="rounded-xl p-4"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
+                  <p className="text-xs text-muted uppercase tracking-wider mb-1">{card.label}</p>
+                  <p className="text-lg font-bold" style={{ color: card.color }}>{card.value}</p>
+                </div>
+              ))}
+            </div>
+            <p className="text-sm text-muted leading-relaxed mb-4">{interview_integrity?.summary || 'No integrity summary available.'}</p>
+            {proctoring_summary?.counts && Object.keys(proctoring_summary.counts).length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {Object.entries(proctoring_summary?.counts ?? {}).map(([key, value]) => (
+                  <Chip key={key} label={`${key.replaceAll('_', ' ')}: ${value}`} color={value ? '#f97316' : '#64748b'} size="xs" />
+                ))}
+              </div>
+            )}
+            <div className="space-y-2">
+              {interview_integrity.highlights?.map((item, index) => (
+                <div key={index} className="flex gap-2 text-sm">
+                  <AlertTriangle size={14} className="text-amber-300 flex-shrink-0 mt-0.5" />
+                  <p className="text-muted">{item}</p>
+                </div>
+              ))}
             </div>
           </SectionCard>
         )}
-
-        </SectionErrorBoundary>
 
         {/* ── Next Interview Blueprint CTA ─────────────────────────────────── */}
         <SectionErrorBoundary>

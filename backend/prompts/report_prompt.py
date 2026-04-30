@@ -116,54 +116,6 @@ Return ONLY valid JSON. No markdown, no text outside the JSON object:
     {radar_schema}
   }},
 
-  "category_breakdown": [
-    {{
-      "category": "<e.g. OOP>",
-      "score": <integer 0-100>,
-      "verdict": "<Strong|Good|Average|Weak>",
-      "comment": "<1 specific sentence citing actual answer evidence>"
-    }}
-  ],
-
-  "strong_areas": [
-    {{
-      "area": "<name>",
-      "evidence": "<quote or specific moment from their answer>",
-      "score": <integer 0-100>
-    }}
-  ],
-
-  "weak_areas": [
-    {{
-      "area": "<name>",
-      "what_was_missed": "<specific concept, formula, or pattern they couldn't articulate>",
-      "how_to_improve": "<concrete, actionable 1-2 sentence advice>",
-      "score": <integer 0-100>
-    }}
-  ],
-
-  "red_flags": [
-    "<Only include if candidate showed extreme arrogance, blame-shifting, or cultural toxicity. Empty array [] if none.>"
-  ],
-
-  "per_question_analysis": [
-    {{
-      "question_id": "<Q1|Q2|...>",
-      "question_text": "<full question text>",
-      "score": <integer 0-10>,
-      "verdict": "<Excellent|Good|Satisfactory|Needs Improvement|Poor>",
-      "answer_summary": "<2-3 sentence summary of what they actually said>",
-      "key_insight": "<1 sharp, specific actionable insight — what they must learn from this question>",
-      "category": "<category>"
-    }}
-  ],
-
-  "interview_tips": [
-    "<actionable technique tip 1 — specific to their performance patterns>",
-    "<tip 2>",
-    "<tip 3>"
-  ],
-
   "hire_signal": {{
     "technical_depth":  {{ "score": <1-10>, "rationale": "<1 sentence citing specific answer>" }},
     "communication":    {{ "score": <1-10>, "rationale": "<1 sentence>" }},
@@ -179,6 +131,45 @@ Return ONLY valid JSON. No markdown, no text outside the JSON object:
       "root_cause": "<1-2 sentences on WHY this pattern likely occurred>",
       "fix": "<1-2 specific, actionable sentences on how to fix it>"
     }}
+  ],
+
+  "strong_areas": [
+    {{
+      "area": "<name>",
+      "evidence": "<quote or specific moment from their answer>",
+      "score": <integer 0-100>
+    }}
+  ],
+
+  "weak_areas": [
+    {{
+      "area": "<name>",
+      "what_was_missed": "<specific concept, formula, or pattern they couldn't articulate>",
+      "how_to_improve": "<concrete, 3-4 sentence actionable advice with specific resources>",
+      "score": <integer 0-100>
+    }}
+  ],
+
+  "red_flags": [
+    "<Only include if candidate showed extreme arrogance, blame-shifting, or cultural toxicity. Empty array [] if none.>"
+  ],
+
+  "interview_tips": [
+    "<actionable technique tip 1 — specific to their performance patterns>",
+    "<tip 2>",
+    "<tip 3>"
+  ],
+
+  "per_question_analysis": [
+    {{
+      "question_id": "<Q1|Q2|...>",
+      "question_text": "<full question text>",
+      "score": <integer 0-10>,
+      "verdict": "<Excellent|Good|Satisfactory|Needs Improvement|Poor>",
+      "answer_summary": "<2-3 sentence summary of what they actually said>",
+      "key_insight": "<1 sharp, specific actionable insight — what they must learn from this question>",
+      "category": "<category>"
+    }}
   ]
 }}
 
@@ -186,7 +177,8 @@ GRADING RULES:
 - 90-100 = A+, 80-89 = A, 70-79 = B+, 60-69 = B, 50-59 = C+, 40-49 = C, <40 = D
 - hire_recommendation: Strong Yes ≥85, Yes 70-84, Maybe 50-69, No <50
 - Minimum: 2 strong_areas, 2 weak_areas, complete per_question_analysis for ALL questions
-- failure_patterns: identify at least 1 if overall score <80, empty array only if near-perfect"""
+- failure_patterns: identify at least 1 if overall score <80, empty array only if near-perfect
+- hire_signal MUST always be fully populated with all 5 sub-scores and rationale strings"""
 
 
 # ── STAGE 2: CV Audit Prompt ─────────────────────────────────────────────────

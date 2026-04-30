@@ -3,7 +3,7 @@
  * Props: { roundType, onStart, onBack }
  */
 import { useState, useEffect } from 'react'
-import { ChevronLeft, Zap, Clock, HelpCircle, Loader2, Play, Sparkles, Building2, Briefcase, Repeat } from 'lucide-react'
+import { ChevronLeft, Zap, Clock, Loader2, Play, Sparkles, Building2, Briefcase, Repeat } from 'lucide-react'
 import { startSession } from '../lib/api'
 import { requestAppFullscreen } from '../lib/fullscreen'
 import { useNavigate } from 'react-router-dom'
@@ -93,14 +93,19 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
         if (raw) studentMeta = JSON.parse(raw)
       } catch {}
 
+      // Industry calibration: ~3 min per question for verbal/technical rounds.
+      // 10 min=4Q, 15m=5Q, 20m=7Q, 30m=10Q, 45m=15Q, 60m=18Q max.
+      // MCQ is faster: ~2 min per question, cap at 20.
+      const computedQuestions = roundType === 'mcq_practice'
+        ? Math.min(20, Math.max(5, Math.floor(timerMins / 2)))
+        : Math.min(18, Math.max(4, Math.round(timerMins / 3)))
+
       const payload = {
         profile_id:    profileId,
         round_type:    roundType,
         difficulty,
         timer_mins:    timerMins,
-        num_questions: roundType === 'mcq_practice'
-          ? Math.max(10, Math.floor(timerMins / 2.5))
-          : Math.max(5, Math.floor(timerMins / 3)), // Ensure enough questions for the time
+        num_questions: computedQuestions,
         student_meta:  studentMeta,
       }
       if (targetCompany.trim()) payload.target_company = targetCompany.trim();
@@ -112,14 +117,14 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
       // API returns { success, data: { session_id, first_question, questions, … } }
       const { session_id, questions, timer_mins, round_type, first_question, session_label } = res.data
 
-      // Store full session so InterviewPage / CodingPage can read it
+      // Store full session so InterviewRoom can read it synchronously on mount
       sessionStorage.setItem(`session_${session_id}`, JSON.stringify({
         session_id,
         questions,
-        timer_minutes: timer_mins,
+        timer_minutes: timer_mins ?? timerMins,  // backend confirms, fallback to local
         round_type,
         difficulty,
-        num_questions: numQuestions,
+        num_questions: payload.num_questions,    // use computed value, NOT the default state
         session_label,
       }))
       localStorage.setItem('session_id', session_id)
@@ -223,30 +228,39 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
         </div>
       </div>
 
-      {/* ── Timer slider ─────────────────────────────────────────────────── */}
+      {/* ── Interview Duration presets ──────────────────────────────────────── */}
       <div className="mb-7">
-        <div className="flex items-center justify-between mb-3">
-          <label className="flex items-center gap-1.5 text-sm font-medium text-muted">
-            <Clock size={14} /> Interview Duration
-          </label>
-          <span className="font-bold text-2xl" style={{ color: accent }}>{timerMins}
-            <span className="text-sm font-normal text-muted ml-1">min</span>
-          </span>
-        </div>
-        <div className="relative">
-          <input
-            id="timer-slider"
-            type="range" min={10} max={90} step={5}
-            value={timerMins}
-            onChange={e => setTimerMins(+e.target.value)}
-            className="w-full h-2 rounded-full appearance-none cursor-pointer"
-            style={{
-              background: `linear-gradient(to right, ${accent} 0%, ${accent} ${((timerMins - 10) / 80) * 100}%, rgba(42,42,74,0.8) ${((timerMins - 10) / 80) * 100}%, rgba(42,42,74,0.8) 100%)`,
-            }}
-          />
-          <div className="flex justify-between text-xs text-muted mt-1.5 px-0.5">
-            <span>10 min</span><span>90 min</span>
-          </div>
+        <label className="flex items-center gap-1.5 text-sm font-medium text-muted mb-3">
+          <Clock size={14} /> Interview Duration
+        </label>
+        <div className="grid grid-cols-4 gap-2">
+          {(roundType === 'mcq_practice'
+            ? [
+                { mins: 10, qCount: 5 },
+                { mins: 15, qCount: 7 },
+                { mins: 20, qCount: 10 },
+                { mins: 30, qCount: 15 },
+              ]
+            : [
+                { mins: 10, qCount: 4 },
+                { mins: 15, qCount: 5 },
+                { mins: 20, qCount: 7 },
+                { mins: 30, qCount: 10 },
+              ]
+          ).map(({ mins, qCount }) => (
+            <button
+              key={mins}
+              id={`timer-${mins}`}
+              onClick={() => setTimerMins(mins)}
+              className="py-3 px-2 rounded-xl text-center transition-all duration-200 border"
+              style={timerMins === mins
+                ? { borderColor: accent, background: `${accent}20`, color: accent }
+                : { borderColor: 'var(--color-border)', color: 'var(--color-muted)' }}
+            >
+              <p className="font-bold text-sm">{mins} min</p>
+              <p className="text-xs text-muted mt-0.5">~{qCount} questions</p>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -290,11 +304,14 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
       </div>
 
       {/* ── Summary chips ────────────────────────────────────────────────── */}
-      <div className="flex gap-2 mb-6">
+      <div className="flex gap-2 mb-6 flex-wrap">
         {[
-          { label: DIFFICULTIES.find(d => d.id === difficulty)?.label },
-          { label: `${timerMins} mins` },
-        ].map(({ label }) => (
+          DIFFICULTIES.find(d => d.id === difficulty)?.label,
+          `${timerMins} min`,
+          `${roundType === 'mcq_practice'
+            ? Math.min(20, Math.max(5, Math.floor(timerMins / 2)))
+            : Math.min(18, Math.max(4, Math.round(timerMins / 3))) } Qs`,
+        ].map(label => (
           <span key={label} className="badge-purple text-xs">{label}</span>
         ))}
       </div>

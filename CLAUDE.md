@@ -63,13 +63,15 @@ User Auth (Supabase) → Resume/Context Upload → Interview Config
 - `code_runner.py` — Executes and validates DSA code submissions
 - `session_history_analyzer.py` — Cross-session trend analysis for progress tracking
 - `backfill_service.py` — Background batch service that pre-generates and caches reports for old sessions (completed before the caching fix); drains `_generate_report_sse` without SSE, protected by asyncio.Lock
-- `supabase_service.py` / `db_service.py` — All database interactions
+- `supabase_service.py` / `db_service.py` — All database interactions. `reports.user_id` exists in the live DB (applied out-of-band; the `migrations/012*.sql` file is not in the repo) but `save_report()` does NOT write it — current rows are populated via DB triggers / out-of-band backfill. App code derives ownership via `sessions.user_id`, never trusting `reports.user_id` alone.
+
+**Report System Security:** Both report routes enforce session ownership before serving cached data — `GET /api/v1/report/:sessionId` (in `routers/report.py`) and the legacy `GET /api/v1/reports/:sessionId` (in `routers/reports.py`). Share endpoints `POST/DELETE /api/v1/share/:sessionId` also verify the caller owns the session before minting/revoking tokens; `generate_share_token()` and `disable_share_token()` re-check ownership at the service layer via `sessions.user_id` (defence-in-depth). `end_session()` errors on DB failure (no silent swallow) so dashboard visibility is guaranteed. **Known pre-existing bug:** `reports.share_enabled` column is referenced by share code but does not exist in the live DB — share feature is non-functional regardless of these ownership checks.
 
 **Prompts** (`prompts/`): `interviewer_prompt.py` (question generation with context), `report_prompt.py` (synthesis), `scoring_examples.py` (few-shot calibration), `stage3_prompt.py`, `stage4_prompt.py`
 
 ### Frontend (`frontend/src/`)
 
-**Pages** (`pages/`): `AuthPage.jsx` → `OnboardingPage.jsx`/`Upload.jsx` → `DashboardPage.jsx` → `InterviewPage.jsx` → `InterviewRoom.jsx` (main Q&A) or `CodingPage.jsx` (DSA) → `Report.jsx`/`ReportPage.jsx`
+**Pages** (`pages/`): `AuthPage.jsx` (+ `ForgotPasswordPage.jsx` / `ResetPasswordPage.jsx` for Supabase password recovery flow) → `OnboardingPage.jsx`/`Upload.jsx` → `DashboardPage.jsx` → `InterviewPage.jsx` → `InterviewRoom.jsx` (main Q&A) or `CodingPage.jsx` (DSA) → `Report.jsx`/`ReportPage.jsx`
 
 **Admin Pages** (`pages/`): `AdminLoginPage.jsx` (`/admin`) → `AdminDashboardPage.jsx` (`/admin/dashboard`) — hardcoded-credential admin panel with three tabs (Registered Students, Assessment Activity, Resume Uploads) + student detail modal + search by name/email
 

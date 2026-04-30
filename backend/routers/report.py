@@ -33,7 +33,6 @@ from services.benchmarking_service import compute_peer_comparison
 from services.spaced_repetition_service import build_study_schedule
 from services.checklist_service import generate_checklist
 from services.code_runner import analyze_code_quality, aggregate_code_quality
-from services.web_researcher import search_company_trends
 from services.company_intelligence import analyze_company_fit
 from services.session_history_analyzer import analyze_cross_session
 from services.voice_analyzer import analyze_session_voice
@@ -215,6 +214,47 @@ def _merge_per_question_analysis(
     return merged
 
 
+def _build_verbal_category_breakdown(question_scores: list) -> list:
+    """
+    Build category_breakdown deterministically from question_scores for verbal rounds.
+    Groups questions by category, computes average score and verdict.
+    Never returns []. Replaces unreliable LLM generation for this field.
+    """
+    from collections import defaultdict
+    buckets: dict = defaultdict(lambda: {"scores": [], "count": 0})
+
+    for q in (question_scores or []):
+        if q.get("skipped"):
+            continue
+        cat = (q.get("category") or q.get("topic") or "General").strip()
+        score = q.get("score")
+        if score is not None:
+            buckets[cat]["scores"].append(float(score))
+            buckets[cat]["count"] += 1
+
+    result = []
+    for cat, data in buckets.items():
+        if not data["scores"]:
+            continue
+        avg = round(sum(data["scores"]) / len(data["scores"]), 1)
+        avg_pct = round(avg * 10)
+        verdict = (
+            "Strong"  if avg_pct >= 75 else
+            "Good"    if avg_pct >= 60 else
+            "Average" if avg_pct >= 40 else
+            "Weak"
+        )
+        result.append({
+            "category": cat,
+            "score":    avg_pct,
+            "verdict":  verdict,
+            "comment":  f"{data['count']} question(s) — avg {avg}/10",
+        })
+
+    result.sort(key=lambda x: x["score"], reverse=True)
+    return result
+
+
 def _build_mcq_category_breakdown(transcript: list) -> list:
     """
     Aggregate MCQ transcript entries by category.
@@ -382,7 +422,6 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
         "cv_audit": {"overall_cv_honesty_score": 0, "note": "Demo report.", "items": []},
         "study_roadmap": {"week_1": [], "week_2": [], "week_3": [], "week_4": []},
         "mock_ready_topics": [], "not_ready_topics": [],
-        "market_intelligence": None,
         "company_fit": None, "skill_decay": [],
         "repeated_offenders": [], "growth_trajectory": None,
         "interview_tips": ["Use the STAR method for behavioural questions."],
@@ -631,12 +670,7 @@ async def _generate_report_sse(session_id: str, user_id: str):
     # ── Stage 1+2: core + cv_audit + market + company_fit + cross-session ────
     yield _sse({"stage": "core_analysis", "progress": 10, "label": "Scoring your answers..."})
 
-    market_context = ""
-    if target_company:
-        try:
-            market_context = await search_company_trends(target_company)
-        except Exception:
-            pass
+    market_context = ""  # Tavily removed from report path — saves cost, was only news not interview Q data
 
     past_reports = []
     try:
@@ -856,14 +890,6 @@ async def _generate_report_sse(session_id: str, user_id: str):
     except Exception as _bm_e:
         print(f"[report/sse] Peer comparison failed: {_bm_e}")
 
-    # ── Market intelligence payload ───────────────────────────────────────────
-    market_intel = None
-    if target_company and market_context:
-        market_intel = {
-            "target_company": target_company,
-            "raw_context": market_context[:800],
-        }
-
     # ── Compute report quality from which stages failed ───────────────────────
     _core_failed = "stage1_core" in failed_stages or "stage2_cv" in failed_stages
     _secondary_failed = "stage3_communication" in failed_stages or "stage4_playbook" in failed_stages
@@ -913,13 +939,12 @@ async def _generate_report_sse(session_id: str, user_id: str):
 
         # Charts
         "radar_scores":         radar_scores,
-        # For MCQ rounds, compute category breakdown deterministically from
-        # the transcript (is_correct + category per entry).  For other round
-        # types keep whatever the LLM core stage produced.
+        # category_breakdown: always built deterministically from question_scores
+        # so it's never empty. MCQ uses accuracy %; other rounds use avg score per category.
         "category_breakdown":   (
             _build_mcq_category_breakdown(transcript)
             if round_type == "mcq_practice"
-            else core_result.get("category_breakdown", [])
+            else _build_verbal_category_breakdown(question_scores)
         ),
 
         # Strong / Weak
@@ -946,9 +971,6 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "study_roadmap":        cv_result.get("study_roadmap", {}),
         "mock_ready_topics":    cv_result.get("mock_ready_topics", []),
         "not_ready_topics":     cv_result.get("not_ready_topics", []),
-
-        # Market Intelligence
-        "market_intelligence":  market_intel,
 
         # ── NEW: Communication & Behavioral (Stage 3) ──
         "communication_breakdown": comm_result.get("communication_breakdown", {}),
