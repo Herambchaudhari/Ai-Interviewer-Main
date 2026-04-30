@@ -391,7 +391,20 @@ async def generate_adaptive_next_question(
 
     # ── Decision 3: Unprobed known weak area ─────────────────────────────
     if round_type not in ("dsa",):
-        uncovered_weak = [w for w in known_weak if not _topic_covered(w, asked_topics)]
+        # Track which weak areas have ALREADY been probed this session
+        # (by reading decision_reason on past transcript entries).
+        # This prevents starvation when past-session weak-area labels
+        # (e.g. "Problem-Solving") never match current question categories.
+        already_probed: set = set()
+        for t in transcript:
+            dr = (t.get("decision_reason") or "")
+            if dr.startswith("probing_known_weak:"):
+                already_probed.add(dr.split("probing_known_weak:", 1)[1])
+
+        uncovered_weak = [
+            w for w in known_weak
+            if not _topic_covered(w, asked_topics) and w not in already_probed
+        ]
         if uncovered_weak:
             target_topic = uncovered_weak[0]
             enriched = {

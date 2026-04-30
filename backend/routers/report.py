@@ -199,15 +199,18 @@ def _normalize_report_payload(payload: dict) -> dict:
 
 
 def _is_complete_report(report: dict) -> bool:
-    # Only require Stage 1 keys — always generated and always saved.
-    # Stages 2-4 keys are bonuses; a report is "complete enough to serve" once
-    # core scoring data exists. This prevents regeneration when Stage 3/4 LLM
-    # calls fail or when older sessions were saved with a partial schema.
-    required_keys = {
-        "per_question_analysis",
-        "overall_score",
-    }
-    return isinstance(report, dict) and all(key in report for key in required_keys)
+    """
+    A report is 'complete enough to serve from cache' when:
+    - overall_score exists (always computed)
+    - grade is a non-empty string ("A", "B+", etc.) — confirms Stage 1 LLM succeeded
+    An empty grade ("") means Stage 1 returned bad data and the report needs regeneration.
+    """
+    if not isinstance(report, dict):
+        return False
+    if "overall_score" not in report:
+        return False
+    grade = report.get("grade")
+    return bool(grade) and isinstance(grade, str) and len(grade.strip()) >= 1
 
 
 def _merge_per_question_analysis(

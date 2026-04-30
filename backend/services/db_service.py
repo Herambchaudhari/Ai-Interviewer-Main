@@ -194,6 +194,9 @@ def save_session(session_data: dict) -> str:
         "context_bundle", "target_company", "target_role", "timer_remaining_secs",
         "last_checkpoint_at", "conversation_history", "detected_weaknesses",
         "avoided_topics",
+        # Quota + ability tracking — must be saved at session START
+        "question_quotas", "question_counters", "ability_vector", "question_buffer",
+        "target_interview_date",
     }
     
     payload = {
