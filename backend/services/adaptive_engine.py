@@ -152,23 +152,46 @@ def _update_detected_weaknesses(
     return updated
 
 
+_DIFF_NORMALIZE: dict[str, str] = {
+    "fresher":   "easy",
+    "fresh":     "easy",
+    "junior":    "easy",
+    "easy":      "easy",
+    "mid-level": "medium",
+    "midlevel":  "medium",
+    "mid":       "medium",
+    "medium":    "medium",
+    "senior":    "hard",
+    "hard":      "hard",
+    "expert":    "hard",
+}
+
+
+def _normalize_difficulty(d: str) -> str:
+    return _DIFF_NORMALIZE.get((d or "medium").lower(), "medium")
+
+
 def _candidate_elo_to_difficulty(ability_vector: dict, base_difficulty: str) -> str:
     """
     When the candidate is struggling (low ELO), lower the effective difficulty.
     Only downgrades — never upgrades beyond the session's configured difficulty.
+    Works with both session-stored forms ("fresher", "mid-level", "senior")
+    and canonical forms ("easy", "medium", "hard").
     """
+    norm = _normalize_difficulty(base_difficulty)
+
     if not ability_vector or not ability_vector.get("scores"):
-        return base_difficulty
+        return norm
     answered = ability_vector.get("answered_count", 0)
     if answered < 2:
-        return base_difficulty  # not enough signal yet
+        return norm  # not enough signal yet
 
     avg_elo = sum(ability_vector["scores"].values()) / len(ability_vector["scores"])
-    if avg_elo < 1050 and base_difficulty in ("medium", "hard"):
+    if avg_elo < 1050 and norm in ("medium", "hard"):
         return "easy"
-    if avg_elo < 1100 and base_difficulty == "hard":
+    if avg_elo < 1100 and norm == "hard":
         return "medium"
-    return base_difficulty
+    return norm
 
 
 def _get_used_pillars(transcript: list, round_type: str) -> list[str]:

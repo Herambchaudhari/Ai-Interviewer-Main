@@ -1553,6 +1553,20 @@ _ELO_BANDS: dict[str, tuple[float, float]] = {
     "hard":   (1150, 1600),
 }
 
+_DIFF_NORMALIZE: dict[str, str] = {
+    "fresher":   "easy",
+    "fresh":     "easy",
+    "junior":    "easy",
+    "easy":      "easy",
+    "mid-level": "medium",
+    "midlevel":  "medium",
+    "mid":       "medium",
+    "medium":    "medium",
+    "senior":    "hard",
+    "hard":      "hard",
+    "expert":    "hard",
+}
+
 _CS_PILLARS = ["OS", "DBMS", "CN", "OOP", "DSA", "System Design"]
 _HR_CATEGORIES = [
     "Leadership & Ownership",
@@ -1579,7 +1593,8 @@ def fetch_db_question(
 
     Returns a question dict ready for injection, or None if the bank is exhausted.
     """
-    elo_min, elo_max = _ELO_BANDS.get(difficulty, (900, 1250))
+    diff_norm = _DIFF_NORMALIZE.get((difficulty or "medium").lower(), "medium")
+    elo_min, elo_max = _ELO_BANDS.get(diff_norm, (900, 1250))
 
     try:
         db = _db()

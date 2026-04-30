@@ -1011,50 +1011,77 @@ async def generate_questions(
             )
         return normalized[:num_questions]
 
+    # Normalize difficulty string before building any prompts
+    _diff_map = {
+        "fresher": "easy", "fresh": "easy", "junior": "easy",
+        "mid-level": "medium", "midlevel": "medium", "mid": "medium",
+        "senior": "hard", "expert": "hard",
+    }
+    diff_norm = _diff_map.get(difficulty.lower(), difficulty)
+
+    # Difficulty-specific calibration block injected into every technical prompt
+    _diff_calibration = {
+        "easy": (
+            "CALIBRATION (FRESHER): Ask definition + one example. Appropriate: basic OOP, simple SQL, "
+            "process vs thread, what HTTP does, basic sorting. "
+            "AVOID system design, distributed systems, production scaling."
+        ),
+        "medium": (
+            "CALIBRATION (MID-LEVEL): Ask applied knowledge + trade-offs. Appropriate: SQL indexing, "
+            "ACID, deadlock prevention, REST design, SOLID with code examples, caching strategies, "
+            "simple system design (URL shortener, task queue). Expect real decisions, not just definitions."
+        ),
+        "hard": (
+            "CALIBRATION (SENIOR): Ask internals + production failure modes. Appropriate: DB internals "
+            "(MVCC, B-tree), distributed consensus, CAP theorem, lock-free concurrency, rate limiting, "
+            "observability design, multi-region architecture. Demand real numbers, failure scenarios, "
+            "and engineering trade-offs."
+        ),
+    }
+    diff_calibration = _diff_calibration.get(diff_norm, _diff_calibration["medium"])
+
     # Round-specific instructions
     if round_type == "technical":
-        # Calculate question distribution counts
-        proj_count = max(1, num_questions // 2)             # 50% project/resume
-        cs_count   = max(1, num_questions - proj_count)     # 50% core fundamentals / role fundamentals
+        # Calculate question distribution: 50% core fundamentals + 50% resume/project deep-dives
+        # (the 20% DB-quota is handled by the adaptive engine, not the batch generator)
+        proj_count = max(1, num_questions // 2)
+        cs_count   = max(1, num_questions - proj_count)
 
-        # Live interview intelligence block
         live_intel_block = ""
         if interview_q_ctx:
             live_intel_block = f"""
-LIVE INTERVIEW INTELLIGENCE (searched from the web for {target_comp}):
+COMPANY INTERVIEW INTELLIGENCE ({target_comp}):
 {interview_q_ctx}
-→ Use these real-world question patterns and topics to calibrate your questions to {target_comp}'s actual hiring bar.
-→ If the data mentions specific topics (e.g. 'ACID', 'deadlocks', 'polymorphism'), generate questions covering those.
+→ Calibrate your CS fundamentals questions to the actual topics {target_comp} tests.
+→ If specific topics are mentioned (e.g. ACID, OOP patterns, concurrency), prioritise those.
 """
 
         topic_guide = f"""
-STRICT QUESTION DISTRIBUTION (you MUST follow this exactly):
+STRICT QUESTION DISTRIBUTION (enforce exactly):
 
-BATCH 1 ? CS FUNDAMENTALS ({cs_count} questions):
-  Generate {cs_count} standalone core-fundamentals questions that are NOT about the candidate's specific projects.
-  Cover these core subjects:
-  - OOP: classes, inheritance, polymorphism, SOLID principles, abstraction, encapsulation, design patterns
-  - DBMS: SQL, normalization (1NF-3NF), ACID properties, indexing, transactions, joins, stored procedures
-  - Operating Systems: processes vs threads, scheduling algorithms, deadlocks, memory management, paging, virtual memory
-  - Computer Networks: OSI model, TCP/IP, HTTP/HTTPS, DNS, sockets, REST vs WebSocket
-  These must be standalone theory or role-engineering fundamentals questions.
-  For the stated role ({job_role}), explicitly include topics like: {", ".join(role_focus["topics"])}.
-  These should still be independent of the candidate's specific projects.
+BATCH 1 — CS & ROLE FUNDAMENTALS ({cs_count} questions):
+  Standalone questions NOT tied to the candidate's specific projects.
+  Cover core CS subjects: OOP (polymorphism, SOLID, design patterns), DBMS (SQL, ACID,
+  indexing, transactions), OS (processes/threads, scheduling, deadlocks, paging),
+  Computer Networks (OSI, TCP/IP, HTTP/S, DNS, REST, WebSockets).
+  For the {job_role} role, explicitly include: {", ".join(role_focus["topics"])}.
+  {diff_calibration}
 
-BATCH 2 ? PROJECT & RESUME DEEP-DIVES ({proj_count} questions):
-  Generate {proj_count} questions tied directly to the candidate's actual projects and skills.
-  Reference their project names, implementation details, and tech stacks explicitly.
-  Prefer architecture decisions, trade-offs, debugging stories, scalability, ownership, and why specific tools/frameworks were chosen.
-  For the stated role ({job_role}), especially probe {role_focus["resume_probe"]}.
-  Examples: "In your {{project}} you used {{tech}}. How did you handle X?" or "You listed {{skill}} ? explain how you applied it in {{project}}."
+BATCH 2 — RESUME & PROJECT DEEP-DIVES ({proj_count} questions):
+  Questions tied directly to the candidate's listed projects and tech stack.
+  Reference their actual project names and tools explicitly:
+  "In your {{project}} you used {{tech}} — explain how you handled X."
+  Probe: {role_focus["resume_probe"]}.
+  For the difficulty level, adjust depth: fresher → what they built and why,
+  mid-level → architecture decisions and trade-offs,
+  senior → failure modes, scale, production hardening.
 
-CRITICAL RULES:
-- Keep the overall mix as close to 50% project/resume deep-dives and 50% core/role fundamentals as mathematically possible
-- NEVER skip either half ? both resume deep-dives and core fundamentals must be present
-- The questions must feel explicitly aligned to the target role: {role_focus["label"]}
+RULES:
+- Both batches must be present — never skip CS fundamentals OR resume deep-dives.
+- Questions must feel explicitly aligned to: {role_focus["label"]}
 - {role_focus["core_focus"]}
-- Use the `Project` category for resume/project deep-dives and `OOP`, `DBMS`, `OS`, or `CN` for standalone CS questions
-- Role-focused fundamentals may use categories such as `{role_focus["category"]}` when appropriate
+- Category tags: Project (resume/project), OOP/DBMS/OS/CN (CS fundamentals),
+  {role_focus["category"]} (role-specific fundamentals)
 {live_intel_block}"""
     elif round_type == "hr":
         topic_guide = """
@@ -1121,13 +1148,14 @@ Use STAR-method oriented questions. Make them personalised to the candidate's ba
     prompt = f"""You are a Hiring Bar-Raiser exclusively representing {target_comp}. You are generating exactly {num_questions} interview questions for a {job_role} position.
 
 Candidate Profile:
+- Name: {resume_data.get("name") or "Candidate"}
 - Skills: {skills}
 - Target Role: {job_role}
 - Projects:
 {project_desc}
 - Education: {edu_desc}
 - Round: {round_type.upper()}
-- Difficulty: {difficulty.upper()}
+- Experience Level: {difficulty.upper()} → {diff_norm.upper()} difficulty
 - Role Focus Areas: {", ".join(role_focus["topics"])}
 
 {news_block}

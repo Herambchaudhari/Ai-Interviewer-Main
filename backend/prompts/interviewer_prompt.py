@@ -8,25 +8,45 @@ from __future__ import annotations
 from typing import Optional
 
 
+# Map session difficulty strings → canonical form used in guidance lookups
+_DIFF_NORMALIZE: dict[str, str] = {
+    "fresher":   "easy",
+    "fresh":     "easy",
+    "junior":    "easy",
+    "easy":      "easy",
+    "mid-level": "medium",
+    "midlevel":  "medium",
+    "mid":       "medium",
+    "medium":    "medium",
+    "senior":    "hard",
+    "hard":      "hard",
+    "expert":    "hard",
+}
+
+
 _ROUND_INSTRUCTIONS = {
     "technical": (
         "ROUND: TECHNICAL\n"
-        "QUESTION DISTRIBUTION (STRICT — the adaptive engine enforces this via quota, "
-        "but your LLM-generated questions must also respect this split):\n"
-        "  * 20% CORE CS (served from question bank automatically — you may receive a "
-        "DB question as context; treat it as given)\n"
-        "  * 50% ROLE-BASED FUNDAMENTALS — OOP (inheritance, polymorphism, SOLID), "
-        "DBMS (SQL, normalization, ACID, indexing, transactions), "
-        "OS (processes, threads, scheduling, memory management, deadlocks), "
-        "Computer Networks (TCP/IP, HTTP/S, DNS, sockets, REST). "
-        "Align to the candidate's target role (backend, frontend, full-stack, ML, etc).\n"
-        "  * 30% RESUME DEEP-DIVES — tied directly to the candidate's listed projects and skills. "
-        "Reference their actual projects by name (e.g. 'In your {project} you used {tech} — "
-        "how did you handle X?'). Cover language internals, frameworks listed, architecture decisions.\n\n"
-        "- When the adaptive engine directive says RESUME_DEEP_DIVE, you MUST generate a resume question.\n"
-        "- Probe depth: start broad, drill down based on their answer quality.\n"
-        "- Mix conceptual ('What is X?') and applied ('How would you use X in your project?').\n"
-        "- CRITICAL: Align to the candidate's target role explicitly."
+        "QUESTION DISTRIBUTION (STRICT — enforce this across the full session):\n"
+        "  * 20% CORE CS — pulled from the question bank and provided to you as context. "
+        "Treat DB-supplied questions as given; do not modify them.\n"
+        "  * 50% ROLE-BASED FUNDAMENTALS — standalone CS theory and applied engineering "
+        "questions NOT tied to the candidate's specific projects. Cover: "
+        "OOP (inheritance, polymorphism, SOLID, design patterns), "
+        "DBMS (SQL, normalization, ACID, indexing, transactions, query optimisation), "
+        "OS (processes vs threads, scheduling, deadlocks, paging, virtual memory), "
+        "Computer Networks (TCP/IP, HTTP/S, DNS, REST, WebSockets, CDN). "
+        "Calibrate topics and depth to the stated difficulty level.\n"
+        "  * 30% RESUME DEEP-DIVES — questions tied directly to the candidate's listed "
+        "projects, tech stack, and work experience. Reference their actual project names "
+        "and tools: 'In your {project} you used {tech} — explain how you handled X.' "
+        "Probe architecture decisions, trade-offs, debugging, and ownership.\n\n"
+        "FOLLOW-UP RULE: After a shallow or partial answer, ask one targeted follow-up "
+        "on the same concept ('Can you explain how X works internally?' or "
+        "'What would break if Y failed?') before moving to a new topic.\n"
+        "PROBE DEPTH: start broad, drill down — avoid surface-level questions for "
+        "mid-level and senior candidates.\n"
+        "TOPIC DIVERSITY: never ask two consecutive questions on the same topic."
     ),
     "hr": (
         "ROUND: HR / BEHAVIOURAL\n"
@@ -65,21 +85,60 @@ _ROUND_INSTRUCTIONS = {
 
 _DIFFICULTY_GUIDANCE = {
     "easy": (
-        "DIFFICULTY: FRESHER / JUNIOR\n"
-        "- Focus on conceptual understanding and clear definitions.\n"
-        "- Reward clear thinking and communication.\n"
-        "- Avoid complex system trade-offs."
+        "DIFFICULTY: FRESHER / JUNIOR (0–1 year of experience)\n"
+        "TARGET: Final-year students or fresh graduates entering their first role.\n\n"
+        "CALIBRATION RULES:\n"
+        "- Ask for clear definitions with one concrete example: 'What is X? Give a real scenario.'\n"
+        "- Appropriate topics: what is a class vs object, what is inheritance, "
+        "simple SQL SELECT/JOIN/WHERE, what is a process vs thread, what does HTTP do, "
+        "basic sorting algorithms (bubble/merge), what is an index, what is recursion.\n"
+        "- Accept textbook-level answers with one real-world analogy or example.\n"
+        "- Reward clear communication and logical thinking even without deep internals.\n"
+        "- DO NOT ask system design, distributed systems, production trade-offs, "
+        "concurrency edge cases, or advanced query optimisation.\n"
+        "- For resume questions: focus on what they built, what tech they used, and "
+        "WHY they chose it — not on scaling or production hardening.\n"
+        "- Keep follow-up questions one level deeper: if they define OOP, ask for "
+        "a real example from their code, not for SOLID principles."
     ),
     "medium": (
-        "DIFFICULTY: MID-LEVEL\n"
-        "- Focus on applied knowledge - how they've actually used these concepts.\n"
-        "- Expect working solutions and knowledge of trade-offs."
+        "DIFFICULTY: MID-LEVEL (1–3 years of experience)\n"
+        "TARGET: Candidates who have shipped real features or maintained production code.\n\n"
+        "CALIBRATION RULES:\n"
+        "- Ask applied questions: 'Explain X — how have you actually used it?' or "
+        "'What trade-off would you make between X and Y?'\n"
+        "- Appropriate topics: SQL indexing and query performance, ACID vs BASE, "
+        "deadlock prevention strategies, REST API design best practices, "
+        "SOLID principles with code examples, caching strategies (LRU, write-through), "
+        "concurrency basics (mutex, race conditions), basic system design "
+        "(simple URL shortener, task queue, REST service with a DB).\n"
+        "- Expect working solutions, error handling, and at least one explicit trade-off mentioned.\n"
+        "- For resume questions: probe architecture decisions — 'Why did you choose X over Y?', "
+        "'How did you test this?', 'What would you do differently?'\n"
+        "- Push back gently on vague answers: 'Can you be more specific about how that works?'\n"
+        "- One system-design-lite question is appropriate (e.g. design a simple cache, "
+        "a rate limiter, a file upload service)."
     ),
     "hard": (
-        "DIFFICULTY: SENIOR / EXPERT\n"
-        "- Go deep into internals, edge cases, performance implications.\n"
-        "- Ask about scaling, security, maintainability.\n"
-        "- Challenge assumptions to test reasoning under pressure."
+        "DIFFICULTY: SENIOR / EXPERT (3+ years of experience)\n"
+        "TARGET: Engineers expected to own systems, make architectural decisions, "
+        "and mentor others.\n\n"
+        "CALIBRATION RULES:\n"
+        "- Go deep into internals: 'How does X work under the hood?', "
+        "'What breaks at 1M requests/day?', 'How would you debug this in prod?'\n"
+        "- Appropriate topics: database internals (B-tree indexing, MVCC, query planner), "
+        "distributed systems (CAP theorem, eventual consistency, consensus, sharding), "
+        "concurrency at scale (lock-free data structures, CAS, async I/O), "
+        "system design at scale (multi-region, CDN, rate limiting, circuit breakers), "
+        "security (SQL injection, CSRF, auth token lifecycle, secrets management), "
+        "observability (metrics, tracing, alerting strategy).\n"
+        "- Expect production-hardened answers: failure modes, SLA constraints, "
+        "monitoring hooks, rollback strategy, real numbers (latency, throughput).\n"
+        "- Challenge assumptions proactively: 'What if that cache node goes down?', "
+        "'How does this hold up under concurrent writes?'\n"
+        "- For resume questions: probe ownership and impact — 'What was the hardest "
+        "production incident you handled?', 'What would you redesign knowing what "
+        "you know now?', 'How did you make this system observable?'"
     ),
 }
 
@@ -125,7 +184,8 @@ def build_interviewer_prompt(
     ) if conversation_history else ""
 
     round_instr = _ROUND_INSTRUCTIONS.get(round_type, _ROUND_INSTRUCTIONS["technical"])
-    diff_guide = _DIFFICULTY_GUIDANCE.get(difficulty, _DIFFICULTY_GUIDANCE["medium"])
+    diff_key    = _DIFF_NORMALIZE.get((difficulty or "medium").lower(), "medium")
+    diff_guide  = _DIFFICULTY_GUIDANCE[diff_key]
 
     corp_directives = ""
     t_comp = target_comp.lower()
