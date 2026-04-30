@@ -1093,23 +1093,50 @@ export default function ReportPage() {
         <SectionErrorBoundary>
         {(legacyRadarData.length > 0 || Object.keys(hire_signal || {}).length >= 3) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {legacyRadarData.length > 0 && (
-              <SectionCard icon={<Brain size={16}/>} title="Technical Knowledge Breakdown" color="#7c3aed">
-                <p className="text-xs text-muted mb-3">
-                  Performance across core CS domains covered in this session.
-                </p>
-                <ResponsiveContainer width="100%" height={260}>
-                  <RadarChart data={legacyRadarData} margin={{ top: 0, right: 30, bottom: 0, left: 30 }}>
-                    <PolarGrid stroke="rgba(255,255,255,0.08)" />
-                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                    <Radar name="Score" dataKey="A" stroke="#7c3aed" fill="#7c3aed" fillOpacity={0.2}
-                      dot={{ r: 3, fill: '#a78bfa' }} />
-                    <Tooltip formatter={(v) => [`${v}/10`, 'Score']}
-                      contentStyle={{ background: '#1e1e2e', border: '1px solid #7c3aed40', borderRadius: 8 }} />
-                  </RadarChart>
-                </ResponsiveContainer>
-              </SectionCard>
-            )}
+            {legacyRadarData.length > 0 && (() => {
+              // Only show axes that were actually assessed (score > 0)
+              const assessedAxes = legacyRadarData.filter(d => d.A > 0)
+              const notAssessed  = legacyRadarData.filter(d => d.A === 0).map(d => d.subject)
+              return (
+                <SectionCard icon={<Brain size={16}/>} title="Technical Knowledge Breakdown" color="#7c3aed">
+                  <p className="text-xs text-muted mb-3">
+                    Scores for CS domains actually covered in this session.
+                    {notAssessed.length > 0 && (
+                      <span className="text-amber-400"> Not assessed: {notAssessed.join(', ')}.</span>
+                    )}
+                  </p>
+                  {assessedAxes.length >= 2 ? (
+                    <ResponsiveContainer width="100%" height={260}>
+                      <RadarChart data={assessedAxes} margin={{ top: 0, right: 30, bottom: 0, left: 30 }}>
+                        <PolarGrid stroke="rgba(255,255,255,0.08)" />
+                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                        <Radar name="Score" dataKey="A" stroke="#7c3aed" fill="#7c3aed" fillOpacity={0.2}
+                          dot={{ r: 3, fill: '#a78bfa' }} />
+                        <Tooltip formatter={(v) => [`${v}/10`, 'Score']}
+                          contentStyle={{ background: '#1e1e2e', border: '1px solid #7c3aed40', borderRadius: 8 }} />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="space-y-2">
+                      {assessedAxes.map(d => (
+                        <div key={d.subject} className="flex items-center gap-3">
+                          <span className="text-sm text-muted w-36 flex-shrink-0">{d.subject}</span>
+                          <div className="flex-1 bg-white/5 rounded-full h-2">
+                            <div className="h-2 rounded-full" style={{
+                              width: `${d.A * 10}%`,
+                              background: d.A >= 7 ? '#4ade80' : d.A >= 5 ? '#facc15' : '#f87171'
+                            }} />
+                          </div>
+                          <span className="text-xs w-10 text-right" style={{
+                            color: d.A >= 7 ? '#4ade80' : d.A >= 5 ? '#facc15' : '#f87171'
+                          }}>{d.A}/10</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </SectionCard>
+              )
+            })()}
             {Object.keys(hire_signal || {}).length >= 3 && (
               <SectionCard icon={<Target size={16}/>} title="Hire Signal" color="#f59e0b">
                 <p className="text-xs text-muted mb-3">

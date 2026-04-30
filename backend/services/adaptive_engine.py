@@ -235,6 +235,27 @@ def _get_used_pillars(transcript: list, round_type: str) -> list[str]:
     return pillars
 
 
+def _get_cs_pillar_priority(job_role: str, covered: set) -> list[str]:
+    """
+    Return CS pillars in priority order for live questions, excluding already-covered pillars.
+    Role-aware: frontend roles get Frontend/CN first; backend gets DBMS/OS first, etc.
+    """
+    role = (job_role or "").lower()
+    if any(t in role for t in ("frontend", "ui", "front end")):
+        order = ["OOP", "CN", "DBMS", "OS", "DSA", "Frontend"]
+    elif any(t in role for t in ("backend", "api", "server", "back end")):
+        order = ["DBMS", "OS", "CN", "OOP", "DSA", "Backend"]
+    elif "full" in role:
+        order = ["OOP", "DBMS", "CN", "OS", "DSA", "FullStack"]
+    elif any(t in role for t in ("data", "ml", "ai", "machine")):
+        order = ["DSA", "DBMS", "OS", "OOP", "CN", "Algorithms"]
+    elif any(t in role for t in ("devops", "sre", "platform", "cloud")):
+        order = ["OS", "CN", "DBMS", "DSA", "OOP", "DevOps"]
+    else:
+        order = ["OOP", "DBMS", "OS", "CN", "DSA", "Algorithms"]
+    return [p for p in order if p not in covered] or order
+
+
 def _get_priority_hr_category(used_categories: list[str]) -> str | None:
     """Return the highest-priority HR category not yet covered this session."""
     for cat in _HR_CATEGORIES_ORDERED:
@@ -435,10 +456,10 @@ async def generate_adaptive_next_question(
         except Exception as e:
             print(f"[adaptive_engine] DSA question generation failed: {e}")
 
-    # ── Decision 6: Default — resume-based or role-based per remaining quota
-    # Decide directive based on which quota bucket still has room
+    # ── Decision 6: Default — quota-driven question type ────────────────
     resume_used  = counters.get("resume", 0)
     resume_quota = quotas.get("resume", 0)
+    live_used    = counters.get("live", 0)
     directive    = ""
 
     if resume_used < resume_quota:
@@ -446,9 +467,11 @@ async def generate_adaptive_next_question(
         counters["resume"] = resume_used + 1
         _persist_counters(counters)
         directive = (
-            "MANDATORY: Generate a resume-based deep-dive question. "
-            "Pick a specific claim, project, or technology from the candidate's resume "
-            "and probe their understanding. Do NOT ask a generic technical question."
+            "MANDATORY RESUME DEEP-DIVE: Generate a question that directly references a specific "
+            "project, technology, or experience listed on the candidate's resume. "
+            "Name the project explicitly (e.g. 'In your NurseConnect project, you used X — '). "
+            "Probe the architecture decision, trade-off, or implementation challenge. "
+            "Do NOT ask a generic technical question unrelated to their actual work."
         )
     elif round_type == "hr":
         # HR: resume-grilling with competency category rotation
@@ -468,9 +491,26 @@ async def generate_adaptive_next_question(
                 "and ask them to describe a real situation using STAR (Situation, Task, Action, Result)."
             )
     else:
-        # Technical: role-based live question
-        counters["live"] = counters.get("live", 0) + 1
+        # Technical: MANDATORY CS fundamentals or role-specific question (NOT resume-based)
+        counters["live"] = live_used + 1
         _persist_counters(counters)
+
+        # Rotate through CS pillars not yet covered this session
+        covered_cs = set(p for p in used_pillars if p in ("OS", "DBMS", "CN", "OOP", "DSA",
+                          "System Design", "Algorithms", "Frontend", "Backend", "FullStack",
+                          "Data", "ML", "DevOps", "Mobile"))
+        pillar_order = _get_cs_pillar_priority(job_role, covered_cs)
+        target_cs = pillar_order[0] if pillar_order else "OOP"
+
+        role_note = f" for a {job_role} role" if job_role else ""
+        directive = (
+            f"MANDATORY CS FUNDAMENTALS: Generate a STANDALONE {target_cs} question. "
+            f"This question must NOT reference the candidate's specific projects or resume. "
+            f"Ask a conceptual or applied {target_cs} question{role_note}. "
+            f"Good formats: 'Explain X and when you would use it', "
+            f"'What is the difference between X and Y?', 'How does X work internally?'. "
+            f"This is a core technical knowledge check, not a project discussion."
+        )
 
     enriched = dict(context_bundle)
     if directive:

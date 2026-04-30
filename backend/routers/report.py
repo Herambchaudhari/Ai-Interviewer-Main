@@ -38,8 +38,51 @@ from services.session_history_analyzer import analyze_cross_session
 from services.voice_analyzer import analyze_session_voice
 from prompts.stage3_prompt import build_communication_analysis_prompt
 from prompts.stage4_prompt import build_playbook_prompt
+from prompts.report_prompt import _RADAR_AXES
 
 router = APIRouter()
+
+
+def _mask_uncovered_radar_axes(
+    radar_scores: dict, question_scores: list, radar_skills: list
+) -> dict:
+    """
+    Zero out radar axes that have no matching questions in the transcript.
+    The LLM fills all 6 axes regardless — this masks axes for topics not actually covered.
+    Uses broad keyword matching so "NurseConnect Authentication" matches "Project Knowledge".
+    """
+    import re
+
+    def _words(s: str) -> set:
+        return set(re.sub(r"[^a-z0-9 ]", " ", s.lower()).split())
+
+    _AXIS_KEYWORDS: dict[str, set] = {
+        "oop & design patterns":            {"oop", "design", "pattern", "solid", "inherit",
+                                             "polymorphism", "class", "object", "encapsul"},
+        "data structures & algorithms":     {"dsa", "algorithm", "array", "tree", "graph",
+                                             "sort", "search", "dynamic", "complexity", "hash"},
+        "dbms & sql":                       {"dbms", "sql", "database", "query", "normaliz",
+                                             "acid", "index", "transaction", "join", "schema"},
+        "os & cn concepts":                 {"os", "cn", "process", "thread", "network", "tcp",
+                                             "http", "dns", "socket", "memory", "deadlock", "osi"},
+        "project knowledge":                {"project", "authentication", "auth", "api", "react",
+                                             "node", "flask", "django", "mern", "implementation",
+                                             "architecture", "feature", "build", "develop"},
+        "communication":                    {"communication", "clarity", "delivery", "structure"},
+    }
+
+    # Collect all question categories/topics asked this session
+    asked_words: set = set()
+    for q in question_scores:
+        cat = (q.get("category") or q.get("topic") or "").lower()
+        asked_words |= _words(cat)
+
+    result: dict = {}
+    for skill in radar_skills:
+        keywords = _AXIS_KEYWORDS.get(skill.lower(), _words(skill))
+        covered = bool(keywords & asked_words)
+        result[skill] = radar_scores.get(skill, 0) if covered else 0
+    return result
 
 _ROUND_AGENT_LABELS = {
     "technical":    "Technical",
@@ -731,6 +774,13 @@ async def _generate_report_sse(session_id: str, user_id: str):
 
     # Now rerun company_fit with actual radar scores from core
     radar_scores = core_result.get("radar_scores", {})
+
+    # ── Post-process radar: zero out axes with no matching questions ─────────
+    # The LLM fills in all axes even if only 2/6 topics were covered. We patch
+    # them to 0 so the radar only shows dimensions that were actually tested.
+    radar_skills = _RADAR_AXES.get(round_type, [])
+    if radar_skills and question_scores:
+        radar_scores = _mask_uncovered_radar_axes(radar_scores, question_scores, radar_skills)
     if target_company and radar_scores:
         try:
             company_fit = await analyze_company_fit(

@@ -1336,25 +1336,65 @@ def _compute_fallback_radar(question_scores: list, overall_score: float, radar_s
         score_pct = min(100, max(0, round(float(score_raw) * 10)))
         cat_buckets.setdefault(cat, []).append(score_pct)
 
+    # Broad category aliases so "Project Knowledge" catches "NurseConnect Auth" etc.
+    _AXIS_ALIASES = {
+        "oop & design patterns": {"oop", "design", "pattern", "solid", "inheritance",
+                                   "polymorphism", "class", "object", "encapsulation"},
+        "data structures & algorithms": {"dsa", "algorithm", "array", "tree", "graph",
+                                          "heap", "sort", "search", "dynamic", "complexity"},
+        "dbms & sql": {"dbms", "sql", "database", "query", "normalization", "acid",
+                       "index", "transaction", "join", "schema", "table"},
+        "os & cn concepts": {"os", "cn", "process", "thread", "network", "tcp", "http",
+                              "dns", "socket", "memory", "schedule", "deadlock", "osi"},
+        "project knowledge": {"project", "resume", "experience", "authentication", "auth",
+                               "api", "frontend", "backend", "react", "node", "flask", "django",
+                               "implementation", "architecture", "mern", "full"},
+        "communication": {"communication", "clarity", "delivery", "structure", "explain"},
+        # HR axes
+        "star story quality": {"star", "story", "situation", "task", "action", "result"},
+        "communication clarity": {"communication", "clarity", "structure", "delivery"},
+        "self-awareness": {"self", "awareness", "reflection", "feedback", "weakness"},
+        "growth mindset": {"growth", "mindset", "learn", "failure", "improve"},
+        "behavioral consistency": {"consistency", "pattern", "behavior", "values"},
+        "collaboration quality": {"collaboration", "team", "teamwork", "peer", "coworker"},
+    }
+
     result = {}
     for skill in radar_skills:
-        skill_words = _norm(skill)
+        skill_key = skill.lower()
+        # Try exact alias first, then keyword overlap
+        aliases = _AXIS_ALIASES.get(skill_key, _norm(skill))
         matched: list = []
         for cat, scores in cat_buckets.items():
-            if skill_words & _norm(cat):   # at least one shared keyword
+            if aliases & _norm(cat):
                 matched.extend(scores)
         if matched:
             result[skill] = min(100, max(0, round(sum(matched) / len(matched))))
         else:
-            result[skill] = overall_s
+            # 0 = this axis was not covered in the interview — do NOT fake with overall score
+            result[skill] = 0
     return result
 
 
 _RADAR_SKILLS_BY_ROUND = {
-    "technical": ["OOP & Design Patterns", "Data Structures & Algorithms", "DBMS & SQL", "OS & CN Concepts", "Project Knowledge", "Communication"],
-    "hr":        ["Communication", "Problem Solving", "Teamwork", "Leadership", "Culture Fit", "Situational Judgment"],
-    "dsa":       ["Problem Understanding", "Algorithm Design", "Code Quality", "Time Complexity", "Edge Cases", "Optimization"],
-    "mcq_practice": ["Company Alignment", "Core CS", "Resume Knowledge", "Role Fundamentals", "Accuracy", "Time Management"],
+    "technical": [
+        "OOP & Design Patterns", "Data Structures & Algorithms",
+        "DBMS & SQL", "OS & CN Concepts", "Project Knowledge", "Communication",
+    ],
+    "hr": [
+        # Must match report_prompt.py _RADAR_AXES["hr"] exactly
+        "STAR Story Quality", "Communication Clarity",
+        "Self-Awareness", "Growth Mindset",
+        "Behavioral Consistency", "Collaboration Quality",
+    ],
+    "dsa": [
+        "Problem Understanding", "Algorithm Design",
+        "Code Quality", "Time Complexity", "Edge Cases", "Optimization",
+    ],
+    "mcq_practice": [
+        "Company Alignment", "Core CS",
+        "Resume Knowledge", "Role Fundamentals", "Accuracy", "Time Management",
+    ],
 }
 
 _EMPTY_HIRE_SIGNAL = {
