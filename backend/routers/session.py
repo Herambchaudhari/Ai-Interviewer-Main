@@ -647,6 +647,11 @@ async def submit_answer(
             "category":           q_topic,
             "topic":              q_topic,
             "is_follow_up":       evaluation.get("is_follow_up", False),
+            # decision_reason from the adaptive engine — used by future calls to
+            # _get_used_pillars and probing_known_weak dedup in adaptive_engine.py
+            "decision_reason":    (current_q or {}).get("decision_reason", ""),
+            "cs_pillar":          (current_q or {}).get("cs_pillar", ""),
+            "hr_category":        (current_q or {}).get("hr_category", ""),
             "scoring_meta":       body.scoring_context or {},
             "dimension_scores":   evaluation.get("dimension_scores", {}),
             "red_flag_detected":  evaluation.get("red_flag_detected", ""),
@@ -1029,6 +1034,9 @@ async def submit_answer_stream(
                 "category":           q_topic,
                 "topic":              q_topic,
                 "is_follow_up":       bool((current_q or {}).get("is_follow_up", False)),
+                "decision_reason":    (current_q or {}).get("decision_reason", ""),
+                "cs_pillar":          (current_q or {}).get("cs_pillar", ""),
+                "hr_category":        (current_q or {}).get("hr_category", ""),
                 "scoring_meta":       body.scoring_context or {},
                 "dimension_scores":   evaluation.get("dimension_scores", {}),
                 "red_flag_detected":  evaluation.get("red_flag_detected", ""),
