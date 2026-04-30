@@ -956,6 +956,13 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "hire_signal":          core_result.get("hire_signal", {}),
         "failure_patterns":     core_result.get("failure_patterns", []),
 
+        # ── HR-specific behavioral analysis (populated only for hr rounds) ──
+        "star_story_matrix":           core_result.get("star_story_matrix", []),
+        "behavioral_category_coverage": core_result.get("behavioral_category_coverage", []),
+        "communication_pattern":        core_result.get("communication_pattern", ""),
+        "culture_fit_narrative":        core_result.get("culture_fit_narrative", ""),
+        "behavioral_red_flags":         core_result.get("behavioral_red_flags", []),
+
         # Per-question
         "per_question_analysis": per_question_analysis,
         "question_scores":      question_scores,

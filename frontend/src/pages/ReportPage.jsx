@@ -782,6 +782,12 @@ export default function ReportPage() {
     checklist: reportChecklist = [],
     // Phase 2 MCQ: per-category accuracy breakdown (always an array)
     category_breakdown = [],
+    // HR-specific behavioral fields
+    star_story_matrix = [],
+    behavioral_category_coverage = [],
+    communication_pattern = '',
+    culture_fit_narrative = '',
+    behavioral_red_flags = [],
     // Debug mode flag — set by backend when GROQ_API_KEY is missing
     _debug_mock = false,
   } = report
@@ -1356,6 +1362,115 @@ export default function ReportPage() {
           </SectionCard>
         </div>
 
+
+        {/* ── HR: STAR Story Quality Matrix ───────────────────────────────── */}
+        {round_type === 'hr' && star_story_matrix?.length > 0 && (
+          <SectionCard icon={<Star size={16}/>} title="STAR Story Quality" color="#ec4899">
+            <p className="text-xs text-muted mb-3">
+              Did each answer include all four STAR elements with concrete specifics?
+            </p>
+            <div className="space-y-2">
+              {star_story_matrix.map((q, i) => {
+                const starScore = q.star_score ?? 0
+                const color = starScore >= 8 ? '#4ade80' : starScore >= 5 ? '#facc15' : '#f87171'
+                return (
+                  <div key={i} className="p-3 rounded-xl flex items-center gap-3"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)' }}>
+                    <span className="text-xs font-bold flex-shrink-0" style={{ color }}>{q.question_id}</span>
+                    <div className="flex gap-1 flex-shrink-0">
+                      {['situation_present','task_present','action_present','result_present'].map((key, j) => (
+                        <span key={j} className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                          style={{
+                            background: q[key] ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.12)',
+                            color: q[key] ? '#4ade80' : '#f87171',
+                          }}>
+                          {'STAR'[j]}
+                        </span>
+                      ))}
+                    </div>
+                    <span className="text-xs text-muted truncate flex-1">{q.competency_category}</span>
+                    <span className="text-xs flex-shrink-0" style={{ color }}>
+                      {q.specificity_level?.split(' ')[0] || ''}
+                    </span>
+                    {q.missing_element && q.missing_element !== 'None' && (
+                      <span className="text-xs text-amber-400 flex-shrink-0">Missing: {q.missing_element}</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── HR: Behavioral Category Coverage ────────────────────────────── */}
+        {round_type === 'hr' && behavioral_category_coverage?.length > 0 && (
+          <SectionCard icon={<BarChart2 size={16}/>} title="Competency Coverage" color="#ec4899">
+            <p className="text-xs text-muted mb-3">
+              Which behavioral competencies were assessed this session.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {behavioral_category_coverage.map((cat, i) => {
+                const perfColor = cat.performance === 'Strong' ? '#4ade80'
+                  : cat.performance === 'Adequate' ? '#facc15'
+                  : cat.performance === 'Weak' ? '#f87171'
+                  : '#64748b'
+                return (
+                  <div key={i} className="flex items-center gap-2 p-2 rounded-lg"
+                    style={{ background: 'rgba(255,255,255,0.03)' }}>
+                    {cat.covered
+                      ? <CheckCircle size={12} className="flex-shrink-0" style={{ color: perfColor }} />
+                      : <Minus size={12} className="text-muted flex-shrink-0" />}
+                    <span className="text-xs flex-1 truncate"
+                      style={{ color: cat.covered ? 'var(--color-text)' : 'var(--color-muted)' }}>
+                      {cat.category}
+                    </span>
+                    {cat.covered && (
+                      <Chip label={cat.performance} size="xs" color={perfColor} />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── HR: Culture Fit + Communication Pattern ──────────────────────── */}
+        {round_type === 'hr' && (culture_fit_narrative || communication_pattern || behavioral_red_flags?.length > 0) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            {(culture_fit_narrative || communication_pattern) && (
+              <SectionCard icon={<Users size={16}/>} title="Culture Fit & Communication Style" color="#ec4899">
+                {communication_pattern && (
+                  <div className="mb-3">
+                    <p className="text-xs text-muted uppercase tracking-wider mb-1">Communication Pattern</p>
+                    <p className="text-sm font-medium" style={{
+                      color: communication_pattern.includes('Anecdote') ? '#4ade80'
+                        : communication_pattern.includes('Too-brief') ? '#f87171'
+                        : '#facc15'
+                    }}>{communication_pattern}</p>
+                  </div>
+                )}
+                {culture_fit_narrative && (
+                  <div>
+                    <p className="text-xs text-muted uppercase tracking-wider mb-1">Culture Fit</p>
+                    <p className="text-sm text-muted leading-relaxed">{culture_fit_narrative}</p>
+                  </div>
+                )}
+              </SectionCard>
+            )}
+            {behavioral_red_flags?.length > 0 && (
+              <SectionCard icon={<AlertTriangle size={16}/>} title="Behavioral Red Flags" color="#f87171">
+                <div className="space-y-2">
+                  {behavioral_red_flags.map((flag, i) => (
+                    <div key={i} className="flex gap-2">
+                      <AlertTriangle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-muted">{flag}</p>
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
+            )}
+          </div>
+        )}
 
         {/* ── Code Quality Analysis (DSA rounds only) ─────────────────────── */}
         <SectionErrorBoundary>

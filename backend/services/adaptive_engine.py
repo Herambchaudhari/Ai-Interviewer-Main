@@ -194,14 +194,53 @@ def _candidate_elo_to_difficulty(ability_vector: dict, base_difficulty: str) -> 
     return norm
 
 
+_HR_CATEGORIES_ORDERED = [
+    # Priority order — ensures well-rounded STAR competency coverage per session
+    "Conflict Resolution",
+    "Leadership & Ownership",
+    "Failure & Learning",
+    "Teamwork & Collaboration",
+    "Problem-Solving Under Pressure",
+    "Communication & Influence",
+    "Execution & Delivery",
+    "Customer/User Focus",
+    "Initiative & Innovation",
+    "Values & Ethics",
+    # Legacy categories from original question bank (migration 013)
+    "Communication",
+    "Adaptability",
+    "Time Management",
+]
+
+
 def _get_used_pillars(transcript: list, round_type: str) -> list[str]:
-    """Return cs_pillar or hr_category values already served from the DB."""
+    """
+    Return cs_pillar / hr_category values already served from the DB this session.
+    Transcript entries store the category in multiple keys depending on how the
+    question was created:
+      - DB technical questions: cs_pillar = "OS"/"DBMS"/"CN"/"OOP"/"DSA"
+      - DB HR questions: hr_category = "Leadership & Ownership" etc. (mapped from topic)
+      - All questions: topic / category = the full topic name
+    Read all possible keys so both DB and LLM-generated questions are accounted for.
+    """
     pillars = []
     for entry in transcript:
-        p = entry.get("cs_pillar") or entry.get("hr_category") or ""
+        p = (entry.get("cs_pillar")
+             or entry.get("hr_category")
+             or entry.get("topic")
+             or entry.get("category")
+             or "")
         if p and p not in pillars:
             pillars.append(p)
     return pillars
+
+
+def _get_priority_hr_category(used_categories: list[str]) -> str | None:
+    """Return the highest-priority HR category not yet covered this session."""
+    for cat in _HR_CATEGORIES_ORDERED:
+        if cat not in used_categories:
+            return cat
+    return None
 
 
 def _get_prewritten_follow_up(current_q: dict, score: float) -> str | None:
@@ -412,12 +451,22 @@ async def generate_adaptive_next_question(
             "and probe their understanding. Do NOT ask a generic technical question."
         )
     elif round_type == "hr":
-        # HR: all remaining questions are resume/situational grilling
-        directive = (
-            "MANDATORY: Generate a behavioral question directly tied to the candidate's resume. "
-            "Reference a specific project, role, or claim they listed and ask them to reflect "
-            "on it using the STAR method (Situation, Task, Action, Result)."
-        )
+        # HR: resume-grilling with competency category rotation
+        next_hr_cat = _get_priority_hr_category(used_pillars)
+        if next_hr_cat:
+            directive = (
+                f"MANDATORY: Generate a behavioral question in the '{next_hr_cat}' competency category. "
+                "Tie it directly to the candidate's resume — reference a specific project, role, or claim "
+                "they listed and ask them to describe a real situation using STAR "
+                "(Situation, Task, Action, Result). "
+                f"The question MUST test the '{next_hr_cat}' behavioral competency."
+            )
+        else:
+            directive = (
+                "MANDATORY: Generate a resume-grilling behavioral question. "
+                "Reference a specific project, role, or claim the candidate listed "
+                "and ask them to describe a real situation using STAR (Situation, Task, Action, Result)."
+            )
     else:
         # Technical: role-based live question
         counters["live"] = counters.get("live", 0) + 1

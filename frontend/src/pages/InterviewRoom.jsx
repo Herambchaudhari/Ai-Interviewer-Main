@@ -780,6 +780,32 @@ export default function InterviewRoom() {
             />
           ) : (
             <>
+              {/* ── STAR method reminder (HR rounds only) ─────────────────── */}
+              {roundType === 'hr' && (
+                <div className="rounded-xl p-3 text-xs"
+                  style={{ background: 'rgba(236,72,153,0.07)', border: '1px solid rgba(236,72,153,0.22)' }}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-pink-400 font-bold text-sm">★</span>
+                    <span className="font-semibold text-pink-300">STAR structure — use for every answer</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { letter: 'S', label: 'Situation', hint: 'Set the scene' },
+                      { letter: 'T', label: 'Task', hint: 'Your responsibility' },
+                      { letter: 'A', label: 'Action', hint: 'What YOU did' },
+                      { letter: 'R', label: 'Result', hint: 'Outcome + metric' },
+                    ].map(({ letter, label, hint }) => (
+                      <div key={letter} className="text-center p-1.5 rounded-lg"
+                        style={{ background: 'rgba(255,255,255,0.04)' }}>
+                        <p className="font-bold text-pink-300">{letter}</p>
+                        <p className="text-white font-medium text-[10px]">{label}</p>
+                        <p className="text-muted text-[9px]">{hint}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <QuestionPanel
                 question={currentQ}
                 questionIndex={qIndex}

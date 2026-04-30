@@ -216,7 +216,9 @@ _EVAL_DIMENSIONS = [
 def _compute_question_quotas(num_questions: int, round_type: str) -> dict:
     """
     Technical: 20% CS core from DB · 50% role-based LLM · 30% resume LLM
-    HR:        30% behavioral from DB · 70% resume-based LLM
+    HR:        80% behavioral from DB · 20% resume-grilling LLM (personalized)
+              Research-backed: DB-dominant HR interviews have better validity and
+              coverage guarantees across STAR competency categories.
     DSA/MCQ:   0% DB (all LLM-generated or pre-built bank)
     """
     if round_type == "technical":
@@ -225,9 +227,11 @@ def _compute_question_quotas(num_questions: int, round_type: str) -> dict:
         live_q   = num_questions - db_q - resume_q
         return {"db": db_q, "live": max(0, live_q), "resume": resume_q}
     elif round_type == "hr":
-        db_q     = max(1, round(num_questions * 0.30))
-        resume_q = num_questions - db_q
-        return {"db": db_q, "live": 0, "resume": max(0, resume_q)}
+        # 80% DB ensures full STAR competency category coverage + auditability.
+        # 20% LLM generates resume-personalized behavioral probes.
+        db_q     = max(1, round(num_questions * 0.80))
+        resume_q = max(0, num_questions - db_q)
+        return {"db": db_q, "live": 0, "resume": resume_q}
     else:
         # DSA / MCQ — no DB questions from question_bank
         return {"db": 0, "live": num_questions, "resume": 0}
@@ -846,7 +850,7 @@ async def skip_question(
 
     questions      = session.get("questions", [])
     num_questions  = session.get("num_questions", 8)
-    context_bundle = session.get("context_bundle") or {}
+    context_bundle = _resolve_context_bundle(session)   # was: raw context_bundle, missing parsed resume
     round_type     = session.get("round_type", "technical")
 
     current_q  = next((q for q in questions if q.get("id") == body.question_id), body.current_question)
@@ -1013,6 +1017,8 @@ async def submit_answer_stream(
                 "question_id":        body.question_id,
                 "question":           q_text,
                 "answer":             body.transcript,
+                "language":           body.language,
+                "question_type":      "code" if is_code else "speech",
                 "score":              evaluation.get("score"),
                 "feedback":           evaluation.get("feedback", ""),
                 "verdict":            evaluation.get("verdict", ""),
@@ -1022,9 +1028,12 @@ async def submit_answer_stream(
                 "answer_summary":     evaluation.get("answer_summary", ""),
                 "category":           q_topic,
                 "topic":              q_topic,
+                "is_follow_up":       bool((current_q or {}).get("is_follow_up", False)),
                 "scoring_meta":       body.scoring_context or {},
                 "dimension_scores":   evaluation.get("dimension_scores", {}),
                 "red_flag_detected":  evaluation.get("red_flag_detected", ""),
+                "audio_url":          body.audio_url or None,
+                "audio_path":         body.audio_path or None,
             })
             answered_count = len(existing_transcript)
             from services.adaptive_engine import _update_detected_weaknesses
@@ -1032,11 +1041,15 @@ async def submit_answer_stream(
                 dict(session.get("detected_weaknesses") or {}),
                 q_topic, float(evaluation.get("score") or 5)
             )
+            ability_vector = _update_ability_vector(
+                dict(session.get("ability_vector") or {}), evaluation
+            )
             update_session(body.session_id, {
                 "transcript":             existing_transcript,
                 "scores":                 list(session.get("scores") or []) + [evaluation.get("score")],
                 "current_question_index": q_index + 1,
                 "detected_weaknesses":    dw,
+                "ability_vector":         ability_vector,
             })
         except Exception as e:
             print(f"[answer/stream] persist failed: {e}")

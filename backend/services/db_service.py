@@ -1569,6 +1569,7 @@ _DIFF_NORMALIZE: dict[str, str] = {
 
 _CS_PILLARS = ["OS", "DBMS", "CN", "OOP", "DSA", "System Design"]
 _HR_CATEGORIES = [
+    # Original 8 from migration 013
     "Leadership & Ownership",
     "Conflict Resolution",
     "Failure & Learning",
@@ -1577,6 +1578,12 @@ _HR_CATEGORIES = [
     "Time Management",
     "Adaptability",
     "Communication",
+    # Extended categories from migration 014 (50-question bank)
+    "Problem-Solving Under Pressure",
+    "Communication & Influence",
+    "Customer/User Focus",
+    "Execution & Delivery",
+    "Values & Ethics",
 ]
 
 

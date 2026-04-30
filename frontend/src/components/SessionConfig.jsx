@@ -160,6 +160,42 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
         </div>
       </div>
 
+      {/* ── Round-specific info blurb ──────────────────────────────────────── */}
+      {roundType === 'hr' && (
+        <div className="mb-5 p-3.5 rounded-xl text-sm"
+          style={{ background: 'rgba(236,72,153,0.08)', border: '1px solid rgba(236,72,153,0.25)' }}>
+          <p className="font-semibold text-pink-300 mb-1 flex items-center gap-1.5">
+            <span>✦</span> STAR Method Required
+          </p>
+          <p className="text-muted text-xs leading-relaxed">
+            Structure every answer as: <span className="text-white font-medium">Situation → Task → Action → Result</span>.
+            Describe a real experience — not what you "would" do. Specific examples with outcomes score highest.
+          </p>
+        </div>
+      )}
+      {roundType === 'technical' && (
+        <div className="mb-5 p-3.5 rounded-xl text-sm"
+          style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.25)' }}>
+          <p className="font-semibold text-purple-300 mb-1 flex items-center gap-1.5">
+            <span>✦</span> What to Expect
+          </p>
+          <p className="text-muted text-xs leading-relaxed">
+            20% CS fundamentals (OS, DBMS, OOP, CN) · 50% role-based questions · 30% deep-dives into your projects and stack.
+          </p>
+        </div>
+      )}
+      {roundType === 'dsa' && (
+        <div className="mb-5 p-3.5 rounded-xl text-sm"
+          style={{ background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.25)' }}>
+          <p className="font-semibold text-cyan-300 mb-1 flex items-center gap-1.5">
+            <span>✦</span> Coding Interview
+          </p>
+          <p className="text-muted text-xs leading-relaxed">
+            You will get algorithmic problems to solve. Think out loud — explain your approach, complexity, and edge cases before writing code.
+          </p>
+        </div>
+      )}
+
       {/* ── Context Targets ─────────────────────────────────────────────── */}
       <div className="mb-7 grid gap-4">
         <div>
