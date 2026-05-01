@@ -13,7 +13,7 @@ from services.interviewer import generate_first_question
 from services.db_service import (
     save_session, get_profile as _get_profile,
     save_checkpoint, get_session_with_auth, get_active_sessions,
-    upload_audio_clip, get_audio_signed_url,
+    upload_audio_clip, get_audio_signed_url, init_supabase,
 )
 from services.evaluator import evaluate_mcq_response
 
@@ -353,6 +353,58 @@ async def start_session(
                 "type":                "mcq",
                 "time_limit_secs":     _resolve_question_time_limit("mcq_practice", diff_q),
                 "source_signal":       "database",
+            })
+        first_q = questions[0]
+
+    # ── DSA: fetch problems from curated bank ──────────────────────────────────
+    elif round_type == "dsa":
+        # Industry-standard pacing: ~15 min per problem (HackerRank/CoderPad benchmarks).
+        # Clamp client-supplied count against timer to prevent under/over-allocation.
+        timer_based_cap = max(1, min(5, body.timer_mins // 15))
+        dsa_count = max(1, min(body.num_questions, timer_based_cap))
+        try:
+            db = init_supabase()
+            res = (
+                db.table("dsa_problems")
+                .select("id, slug, title, difficulty, topics, reference_complexity_time, reference_complexity_space")
+                .eq("difficulty", difficulty)
+                .limit(dsa_count)
+                .execute()
+            )
+            bank_rows = res.data or []
+        except Exception as e:
+            return _err(f"Failed to load DSA problems: {e}", status=500)
+
+        if not bank_rows:
+            # Fall back to any difficulty if exact tier has none
+            try:
+                res = db.table("dsa_problems").select(
+                    "id, slug, title, difficulty, topics, reference_complexity_time, reference_complexity_space"
+                ).limit(dsa_count).execute()
+                bank_rows = res.data or []
+            except Exception:
+                bank_rows = []
+
+        if not bank_rows:
+            return _err(
+                "No DSA problems available. Run migration 014_dsa_problems.sql in Supabase.",
+                status=404,
+            )
+
+        questions = []
+        for i, p in enumerate(bank_rows):
+            questions.append({
+                "id":             str(uuid.uuid4()),
+                "problem_slug":   p["slug"],
+                "title":          p["title"],
+                "difficulty":     p["difficulty"],
+                "topics":         p.get("topics") or [],
+                "reference_complexity_time":  p.get("reference_complexity_time"),
+                "reference_complexity_space": p.get("reference_complexity_space"),
+                "type":           "dsa",
+                "order_index":    i,
+                "time_limit_secs": _resolve_question_time_limit("dsa", difficulty),
+                "source_signal":  "database",
             })
         first_q = questions[0]
 
@@ -1336,10 +1388,8 @@ async def list_active_sessions(
     """
     try:
         sessions = get_active_sessions(user["user_id"])
-    except RuntimeError as e:
-        return _err(str(e), status=503)
-    except Exception as e:
-        return _err(f"Could not fetch active sessions: {e}", status=500)
+    except Exception:
+        sessions = []   # resume-banner is best-effort; never block the dashboard
 
     return _ok(data={"sessions": sessions})
 

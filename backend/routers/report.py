@@ -665,7 +665,36 @@ async def _generate_report_sse(session_id: str, user_id: str):
             qs_entry["explanation"]            = entry.get("explanation") or ""
             qs_entry["time_taken_seconds"]     = entry.get("time_taken_secs") or entry.get("time_taken_seconds") or 0
             qs_entry["difficulty"]             = entry.get("difficulty") or ""
+        # DSA-specific fields — transcript entries now embed execution metadata
+        # directly (see dsa.py /submit). Copy them so question_scores is self-contained
+        # and the dashboard renders even when sessions.scores enrichment is unavailable.
+        if entry.get("question_type") == "code":
+            for _dsa_k in ("problem_slug", "problem_title", "language",
+                           "tests_passed", "tests_total", "pass_rate",
+                           "avg_runtime_ms", "time_complexity", "space_complexity",
+                           "difficulty"):
+                if entry.get(_dsa_k) is not None:
+                    qs_entry[_dsa_k] = entry[_dsa_k]
         question_scores.append(qs_entry)
+
+    # ── DSA: enrich question_scores with code-submission metadata ─────────────
+    # transcript carries the score + verdict, but DSA-specific fields
+    # (code_excerpt, language, complexities, tests passed) live in sessions.scores.
+    # Overlay them by question_id so the DSA report block renders cleanly.
+    if round_type == "dsa":
+        scores_by_qid = {}
+        for s in (session.get("scores") or []):
+            qid = s.get("question_id")
+            if qid:
+                scores_by_qid[qid] = s
+        for qs in question_scores:
+            extra = scores_by_qid.get(qs.get("question_id"))
+            if extra:
+                for k in ("problem_slug", "problem_title", "language", "code_excerpt",
+                         "time_complexity", "space_complexity",
+                         "tests_passed", "tests_total", "pass_rate", "avg_runtime_ms"):
+                    if extra.get(k) is not None:
+                        qs[k] = extra[k]
 
     # Only average questions that were answered and evaluated (score is a real number)
     scored = [q["score"] for q in question_scores
@@ -674,11 +703,13 @@ async def _generate_report_sse(session_id: str, user_id: str):
     overall_pct  = round(overall_raw * 10, 1)
 
     # ── Run voice analysis on stored transcript ───────────────────────────────
+    # Skip for DSA: coding rounds have no spoken transcript and no voice/filler axis.
     voice_result = {}
-    try:
-        voice_result = analyze_session_voice(transcript_entries=transcript)
-    except Exception as e:
-        print(f"[report/sse] Voice analysis failed: {e}")
+    if round_type != "dsa":
+        try:
+            voice_result = analyze_session_voice(transcript_entries=transcript)
+        except Exception as e:
+            print(f"[report/sse] Voice analysis failed: {e}")
 
     voice_metrics       = voice_result.get("voice_metrics")
     delivery_consistency = voice_result.get("delivery_consistency")
@@ -815,13 +846,19 @@ async def _generate_report_sse(session_id: str, user_id: str):
     yield _sse({"stage": "behavioral_analysis", "progress": 50, "label": "Analyzing your delivery..."})
 
     # ── Stage 3+4: communication + playbook (parallel) ───────────────────────
-    comm_task = _gen_communication(
-        question_scores=question_scores,
-        voice_metrics=voice_metrics,
-        delivery_consistency=delivery_consistency,
-        round_type=round_type,
-        overall_score=overall_pct,
-    )
+    # DSA rounds: skip Stage 3 entirely. Communication/delivery/BS-detector axes
+    # don't apply to a coding submission — running them just produces irrelevant
+    # data the DSA report doesn't render and burns LLM credits.
+    if round_type == "dsa":
+        comm_task = _empty_async_dict()
+    else:
+        comm_task = _gen_communication(
+            question_scores=question_scores,
+            voice_metrics=voice_metrics,
+            delivery_consistency=delivery_consistency,
+            round_type=round_type,
+            overall_score=overall_pct,
+        )
     playbook_task = _gen_playbook(
         weak_areas=core_result.get("weak_areas", []),
         strong_areas=core_result.get("strong_areas", []),
@@ -1183,10 +1220,38 @@ async def get_or_generate_report(
     # ── Cache check ───────────────────────────────────────────────────────────
     # Serve ANY existing report row — don't regenerate if a row exists, even if
     # it only has Stage 1 data (prevents looping regeneration on partial saves).
+    #
+    # DSA exception: a DSA report generated before all submissions arrived
+    # will be cached with question_scores: []. Detect staleness by comparing
+    # cached question count vs live session transcript length — if the session
+    # has grown since the report was generated, invalidate and regenerate.
     try:
         cached = get_report(session_id)
         if cached and _is_complete_report(cached):
-            return _ok(data=_normalize_report_payload(cached))
+            if cached.get("round_type") == "dsa":
+                try:
+                    live_sess = get_session(session_id)
+                    if not live_sess:
+                        return _err("Session not found.", status=404)
+                    if live_sess.get("user_id") != user["user_id"]:
+                        return _err("Access denied.", status=403)
+                    live_q_count    = len((live_sess or {}).get("transcript") or [])
+                    cached_q_count  = len(cached.get("question_scores") or [])
+                    if live_q_count <= cached_q_count:
+                        return _ok(data=_normalize_report_payload(cached))
+                    # Session has more submissions than the cached report captured.
+                    # Fall through to regeneration — session already loaded above.
+                    print(f"[report] DSA stale cache {session_id}: "
+                          f"{cached_q_count} qs in cache vs {live_q_count} in transcript → regenerating")
+                except RuntimeError:
+                    if _DEBUG:
+                        return _ok(data=_mock_report(session_id))
+                    return _err("Database not configured.", status=503)
+                except Exception:
+                    # DB error during staleness check — serve cache to avoid blocking user
+                    return _ok(data=_normalize_report_payload(cached))
+            else:
+                return _ok(data=_normalize_report_payload(cached))
         if cached:
             # A row exists but is still too sparse (e.g. a schema migration column
             # was just added). Log and fall through to regeneration only when

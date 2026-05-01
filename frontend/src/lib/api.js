@@ -141,6 +141,39 @@ export async function submitAnswer(payload) {
   return data
 }
 
+// ── DSA (Coding round) ─────────────────────────────────────────────────────
+
+/** GET /api/v1/dsa/problems — paginated list of problems (filter by difficulty/topic) */
+export async function listDsaProblems({ difficulty, topic, limit = 50 } = {}) {
+  const params = new URLSearchParams()
+  if (difficulty) params.set('difficulty', difficulty)
+  if (topic)      params.set('topic', topic)
+  params.set('limit', limit)
+  const { data } = await api.get(`/dsa/problems?${params.toString()}`)
+  return data  // { success, data: { problems: [...], total } }
+}
+
+/** GET /api/v1/dsa/problems/:slug — full problem (statement + samples + starter) */
+export async function getDsaProblem(slug) {
+  const { data } = await api.get(`/dsa/problems/${slug}`)
+  return data  // { success, data: { problem fields }, error }
+}
+
+/** POST /api/v1/dsa/run — execute against sample tests only (fast, no scoring) */
+export async function runDsaCode({ slug, language, code }) {
+  const { data } = await api.post('/dsa/run', { slug, language, code })
+  return data  // { success, data: { results, tests_passed, tests_total, all_passed }, error }
+}
+
+/** POST /api/v1/dsa/submit — execute against all hidden tests + LLM evaluation */
+export async function submitDsaCode({ slug, language, code, sessionId, questionId }) {
+  const { data } = await api.post('/dsa/submit', {
+    slug, language, code,
+    session_id: sessionId, question_id: questionId,
+  })
+  return data  // { success, data: { results, evaluation, all_passed }, error }
+}
+
 // ── Report ─────────────────────────────────────────────────────────────────
 export async function getReport(sessionId) {
   const { data } = await api.get(`/report/${sessionId}`)

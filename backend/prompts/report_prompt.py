@@ -32,19 +32,43 @@ _RADAR_AXES = {
 
 
 def _format_qa(question_scores: list, max_questions: int = 12) -> str:
-    """Format Q&A transcript for prompt injection."""
+    """Format Q&A transcript for prompt injection.
+
+    For DSA (question_type='code') entries: surfaces test results, complexity,
+    and language — the signals the LLM needs for a meaningful coding assessment.
+    For verbal/MCQ entries: retains concept-missed and red-flag signals.
+    """
     lines = []
     for i, q in enumerate(question_scores[:max_questions], 1):
-        answer = (q.get("answer_text") or "")[:350].strip()
+        answer = (q.get("answer_text") or "")[:400].strip()
         if not answer:
             answer = "[No answer provided]"
-        lines.append(
-            f"Q{i} [{q.get('category', 'General')}]: {q.get('question_text', '')}\n"
-            f"  Answer: {answer}\n"
-            f"  Score: {q.get('score', 0)}/10 | Verdict: {q.get('verdict', '')}\n"
-            f"  Concept Missed: {q.get('key_concept_missed', '') or 'None'}\n"
-            f"  Red Flag: {q.get('red_flag_detected', '') or 'None'}"
-        )
+
+        entry = [
+            f"Q{i} [{q.get('category', 'General')}]: {q.get('question_text', '')}",
+            f"  Answer: {answer}",
+            f"  Score: {q.get('score', 0)}/10 | Verdict: {q.get('verdict', '')}",
+        ]
+
+        if q.get("question_type") == "code":
+            # DSA submission — give the LLM execution + complexity context
+            tp = q.get("tests_passed")
+            tt = q.get("tests_total")
+            if tt is not None:
+                pct = round((tp or 0) / max(tt, 1) * 100)
+                entry.append(f"  Tests: {tp}/{tt} passed ({pct}%)")
+            tc = q.get("time_complexity", "")
+            sc = q.get("space_complexity", "")
+            if tc:
+                entry.append(f"  Complexity: Time {tc} | Space {sc or 'unknown'}")
+            if q.get("language"):
+                entry.append(f"  Language: {q['language']}")
+        else:
+            # Verbal / MCQ — surface gap-analysis signals
+            entry.append(f"  Concept Missed: {q.get('key_concept_missed', '') or 'None'}")
+            entry.append(f"  Red Flag: {q.get('red_flag_detected', '') or 'None'}")
+
+        lines.append("\n".join(entry))
     return "\n\n".join(lines) if lines else "No questions answered."
 
 

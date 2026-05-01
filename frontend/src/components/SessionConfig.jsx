@@ -90,11 +90,16 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
       } catch {}
 
       // Industry calibration: ~3 min per question for verbal/technical rounds.
-      // 10 min=4Q, 15m=5Q, 20m=7Q, 30m=10Q, 45m=15Q, 60m=18Q max.
-      // MCQ is faster: ~2 min per question, cap at 20.
+      // Question count scales with timer length, tuned per round type.
+      // MCQ:    ~2 min/Q, cap 20.
+      // DSA:    industry standard — ~10–15 min per problem (HackerRank/CoderPad).
+      //         10m=1Q, 15m=1Q, 20m=2Q, 30m=2Q, 45m=3Q, 60m=4Q, 90m=5Q.
+      // Verbal: ~3 min/Q, cap 18.
       const computedQuestions = roundType === 'mcq_practice'
         ? Math.min(20, Math.max(5, Math.floor(timerMins / 2)))
-        : Math.min(18, Math.max(4, Math.round(timerMins / 3)))
+        : roundType === 'dsa'
+          ? Math.min(5, Math.max(1, Math.floor(timerMins / 15)))
+          : Math.min(18, Math.max(4, Math.round(timerMins / 3)))
 
       const payload = {
         profile_id:    profileId,
@@ -277,12 +282,19 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
                 { mins: 20, qCount: 10 },
                 { mins: 30, qCount: 15 },
               ]
-            : [
-                { mins: 10, qCount: 4 },
-                { mins: 15, qCount: 5 },
-                { mins: 20, qCount: 7 },
-                { mins: 30, qCount: 10 },
-              ]
+            : roundType === 'dsa'
+              ? [
+                  { mins: 15, qCount: 1 },
+                  { mins: 30, qCount: 2 },
+                  { mins: 45, qCount: 3 },
+                  { mins: 60, qCount: 4 },
+                ]
+              : [
+                  { mins: 10, qCount: 4 },
+                  { mins: 15, qCount: 5 },
+                  { mins: 20, qCount: 7 },
+                  { mins: 30, qCount: 10 },
+                ]
           ).map(({ mins, qCount }) => (
             <button
               key={mins}
@@ -346,7 +358,9 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
           `${timerMins} min`,
           `${roundType === 'mcq_practice'
             ? Math.min(20, Math.max(5, Math.floor(timerMins / 2)))
-            : Math.min(18, Math.max(4, Math.round(timerMins / 3))) } Qs`,
+            : roundType === 'dsa'
+              ? Math.min(5, Math.max(1, Math.floor(timerMins / 15)))
+              : Math.min(18, Math.max(4, Math.round(timerMins / 3))) } Qs`,
         ].filter(Boolean).map(label => (
           <span key={label} className="badge-purple text-xs">{label}</span>
         ))}

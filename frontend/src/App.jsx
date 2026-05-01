@@ -12,6 +12,7 @@ import UploadPage from './pages/Upload'
 import OnboardingPage from './pages/OnboardingPage'
 import DashboardPage from './pages/DashboardPage'
 import InterviewRoom from './pages/InterviewRoom'
+import CodingPage from './pages/CodingPage'
 import Report from './pages/ReportPage'
 import SharedReportPage from './pages/SharedReportPage'
 import SettingsPage from './pages/SettingsPage'
@@ -62,7 +63,10 @@ export default function App() {
           <ProtectedRoute><InterviewRoom /></ProtectedRoute>
         } />
         <Route path="/coding/:sessionId" element={
-          <ProtectedRoute><InterviewRoom /></ProtectedRoute>
+          <ProtectedRoute><CodingPage /></ProtectedRoute>
+        } />
+        <Route path="/coding/practice/:slug" element={
+          <ProtectedRoute><CodingPage /></ProtectedRoute>
         } />
         <Route path="/report/:sessionId" element={
           <ProtectedRoute><Report /></ProtectedRoute>
