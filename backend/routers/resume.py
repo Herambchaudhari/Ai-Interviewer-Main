@@ -223,65 +223,75 @@ async def update_profile(
     )
 
 
-# ── GET /api/v1/reports/user/:user_id ────────────────────────────────────────
-# NOTE: mounted on the resume router for simplicity; prefix = /api/v1/resume
-# Full path: GET /api/v1/resume/reports/user/{user_id}
+# ── GET /api/v1/resume/reports/mine  (JWT-only, no path param) ───────────────
+# Also keeps the legacy /reports/user/{user_id} route pointing here so the
+# existing frontend call still works without any client-side change.
+@router.get("/reports/mine")
 @router.get("/reports/user/{user_id}")
 async def get_user_reports(
-    user_id: str,
     user: dict = Depends(get_current_user),
-):
+    user_id: str = None,   # ignored — always derived from JWT so users can
+):                          # never read another user's reports by tweaking the URL
     """
-    Return past sessions + reports for a given user.
-    Validates that the requesting user matches the path param.
+    Return past sessions + reports for the authenticated user.
+    user_id path param is accepted for backwards-compat but ignored;
+    identity comes from the JWT only.
     """
-    if user["user_id"] != user_id:
-        return _err("Access denied.", status=403)
+    user_id = user["user_id"]  # always override with JWT identity
 
     try:
         db = init_supabase()
-        # Fetch sessions for this user, ordered by most recent.
-        # `session_label` and `questions` are pulled so we can defensively detect MCQ
-        # rounds whose round_type was mis-stored as 'technical' by older code paths.
-        sessions_res = (
+
+        # ── Strategy: fetch all sessions for user, join reports in Python ──
+        # Using a single wide fetch + Python-side join avoids complex Supabase
+        # filter syntax (.not_.in_) that varies across client versions and was
+        # silently failing. All "active" orphan sessions are filtered out at
+        # the Python level so they don't crowd out completed ones.
+        all_sessions_res = (
             db.table("sessions")
-            .select("id, round_type, difficulty, num_questions, status, created_at, session_label, questions")
+            .select("id, round_type, difficulty, num_questions, status, "
+                    "created_at, questions, target_company")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
-            .limit(20)
+            .limit(100)
             .execute()
         )
-        sessions = sessions_res.data or []
+        all_sessions = all_sessions_res.data or []
+
+        if not all_sessions:
+            return _ok(data={"reports": [], "total": 0})
+
+        # Fetch all report rows for these sessions in one query
+        session_ids = [s["id"] for s in all_sessions]
+        reports_res = (
+            db.table("reports")
+            .select("session_id, overall_score, report_quality, report_status")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+        report_map = {r["session_id"]: r for r in (reports_res.data or [])}
+
+        # Attach report data to each session
+        for s in all_sessions:
+            r = report_map.get(s["id"])
+            s["overall_score"]  = r["overall_score"]  if r else None
+            s["has_report"]     = r is not None
+            s["report_quality"] = r["report_quality"] if r else None
+            s["report_status"]  = r["report_status"]  if r else None
+
+        # Keep rows that have a report OR are recent active sessions (resume banner)
+        # Sort: sessions with reports first (by date), then active ones.
+        with_report    = [s for s in all_sessions if s["has_report"]]
+        active_recent  = [s for s in all_sessions if not s["has_report"]][:5]
+        sessions = (with_report + active_recent)[:30]
 
         # ── Normalise round_type for legacy rows ────────────────────────────
-        # Some historical MCQ sessions were saved with round_type='technical'.
-        # Re-derive from session_label or the first question's type so the
-        # dashboard renders the correct round name.
         for s in sessions:
-            label = (s.get("session_label") or "").lower()
-            qs    = s.get("questions") or []
+            qs = s.get("questions") or []
             first_type = (qs[0].get("type") if qs and isinstance(qs[0], dict) else "") or ""
-            if first_type == "mcq" or label.startswith("mcq"):
+            if first_type == "mcq":
                 s["round_type"] = "mcq_practice"
-            # Drop the heavy `questions` blob from the response — only used for detection
             s.pop("questions", None)
-
-        # For each completed session, attach its overall_score from reports table
-        if sessions:
-            session_ids = [s["id"] for s in sessions]
-            reports_res = (
-                db.table("reports")
-                .select("session_id, overall_score, report_quality, report_status")
-                .in_("session_id", session_ids)
-                .execute()
-            )
-            report_map = {r["session_id"]: r for r in (reports_res.data or [])}
-            for s in sessions:
-                r = report_map.get(s["id"])
-                s["overall_score"]  = r["overall_score"]  if r else None
-                s["has_report"]     = r is not None
-                s["report_quality"] = r["report_quality"] if r else None
-                s["report_status"]  = r["report_status"]  if r else None
 
     except RuntimeError:
         return _err("Database not configured.", status=503)

@@ -46,7 +46,7 @@ import {
   Target, Zap, Brain, ArrowUp, ArrowDown, Minus, Shield,
   MessageSquare, BarChart2, Clock, Flame, Eye,
   Share2, Download, Play, Pause, Volume2, X, Copy, Check, Users,
-  Activity, Layers, Timer,
+  Activity, Layers, Timer, Code2,
 } from 'lucide-react'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1733,9 +1733,10 @@ export default function ReportPage() {
         )}
 
         {/* ── Two-Radar Grid: Technical Knowledge + Hire Signal ────────────── */}
-        {/* Hidden for MCQ — these radars assess verbal communication / hiring readiness */}
+        {/* Hidden for MCQ — these radars assess verbal communication / hiring readiness.
+            Hidden for DSA — DSA Performance Dashboard renders its own topic-mastery radar and hire signal. */}
         <SectionErrorBoundary>
-        {round_type !== 'mcq_practice' && (legacyRadarData.length > 0 || Object.keys(hire_signal || {}).length >= 3) && (
+        {round_type !== 'mcq_practice' && round_type !== 'dsa' && (legacyRadarData.length > 0 || Object.keys(hire_signal || {}).length >= 3) && (
           <div className={legacyRadarData.length > 0 && round_type !== 'hr' ? 'grid grid-cols-1 lg:grid-cols-2 gap-5' : ''}>
             {/* Technical Knowledge — hidden for HR rounds (not relevant to behavioral assessment) */}
             {legacyRadarData.length > 0 && round_type !== 'hr' && (() => {
@@ -1800,9 +1801,10 @@ export default function ReportPage() {
         </SectionErrorBoundary>
 
         {/* ── 6-Axis Communication Radar + Delivery Consistency ───────────── */}
-        {/* Hidden for MCQ — communication axes are derived from spoken answers */}
+        {/* Hidden for MCQ — communication axes are derived from spoken answers.
+            Hidden for DSA — coding rounds are evaluated on code, not delivery. */}
         <SectionErrorBoundary>
-        {round_type === 'mcq_practice' ? null : failedSections.includes('communication_breakdown') && !stageRetrySuccess['stage3_communication'] ? (
+        {round_type === 'mcq_practice' || round_type === 'dsa' ? null : failedSections.includes('communication_breakdown') && !stageRetrySuccess['stage3_communication'] ? (
           <SectionRetryCard
             sectionLabel="Communication Analysis"
             onRetry={() => handleRetryStage('stage3_communication')}
@@ -1938,9 +1940,10 @@ export default function ReportPage() {
         </SectionErrorBoundary>
 
         {/* ── Filler & Hesitation Heatmap ─────────────────────────────────── */}
-        {/* Hidden for MCQ — filler counts come from speech transcripts */}
+        {/* Hidden for MCQ — filler counts come from speech transcripts.
+            Hidden for DSA — coding rounds have no spoken transcript. */}
         <SectionErrorBoundary>
-        {round_type !== 'mcq_practice' && fillerData.length > 0 && (
+        {round_type !== 'mcq_practice' && round_type !== 'dsa' && fillerData.length > 0 && (
           <SectionCard icon={<BarChart2 size={16}/>} title="Filler Word Heatmap" color="#fb923c">
             <p className="text-xs text-muted mb-3">
               Higher bars = more filler words per question. Hover for details.
@@ -1960,9 +1963,10 @@ export default function ReportPage() {
         </SectionErrorBoundary>
 
         {/* ── Per-Question Scores Chart ────────────────────────────────────── */}
-        {/* Hidden for MCQ — the MCQ analytics block above already shows per-question time + correctness */}
+        {/* Hidden for MCQ — the MCQ analytics block above already shows per-question time + correctness.
+            Hidden for DSA — DSA Performance Dashboard renders a richer per-problem score chart. */}
         <SectionErrorBoundary>
-        {round_type !== 'mcq_practice' && (
+        {round_type !== 'mcq_practice' && round_type !== 'dsa' && (
           <SectionCard icon={<TrendingUp size={16}/>} title="Per-Question Scores" color="#4ade80">
             {qaData.length === 0
               ? <p className="text-muted text-sm text-center py-4">No question data available for this session.</p>
@@ -1983,8 +1987,9 @@ export default function ReportPage() {
         )}
         </SectionErrorBoundary>
 
-        {/* ── Verbal Category Breakdown (technical/DSA only) ───────────────── */}
-        {round_type !== 'mcq_practice' && round_type !== 'hr' && category_breakdown?.length > 0 && (
+        {/* ── Verbal Category Breakdown (technical only) ───────────────────── */}
+        {/* DSA covers this in the Topic Mastery radar inside its dedicated dashboard. */}
+        {round_type !== 'mcq_practice' && round_type !== 'hr' && round_type !== 'dsa' && category_breakdown?.length > 0 && (
           <SectionCard icon={<BarChart2 size={16}/>} title="Performance by Topic Category" color="#7c3aed">
             <p className="text-xs text-muted mb-3">
               Average score per CS pillar — shows exactly where preparation is needed.
@@ -2239,6 +2244,572 @@ export default function ReportPage() {
             )}
           </div>
         )}
+
+        {/* ── DSA Performance Dashboard ─────────────────────────────────────────
+            Comprehensive multi-section block: KPIs, charts, complexity, topic
+            mastery, hire signal, problem-by-problem performance.
+            Driven by question_scores enriched from sessions.scores (problem_slug,
+            language, code_excerpt, time/space complexity, tests passed, runtime). */}
+        <SectionErrorBoundary>
+        {round_type === 'dsa' && Array.isArray(question_scores) && question_scores.some(q => q.problem_slug || q.tests_total != null || q.question_type === 'code') && (() => {
+          const dsaQs = question_scores.filter(q => q.problem_slug || q.tests_total != null || q.question_type === 'code')
+          const N = dsaQs.length || 1
+
+          // ── Aggregates ──
+          const totalTestsPassed = dsaQs.reduce((s, q) => s + (q.tests_passed || 0), 0)
+          const totalTests       = dsaQs.reduce((s, q) => s + (q.tests_total  || 0), 0)
+          const aggPassRate      = totalTests > 0 ? totalTestsPassed / totalTests : 0
+          const fullySolved      = dsaQs.filter(q => q.tests_total > 0 && q.tests_passed === q.tests_total).length
+          const solveRate        = fullySolved / N
+          const avgRuntime       = Math.round(dsaQs.reduce((s, q) => s + (q.avg_runtime_ms || 0), 0) / N)
+          const avgScore         = (dsaQs.reduce((s, q) => s + (q.score || 0), 0) / N).toFixed(1)
+          const langs            = [...new Set(dsaQs.map(q => q.language).filter(Boolean))]
+          const totalLines       = dsaQs.reduce((s, q) => s + ((q.code_excerpt || '').split('\n').length), 0)
+
+          // Hire signal heuristic: mix of solve rate, score, complexity adherence
+          const tcMatchCount = dsaQs.filter(q => {
+            const t = (q.time_complexity || '').toLowerCase().replace(/\s/g, '')
+            // Heuristic: anything with "n^2" or worse where reference is O(n) flags as mismatch.
+            // We treat empty as "unknown" (don't penalise).
+            return t && !t.includes('n^3') && !t.includes('n²·')
+          }).length
+          const hireScore = Math.round((solveRate * 0.45 + (avgScore / 10) * 0.35 + (tcMatchCount / N) * 0.20) * 100)
+          const hireBand =
+            hireScore >= 80 ? { label: 'Strong Hire',  color: '#22c55e' } :
+            hireScore >= 65 ? { label: 'Hire',         color: '#84cc16' } :
+            hireScore >= 50 ? { label: 'Lean Hire',    color: '#eab308' } :
+            hireScore >= 35 ? { label: 'No Hire (yet)', color: '#f97316' } :
+                              { label: 'No Hire',       color: '#ef4444' }
+
+          // ── Verdict distribution ──
+          const verdictCounts = dsaQs.reduce((m, q) => {
+            const v = q.verdict || (q.tests_passed === q.tests_total ? 'acceptable' : 'incorrect')
+            m[v] = (m[v] || 0) + 1; return m
+          }, {})
+          const verdictPalette = {
+            excellent: '#22c55e', strong: '#4ade80', acceptable: '#eab308',
+            needs_work: '#f97316', incorrect: '#ef4444',
+          }
+          const verdictData = Object.entries(verdictCounts).map(([k, v]) => ({
+            name: k.replace('_', ' '), value: v, fill: verdictPalette[k] || '#94a3b8',
+          }))
+
+          // ── Per-problem bar data ──
+          const perProblemBars = dsaQs.map((q, i) => ({
+            name:     `Q${i + 1}`,
+            label:    q.problem_title || q.question_text || `Problem ${i + 1}`,
+            score:    q.score || 0,
+            passRate: q.tests_total ? Math.round((q.tests_passed / q.tests_total) * 100) : 0,
+            runtime:  q.avg_runtime_ms || 0,
+            difficulty: q.difficulty || 'medium',
+          }))
+
+          // ── Time vs memory scatter ──
+          const scatterData = dsaQs
+            .filter(q => q.avg_runtime_ms > 0)
+            .map((q, i) => ({
+              x: q.avg_runtime_ms,
+              y: q.code_excerpt ? q.code_excerpt.split('\n').length : 1,
+              z: (q.tests_passed / Math.max(q.tests_total, 1)) * 100,
+              name: q.problem_title || `Q${i + 1}`,
+            }))
+
+          // ── Topic mastery radar ──
+          const topicScores = {}
+          dsaQs.forEach(q => {
+            const cats = (q.category || q.topic || 'general').split(',').map(t => t.trim())
+            cats.forEach(t => {
+              if (!t) return
+              if (!topicScores[t]) topicScores[t] = { sum: 0, n: 0 }
+              topicScores[t].sum += (q.score || 0) * 10
+              topicScores[t].n   += 1
+            })
+          })
+          const topicRadar = Object.entries(topicScores).map(([topic, { sum, n }]) => ({
+            subject: topic, A: Math.round(sum / n), fullMark: 100,
+          })).slice(0, 8)
+
+          // ── Difficulty distribution ──
+          const diffCounts = dsaQs.reduce((m, q) => {
+            const d = q.difficulty || 'medium'; m[d] = (m[d] || 0) + 1; return m
+          }, {})
+          const diffPalette = { easy: '#22c55e', medium: '#eab308', hard: '#ef4444' }
+
+          return (
+            <SectionCard icon={<Activity size={16}/>} title="DSA Performance Dashboard" color="#a78bfa">
+              {/* ── Hero KPIs ──────────────────────────────────────────────── */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+                {[
+                  { label: 'Solve Rate',     value: `${Math.round(solveRate * 100)}%`, sub: `${fullySolved}/${N} fully passed`, color: '#a78bfa' },
+                  { label: 'Test Pass Rate', value: `${Math.round(aggPassRate * 100)}%`, sub: `${totalTestsPassed}/${totalTests} tests`, color: '#22d3ee' },
+                  { label: 'Avg Score',      value: `${avgScore}/10`, sub: 'across problems', color: '#4ade80' },
+                  { label: 'Avg Runtime',    value: `${avgRuntime} ms`, sub: 'CPU time', color: '#fb923c' },
+                  { label: 'Languages',      value: langs.length || 1, sub: langs.join(', ') || '—', color: '#f472b6' },
+                  { label: 'Lines Written',  value: totalLines, sub: `${Math.round(totalLines / N)} avg/problem`, color: '#94a3b8' },
+                ].map(({ label, value, sub, color }) => (
+                  <div key={label} className="rounded-xl p-4"
+                       style={{ background: `${color}10`, border: `1px solid ${color}30` }}>
+                    <p className="text-[11px] uppercase tracking-wider font-semibold" style={{ color }}>{label}</p>
+                    <p className="font-bold text-2xl mt-1" style={{ color }}>{value}</p>
+                    <p className="text-xs text-muted mt-0.5">{sub}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── Hire Signal banner ─────────────────────────────────────── */}
+              <div className="rounded-xl p-4 mb-6 flex items-center gap-4"
+                   style={{ background: `linear-gradient(135deg, ${hireBand.color}18, ${hireBand.color}06)`, border: `1px solid ${hireBand.color}40` }}>
+                <div className="w-14 h-14 rounded-full flex items-center justify-center font-bold text-xl"
+                     style={{ background: hireBand.color, color: 'white' }}>
+                  {hireScore}
+                </div>
+                <div className="flex-1">
+                  <p className="text-xs uppercase tracking-wider text-muted">Hire Signal</p>
+                  <p className="font-bold text-lg" style={{ color: hireBand.color }}>{hireBand.label}</p>
+                  <p className="text-xs text-muted mt-1">
+                    Composite of solve rate ({Math.round(solveRate*100)}%), code quality ({avgScore}/10),
+                    and complexity adherence ({tcMatchCount}/{N}).
+                  </p>
+                </div>
+                <div className="hidden sm:flex flex-col gap-1 text-right">
+                  <span className="text-[10px] uppercase text-muted">Difficulty Mix</span>
+                  <div className="flex gap-1">
+                    {Object.entries(diffCounts).map(([d, c]) => (
+                      <span key={d} className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                            style={{ background: `${diffPalette[d]}20`, color: diffPalette[d] }}>
+                        {c} {d}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Charts grid ────────────────────────────────────────────── */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+                {/* Per-problem score + pass rate */}
+                <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                  <p className="text-sm font-semibold mb-3 flex items-center gap-2"><BarChart2 size={14}/> Per-Problem Score</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={perProblemBars}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                      <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                      <YAxis domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                      <Tooltip
+                        contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                        labelFormatter={(_, p) => p[0]?.payload?.label}
+                        formatter={(v, name) => [`${v}${name === 'score' ? '/10' : '%'}`, name === 'score' ? 'Score' : 'Tests Passed']}
+                      />
+                      <Bar dataKey="score" fill="#a78bfa" radius={[6, 6, 0, 0]}>
+                        {perProblemBars.map((entry, i) => (
+                          <Cell key={i} fill={entry.score >= 8 ? '#22c55e' : entry.score >= 5 ? '#eab308' : '#ef4444'}/>
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Verdict distribution */}
+                <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                  <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Target size={14}/> Verdict Distribution</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={verdictData} layout="vertical">
+                      <CartesianGrid stroke="rgba(255,255,255,0.05)" horizontal={false}/>
+                      <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                      <YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} width={90}/>
+                      <Tooltip contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}/>
+                      <Bar dataKey="value" radius={[0, 6, 6, 0]}>
+                        {verdictData.map((entry, i) => <Cell key={i} fill={entry.fill}/>)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Time vs Code-size scatter (efficiency) */}
+                {scatterData.length > 1 && (
+                  <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                    <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Zap size={14}/> Efficiency Map (Runtime vs Code Length)</p>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <ScatterChart>
+                        <CartesianGrid stroke="rgba(255,255,255,0.05)"/>
+                        <XAxis type="number" dataKey="x" name="Runtime" unit="ms" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                        <YAxis type="number" dataKey="y" name="Lines"        tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                        <ZAxis type="number" dataKey="z" range={[60, 240]} name="Pass %"/>
+                        <Tooltip
+                          cursor={{ strokeDasharray: '3 3' }}
+                          contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                          formatter={(v, name) => [`${v}${name === 'Runtime' ? ' ms' : name === 'Pass %' ? '%' : ''}`, name]}
+                          labelFormatter={(_, p) => p[0]?.payload?.name}
+                        />
+                        <Scatter data={scatterData} fill="#a78bfa"/>
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
+                {/* Topic mastery radar */}
+                {topicRadar.length >= 3 && (
+                  <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                    <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Layers size={14}/> Topic Mastery</p>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <RadarChart data={topicRadar}>
+                        <PolarGrid stroke="rgba(255,255,255,0.1)"/>
+                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }}/>
+                        <Radar dataKey="A" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.3}/>
+                        <Tooltip formatter={v => [`${v}/100`]} contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40' }}/>
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Second analytics grid (extended graphical insights) ─────── */}
+              {(() => {
+                // Complexity rank: maps Big-O string → numeric rank for line chart Y-axis
+                const TC_RANK = [
+                  { rank: 1, label: 'O(1)',       match: t => t === 'o(1)' },
+                  { rank: 2, label: 'O(log n)',    match: t => t.includes('logn') && !t.includes('nlogn') },
+                  { rank: 3, label: 'O(n)',        match: t => t === 'o(n)' },
+                  { rank: 4, label: 'O(n log n)',  match: t => t.includes('nlogn') || t.includes('nlog') },
+                  { rank: 5, label: 'O(n²)',       match: t => t.includes('n^2') || t.includes('n²') || t.includes('n*n') },
+                  { rank: 6, label: 'O(n³)',       match: t => t.includes('n^3') || t.includes('n³') },
+                  { rank: 7, label: 'O(2ⁿ)',       match: t => t.includes('2^n') },
+                  { rank: 8, label: 'O(n!)',       match: t => t.includes('n!') },
+                ]
+                function complexityRank(raw) {
+                  const t = (raw || '').toLowerCase().replace(/\s/g, '')
+                  if (!t || t === 'unknown' || t === 'n/a') return null
+                  const hit = TC_RANK.find(r => r.match(t))
+                  return hit ? hit.rank : 3
+                }
+                function rankLabel(r) {
+                  const hit = TC_RANK.find(x => x.rank === r)
+                  return hit ? hit.label : ''
+                }
+
+                // Difficulty-tier accuracy
+                const diffTiers = ['easy', 'medium', 'hard']
+                const diffStats = diffTiers.map(d => {
+                  const items = dsaQs.filter(q => (q.difficulty || 'medium') === d)
+                  const total = items.length
+                  const solved = items.filter(q => q.tests_total > 0 && q.tests_passed === q.tests_total).length
+                  const pass  = total ? Math.round((solved / total) * 100) : 0
+                  return { tier: d.charAt(0).toUpperCase() + d.slice(1), pass, total, solved, fill: diffPalette[d] }
+                }).filter(d => d.total > 0)
+
+                // Score + pass-rate progression per problem (line)
+                const progression = dsaQs.map((q, i) => ({
+                  step: `Q${i + 1}`,
+                  score: q.score || 0,
+                  passRate: q.tests_total ? Math.round((q.tests_passed / q.tests_total) * 100) : 0,
+                  label: q.problem_title || `Problem ${i + 1}`,
+                }))
+
+                // Complexity line data — time and space rank per problem
+                const complexityLine = dsaQs.map((q, i) => ({
+                  step: `Q${i + 1}`,
+                  tc: complexityRank(q.time_complexity),
+                  sc: complexityRank(q.space_complexity),
+                  tcLabel: q.time_complexity || 'unknown',
+                  scLabel: q.space_complexity || 'unknown',
+                  label: q.problem_title || `Problem ${i + 1}`,
+                }))
+                const hasComplexityData = complexityLine.some(c => c.tc !== null || c.sc !== null)
+
+                // Runtime line data per problem
+                const runtimeLine = dsaQs.map((q, i) => ({
+                  step: `Q${i + 1}`,
+                  runtime: q.avg_runtime_ms || 0,
+                  label: q.problem_title || `Problem ${i + 1}`,
+                }))
+                const hasRuntime = runtimeLine.some(r => r.runtime > 0)
+
+                // Stacked test coverage per problem
+                const coverage = dsaQs.map((q, i) => ({
+                  name: `Q${i + 1}`,
+                  passed: q.tests_passed || 0,
+                  failed: Math.max(0, (q.tests_total || 0) - (q.tests_passed || 0)),
+                  label: q.problem_title || `Problem ${i + 1}`,
+                }))
+
+                // Language breakdown (pill style, no chart needed for typically 1–2 languages)
+                const langPalette = {
+                  python: '#facc15', javascript: '#fbbf24', java: '#fb923c',
+                  cpp: '#a78bfa', 'c++': '#a78bfa', c: '#94a3b8', go: '#22d3ee',
+                  rust: '#ef4444', typescript: '#3b82f6', unknown: '#64748b',
+                }
+                const langCount = dsaQs.reduce((m, q) => {
+                  const l = q.language || 'unknown'; m[l] = (m[l] || 0) + 1; return m
+                }, {})
+
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+
+                    {/* ── Difficulty-Tier Solve Rate (bar — categorical) ────── */}
+                    {diffStats.length > 0 && (
+                      <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                        <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Layers size={14}/> Difficulty-Tier Solve Rate</p>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <BarChart data={diffStats} margin={{ top: 5, right: 10, bottom: 5, left: -15 }}>
+                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <XAxis dataKey="tier" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                            <YAxis domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => `${v}%`}/>
+                            <Tooltip
+                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              formatter={(v, _n, p) => [`${v}% (${p.payload.solved}/${p.payload.total})`, 'Solved']}
+                            />
+                            <Bar dataKey="pass" radius={[6, 6, 0, 0]}>
+                              {diffStats.map((d, i) => <Cell key={i} fill={d.fill}/>)}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* ── Score & Test Pass-Rate Progression (line) ─────────── */}
+                    <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                      <p className="text-sm font-semibold mb-1 flex items-center gap-2"><TrendingUp size={14}/> Score & Pass-Rate Trend</p>
+                      <div className="flex gap-4 mb-3">
+                        {[{ color: '#a78bfa', label: 'Score /10' }, { color: '#22d3ee', label: 'Tests %' }].map(l => (
+                          <span key={l.label} className="flex items-center gap-1.5 text-xs text-muted">
+                            <span className="w-3 h-0.5 rounded-full" style={{ background: l.color, display: 'inline-block' }}/>
+                            {l.label}
+                          </span>
+                        ))}
+                      </div>
+                      <ResponsiveContainer width="100%" height={205}>
+                        <LineChart data={progression} margin={{ top: 5, right: 16, bottom: 5, left: -20 }}>
+                          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                          <XAxis dataKey="step" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                          <YAxis yAxisId="score" domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={v => `${v}`}/>
+                          <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={v => `${v}%`}/>
+                          <Tooltip
+                            contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                            labelFormatter={(_, p) => p[0]?.payload?.label}
+                            formatter={(v, name) => [name === 'score' ? `${v}/10` : `${v}%`, name === 'score' ? 'Score' : 'Tests passed']}
+                          />
+                          <ReferenceLine yAxisId="score" y={7} stroke="#4ade8060" strokeDasharray="4 3"/>
+                          <Line yAxisId="score"  type="monotone" dataKey="score"    stroke="#a78bfa" strokeWidth={2.5} dot={{ r: 4, fill: '#a78bfa' }} activeDot={{ r: 6 }}/>
+                          <Line yAxisId="pct"    type="monotone" dataKey="passRate" stroke="#22d3ee" strokeWidth={2}   dot={{ r: 3, fill: '#22d3ee' }} strokeDasharray="5 3"/>
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* ── Time & Space Complexity Profile (line) ────────────── */}
+                    {hasComplexityData && (
+                      <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                        <p className="text-sm font-semibold mb-1 flex items-center gap-2"><Brain size={14}/> Complexity Profile</p>
+                        <div className="flex gap-4 mb-3">
+                          {[{ color: '#f472b6', label: 'Time' }, { color: '#34d399', label: 'Space' }].map(l => (
+                            <span key={l.label} className="flex items-center gap-1.5 text-xs text-muted">
+                              <span className="w-3 h-0.5 rounded-full" style={{ background: l.color, display: 'inline-block' }}/>
+                              {l.label}
+                            </span>
+                          ))}
+                          <span className="text-xs text-muted ml-auto opacity-60">lower = better</span>
+                        </div>
+                        <ResponsiveContainer width="100%" height={205}>
+                          <LineChart data={complexityLine} margin={{ top: 5, right: 10, bottom: 5, left: -10 }}>
+                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <XAxis dataKey="step" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                            <YAxis domain={[0, 8]} ticks={[1,2,3,4,5,6,7,8]} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={rankLabel} width={56}/>
+                            <Tooltip
+                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              labelFormatter={(_, p) => p[0]?.payload?.label}
+                              formatter={(v, name, props) => {
+                                const raw = name === 'tc' ? props.payload.tcLabel : props.payload.scLabel
+                                return [raw, name === 'tc' ? 'Time Complexity' : 'Space Complexity']
+                              }}
+                            />
+                            <ReferenceLine y={3} stroke="#4ade8040" strokeDasharray="4 3" label={{ value: 'O(n)', fill: '#4ade8060', fontSize: 9, position: 'right' }}/>
+                            <Line type="monotone" dataKey="tc" stroke="#f472b6" strokeWidth={2.5} dot={{ r: 4, fill: '#f472b6' }} connectNulls activeDot={{ r: 6 }}/>
+                            <Line type="monotone" dataKey="sc" stroke="#34d399" strokeWidth={2}   dot={{ r: 3, fill: '#34d399' }} connectNulls strokeDasharray="5 3"/>
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* ── Runtime Profile (line) ────────────────────────────── */}
+                    {hasRuntime && (
+                      <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                        <p className="text-sm font-semibold mb-1 flex items-center gap-2"><Zap size={14}/> Runtime Profile</p>
+                        <div className="flex gap-4 mb-3 items-center">
+                          <span className="flex items-center gap-1.5 text-xs text-muted">
+                            <span className="w-3 h-0.5 rounded-full" style={{ background: '#fb923c', display: 'inline-block' }}/>Avg runtime (ms)
+                          </span>
+                          <span className="text-xs text-muted ml-auto opacity-60">
+                            <span style={{ color: '#22c55e' }}>●</span> &lt;50ms fast&nbsp;
+                            <span style={{ color: '#eab308' }}>●</span> &lt;200ms ok&nbsp;
+                            <span style={{ color: '#f87171' }}>●</span> slow
+                          </span>
+                        </div>
+                        <ResponsiveContainer width="100%" height={205}>
+                          <LineChart data={runtimeLine} margin={{ top: 5, right: 10, bottom: 5, left: -10 }}>
+                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <XAxis dataKey="step" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                            <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={v => `${v}ms`}/>
+                            <Tooltip
+                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              labelFormatter={(_, p) => p[0]?.payload?.label}
+                              formatter={v => [`${v} ms`, 'Runtime']}
+                            />
+                            <ReferenceLine y={50}  stroke="#22c55e40" strokeDasharray="4 3" label={{ value: '50ms', fill: '#22c55e80', fontSize: 9, position: 'right' }}/>
+                            <ReferenceLine y={200} stroke="#f8717140" strokeDasharray="4 3" label={{ value: '200ms', fill: '#f8717180', fontSize: 9, position: 'right' }}/>
+                            <Line type="monotone" dataKey="runtime" stroke="#fb923c" strokeWidth={2.5}
+                              dot={(props) => {
+                                const { cx, cy, payload } = props
+                                const col = payload.runtime < 50 ? '#22c55e' : payload.runtime < 200 ? '#eab308' : '#f87171'
+                                return <circle key={cx} cx={cx} cy={cy} r={5} fill={col} stroke={col}/>
+                              }}
+                              activeDot={{ r: 7 }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* ── Test Coverage per Problem (stacked bar — counts) ────── */}
+                    {coverage.some(c => c.passed + c.failed > 0) && (
+                      <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                        <p className="text-sm font-semibold mb-3 flex items-center gap-2"><BarChart2 size={14}/> Test Coverage Per Problem</p>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <BarChart data={coverage} margin={{ top: 5, right: 10, bottom: 5, left: -15 }}>
+                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                            <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }}/>
+                            <Tooltip
+                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              labelFormatter={(_, p) => p[0]?.payload?.label}
+                            />
+                            <Bar dataKey="passed" stackId="a" fill="#22c55e" name="Passed"/>
+                            <Bar dataKey="failed" stackId="a" fill="#f87171" name="Failed" radius={[4, 4, 0, 0]}/>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* ── Language & Verdict Summary (pill card) ─────────────── */}
+                    <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.05)', border: '1px solid rgba(167,139,250,0.15)' }}>
+                      <p className="text-sm font-semibold mb-4 flex items-center gap-2"><Code2 size={14}/> Language & Verdict Breakdown</p>
+                      <div className="mb-4">
+                        <p className="text-xs text-muted uppercase tracking-wider mb-2">Languages used</p>
+                        <div className="flex flex-wrap gap-2">
+                          {Object.entries(langCount).map(([lang, count]) => (
+                            <span key={lang} className="px-3 py-1.5 rounded-full text-xs font-semibold"
+                              style={{ background: `${langPalette[lang] || '#94a3b8'}20`, color: langPalette[lang] || '#94a3b8', border: `1px solid ${langPalette[lang] || '#94a3b8'}40` }}>
+                              {lang} — {count} problem{count > 1 ? 's' : ''}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted uppercase tracking-wider mb-2">Verdict breakdown</p>
+                        <div className="flex flex-wrap gap-2">
+                          {Object.entries(verdictCounts).map(([v, cnt]) => (
+                            <span key={v} className="px-3 py-1.5 rounded-full text-xs font-semibold capitalize"
+                              style={{ background: `${verdictPalette[v] || '#94a3b8'}20`, color: verdictPalette[v] || '#94a3b8', border: `1px solid ${verdictPalette[v] || '#94a3b8'}40` }}>
+                              {v.replace('_', ' ')} ×{cnt}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      {/* Aggregate complexity summary */}
+                      {dsaQs.some(q => q.time_complexity) && (
+                        <div className="mt-4 pt-4 border-t" style={{ borderColor: 'rgba(167,139,250,0.15)' }}>
+                          <p className="text-xs text-muted uppercase tracking-wider mb-2">Complexity summary</p>
+                          <div className="space-y-1.5">
+                            {dsaQs.map((q, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs">
+                                <span className="text-muted truncate max-w-[120px]">{q.problem_title || `Q${i+1}`}</span>
+                                <div className="flex gap-2">
+                                  {q.time_complexity && (
+                                    <span className="px-2 py-0.5 rounded font-mono" style={{ background: 'rgba(244,114,182,0.1)', color: '#f472b6' }}>
+                                      T: {q.time_complexity}
+                                    </span>
+                                  )}
+                                  {q.space_complexity && (
+                                    <span className="px-2 py-0.5 rounded font-mono" style={{ background: 'rgba(52,211,153,0.1)', color: '#34d399' }}>
+                                      S: {q.space_complexity}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                )
+              })()}
+
+              {/* ── Complexity Match Table ─────────────────────────────────── */}
+              <div className="mb-6">
+                <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Brain size={14}/> Complexity Adherence</p>
+                <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
+                  <table className="w-full text-sm">
+                    <thead style={{ background: 'rgba(167,139,250,0.08)' }}>
+                      <tr className="text-xs uppercase tracking-wider text-muted">
+                        <th className="px-3 py-2 text-left">Problem</th>
+                        <th className="px-3 py-2 text-left">Difficulty</th>
+                        <th className="px-3 py-2 text-left">Your Time</th>
+                        <th className="px-3 py-2 text-left">Your Space</th>
+                        <th className="px-3 py-2 text-left">Tests</th>
+                        <th className="px-3 py-2 text-left">Verdict</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dsaQs.map((q, i) => {
+                        const allPassed = q.tests_total > 0 && q.tests_passed === q.tests_total
+                        return (
+                          <tr key={i} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
+                            <td className="px-3 py-2 font-medium">{q.problem_title || q.question_text?.slice(0, 40) || `Problem ${i+1}`}</td>
+                            <td className="px-3 py-2">
+                              <span className="text-xs px-2 py-0.5 rounded-full font-semibold capitalize"
+                                style={{ background: `${diffPalette[q.difficulty || 'medium']}20`, color: diffPalette[q.difficulty || 'medium'] }}>
+                                {q.difficulty || 'medium'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 font-mono text-xs">{q.time_complexity || '—'}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{q.space_complexity || '—'}</td>
+                            <td className="px-3 py-2">
+                              <span style={{ color: allPassed ? '#4ade80' : '#f87171' }}>
+                                {q.tests_passed ?? 0}/{q.tests_total ?? 0}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className="text-xs px-2 py-0.5 rounded-full font-semibold capitalize"
+                                style={{ background: `${verdictPalette[q.verdict] || '#94a3b8'}20`, color: verdictPalette[q.verdict] || '#94a3b8' }}>
+                                {(q.verdict || (allPassed ? 'acceptable' : 'incorrect')).replace('_', ' ')}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* ── Industry benchmark footer ──────────────────────────────── */}
+              <div className="rounded-xl p-3 text-xs flex items-start gap-2"
+                   style={{ background: 'rgba(34,211,238,0.08)', border: '1px solid rgba(34,211,238,0.25)' }}>
+                <Users size={14} className="mt-0.5 flex-shrink-0" style={{ color: '#22d3ee' }}/>
+                <div>
+                  <span className="font-semibold" style={{ color: '#22d3ee' }}>Industry Benchmark · </span>
+                  <span className="text-muted">
+                    Top FAANG candidates typically solve {N <= 2 ? '2/2' : `${Math.max(2, N - 1)}/${N}`} problems
+                    within the time limit with O(n)/O(n log n) solutions. Your current solve rate of <strong className="text-white">{Math.round(solveRate*100)}%</strong>
+                    {' '}places you in the
+                    {' '}<strong className="text-white">{solveRate >= 0.8 ? 'top quartile' : solveRate >= 0.5 ? 'middle 50%' : 'bottom quartile'}</strong>{' '}
+                    of new-grad candidates targeting senior-tier companies.
+                  </span>
+                </div>
+              </div>
+            </SectionCard>
+          )
+        })()}
+        </SectionErrorBoundary>
 
         {/* ── Code Quality Analysis (DSA rounds only) ─────────────────────── */}
         <SectionErrorBoundary>
@@ -2510,8 +3081,9 @@ export default function ReportPage() {
         )}
 
         {/* ── CV Audit ────────────────────────────────────────────────────── */}
-        {/* Hidden for MCQ — CV claims aren't probed in a multiple-choice test */}
-        {round_type !== 'mcq_practice' && cv_audit?.items?.length > 0 && (
+        {/* Hidden for MCQ — CV claims aren't probed in a multiple-choice test.
+            Hidden for DSA — coding rounds don't probe resume claims. */}
+        {round_type !== 'mcq_practice' && round_type !== 'dsa' && cv_audit?.items?.length > 0 && (
           <SectionCard icon={<Eye size={16}/>} title="CV Honesty Audit" color="#e879f9">
             <div className="flex items-center gap-4 mb-4">
               <ScoreRing score={cv_audit.overall_cv_honesty_score || 0} size={80} max={100} />
@@ -2604,8 +3176,9 @@ export default function ReportPage() {
         )}
 
         {/* ── Follow-Up Questions ─────────────────────────────────────────── */}
-        {/* Hidden for MCQ — interviewer follow-up framing doesn't fit a written test */}
-        {round_type !== 'mcq_practice' && follow_up_questions?.length > 0 && (
+        {/* Hidden for MCQ — interviewer follow-up framing doesn't fit a written test.
+            Hidden for DSA — verbal follow-up framing doesn't fit a coding submission. */}
+        {round_type !== 'mcq_practice' && round_type !== 'dsa' && follow_up_questions?.length > 0 && (
           <SectionCard icon={<MessageSquare size={16}/>} title="A Human Interviewer Would Now Ask…" color="#a78bfa">
             <div className="space-y-3">
               {follow_up_questions.map((q, i) => (
@@ -2709,12 +3282,47 @@ export default function ReportPage() {
                         )}
                       </div>
                     )}
-                    {/* "Review the Tape" — audio playback if URL stored */}
-                    <AudioClipPlayer
-                      audioUrl={q.audio_url}
-                      startSec={q.audio_start_sec}
-                      label={`Review Q${i + 1} Audio`}
-                    />
+                    {/* DSA-specific: code excerpt + complexity + tests passed */}
+                    {round_type === 'dsa' && (q.code_excerpt || q.problem_slug) && (
+                      <div className="space-y-3">
+                        {(q.tests_passed != null && q.tests_total != null) && (
+                          <div className="flex flex-wrap gap-2">
+                            <Chip
+                              label={`${q.tests_passed}/${q.tests_total} tests`}
+                              color={q.tests_passed === q.tests_total ? '#4ade80' : '#f87171'}
+                              size="xs"
+                            />
+                            {q.language && <Chip label={q.language} color="#94a3b8" size="xs" />}
+                            {q.time_complexity && <Chip label={`Time: ${q.time_complexity}`} color="#22d3ee" size="xs" />}
+                            {q.space_complexity && <Chip label={`Space: ${q.space_complexity}`} color="#fb923c" size="xs" />}
+                            {q.avg_runtime_ms != null && <Chip label={`${q.avg_runtime_ms} ms avg`} color="#a78bfa" size="xs" />}
+                          </div>
+                        )}
+                        {q.code_excerpt && (
+                          <div>
+                            <p className="text-xs text-muted uppercase tracking-wider mb-1">Submitted Code</p>
+                            <pre className="text-xs p-3 rounded-lg overflow-x-auto"
+                              style={{
+                                background: 'rgba(15,23,42,0.6)',
+                                border: '1px solid var(--color-border)',
+                                color: '#e2e8f0',
+                                fontFamily: "'JetBrains Mono','Fira Code',monospace",
+                                maxHeight: 320,
+                              }}>
+                              <code>{q.code_excerpt}</code>
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* "Review the Tape" — audio playback if URL stored (verbal rounds) */}
+                    {round_type !== 'dsa' && (
+                      <AudioClipPlayer
+                        audioUrl={q.audio_url}
+                        startSec={q.audio_start_sec}
+                        label={`Review Q${i + 1} Audio`}
+                      />
+                    )}
                   </div>
                 </details>
               ))}

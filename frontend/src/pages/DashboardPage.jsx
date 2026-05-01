@@ -120,7 +120,7 @@ export default function DashboardPage() {
     if (!user?.id) return
     getUserReports(user.id)
       .then(res => setReports(res.data?.reports || []))
-      .catch(() => {}) // fail silently — reports are optional
+      .catch(err => console.error('[Dashboard] getUserReports failed:', err))
 
     fetchNews()
 

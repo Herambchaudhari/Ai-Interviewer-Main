@@ -52,7 +52,7 @@ User Auth (Supabase) → Resume/Context Upload → Interview Config
 
 **Entry point:** `main.py` registers all routers.
 
-**Routers** (`routers/`): `session.py` (interview lifecycle: start/answer/skip/end/checkpoint/resume), `report.py`/`reports.py`, `resume.py`, `context_hub.py`, `transcribe.py`, `interview.py`, `portfolio.py`, `news.py`, `progress.py`, `share.py`, `mcq.py` (MCQ topic tree endpoint + `fetch_mcq_questions_from_db()` helper used by session.py), `tts.py`, `admin.py` (hardcoded-credential admin panel: login, all users/sessions/profiles, per-student detail; also exposes report backfill trigger + status endpoints)
+**Routers** (`routers/`): `session.py` (interview lifecycle: start/answer/skip/end/checkpoint/resume), `report.py`/`reports.py`, `resume.py`, `context_hub.py`, `transcribe.py`, `interview.py`, `portfolio.py`, `news.py`, `progress.py`, `share.py`, `mcq.py` (MCQ topic tree + `fetch_mcq_questions_from_db()` helper used by session.py), `tts.py`, `dsa.py` (DSA coding round: problem bank CRUD, /run sample tests, /submit hidden tests + LLM eval + persistence), `admin.py` (hardcoded-credential admin panel: login, all users/sessions/profiles, per-student detail; backfill trigger + status endpoints)
 
 **Key Services** (`services/`):
 - `groq_service.py` — LLM inference with streaming (llama-3.3-70b-versatile), API key failover via `api_manager.py`
@@ -60,27 +60,28 @@ User Auth (Supabase) → Resume/Context Upload → Interview Config
 - `evaluator.py` — Scores answers across 7 dimensions: Technical Accuracy, Depth, Communication, Confidence, Relevance, Example Quality, Structure
 - `context_assembler.py` — Aggregates resume + GitHub profile + past reports into a ContextBundle for each session
 - `stt.py` / `whisper_service.py` — Speech-to-text via faster-whisper
-- `code_runner.py` — Executes and validates DSA code submissions
+- `code_runner.py` — JDoodle judge integration with pre-flight validation (bracket balance, non-ASCII, compile check); `run_against_tests()` fans out to N hidden tests, short-circuits on failure
+- `dsa_evaluator.py` — LLM-driven DSA submission evaluation: correctness score, TC/SC, code quality, approach summary, hints
 - `session_history_analyzer.py` — Cross-session trend analysis for progress tracking
-- `backfill_service.py` — Background batch service that pre-generates and caches reports for old sessions (completed before the caching fix); drains `_generate_report_sse` without SSE, protected by asyncio.Lock
-- `supabase_service.py` / `db_service.py` — All database interactions. `reports.user_id` exists in the live DB (applied out-of-band; the `migrations/012*.sql` file is not in the repo) but `save_report()` does NOT write it — current rows are populated via DB triggers / out-of-band backfill. App code derives ownership via `sessions.user_id`, never trusting `reports.user_id` alone.
-
-**Report System Security:** Both report routes enforce session ownership before serving cached data — `GET /api/v1/report/:sessionId` (in `routers/report.py`) and the legacy `GET /api/v1/reports/:sessionId` (in `routers/reports.py`). Share endpoints `POST/DELETE /api/v1/share/:sessionId` also verify the caller owns the session before minting/revoking tokens; `generate_share_token()` and `disable_share_token()` re-check ownership at the service layer via `sessions.user_id` (defence-in-depth). `end_session()` errors on DB failure (no silent swallow) so dashboard visibility is guaranteed. **Known pre-existing bug:** `reports.share_enabled` column is referenced by share code but does not exist in the live DB — share feature is non-functional regardless of these ownership checks.
+- `backfill_service.py` — Background batch service that pre-generates and caches reports for old sessions; drains `_generate_report_sse` without SSE, protected by asyncio.Lock
+- `supabase_service.py` / `db_service.py` — All database interactions. `reports.user_id` exists in live DB but `save_report()` does NOT write it — ownership derived from `sessions.user_id`
 
 **Prompts** (`prompts/`): `interviewer_prompt.py` (question generation with context), `report_prompt.py` (synthesis), `scoring_examples.py` (few-shot calibration), `stage3_prompt.py`, `stage4_prompt.py`
 
 ### Frontend (`frontend/src/`)
 
-**Pages** (`pages/`): `AuthPage.jsx` (+ `ForgotPasswordPage.jsx` / `ResetPasswordPage.jsx` for Supabase password recovery flow) → `OnboardingPage.jsx`/`Upload.jsx` → `DashboardPage.jsx` → `InterviewPage.jsx` → `InterviewRoom.jsx` (main Q&A) or `CodingPage.jsx` (DSA) → `Report.jsx`/`ReportPage.jsx`
+**Pages** (`pages/`): `AuthPage.jsx` → `OnboardingPage.jsx`/`Upload.jsx` → `DashboardPage.jsx` → `InterviewPage.jsx` → `InterviewRoom.jsx` (main Q&A) or `CodingPage.jsx` (DSA) → `Report.jsx`/`ReportPage.jsx`
 
 **Admin Pages** (`pages/`): `AdminLoginPage.jsx` (`/admin`) → `AdminDashboardPage.jsx` (`/admin/dashboard`) — hardcoded-credential admin panel with three tabs (Registered Students, Assessment Activity, Resume Uploads) + student detail modal + search by name/email
 
 **Key Components** (`components/`):
 - `InterviewCamera.jsx` + `WebcamFeed.jsx` — MediaPipe-based proctoring (eye tracking, phone detection, posture)
 - `InterviewIntegrityPanel.jsx` — Proctoring warning display
-- `DSAQuestionPanel.jsx` + `DSACodeEditor.jsx` + `CodeEditor.jsx` (Monaco) — Coding interview UI
-- `MCQTestInterface.jsx` — Full-screen professional MCQ test UI (3-panel: header + sidebar navigator + main content + bottom bar); replaces MCQ path in InterviewRoom via early return; no answer reveal during test
-- `MCQQuestionPanel.jsx` — Legacy MCQ component (superseded by MCQTestInterface)
+- `DSAProblemPanel.jsx` — Problem statement renderer (markdown, constraints, examples, sample I/O)
+- `DSATestResults.jsx` — Per-test pass/fail table with stdout diff and error display
+- `DSAEvaluationCard.jsx` — LLM evaluation card (verdict, TC/SC, strengths, improvements)
+- `CodeEditor.jsx` (Monaco) — Language-aware Monaco editor with starter code injection
+- `MCQTestInterface.jsx` — Full-screen MCQ test UI (header + sidebar navigator + main content); replaces MCQ path in InterviewRoom
 - Chart components: `RadarChart.jsx`, `HireSignalRadar.jsx`, `AreaTimeline.jsx`, `ScoreBarChart.jsx`, `CVHonestyGauge.jsx`
 
 **Custom Hooks** (`hooks/`):
