@@ -14,11 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Expose port (Railway uses $PORT env var)
-EXPOSE 8000
+# Railway injects $PORT at runtime; shell form expands it. Falls back to 8000 locally.
+EXPOSE ${PORT:-8000}
 
-# Health check
+# Health check uses same dynamic port
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+    CMD python -c "import os,urllib.request; urllib.request.urlopen(f'http://localhost:{os.environ.get(\"PORT\",8000)}/health')" || exit 1
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
