@@ -13,3 +13,12 @@ frontend/dist/
 backend/venv/
 backend/__pycache__/
 frontend/node_modules/
+
+# ── Local-only docs & data (kept on disk, not pushed to origin) ───────────
+IMPLEMENTATION_PLAN.md
+MASTER_IMPROVEMENT_PLAN.md
+TECHNICAL_INTERVIEWER_OVERHAUL.md
+project_handover.md
+backend/CS_Core_Q.json
+backend/*.log
+.claude/worktrees/

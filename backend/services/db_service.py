@@ -194,6 +194,9 @@ def save_session(session_data: dict) -> str:
         "context_bundle", "target_company", "target_role", "timer_remaining_secs",
         "last_checkpoint_at", "conversation_history", "detected_weaknesses",
         "avoided_topics",
+        # Quota + ability tracking — must be saved at session START
+        "question_quotas", "question_counters", "ability_vector", "question_buffer",
+        "target_interview_date",
     }
     
     payload = {
@@ -242,7 +245,7 @@ def update_session(session_id: str, updates: dict) -> bool:
         "current_question_index", "ended_at", "end_reason", "created_at",
         "context_bundle", "target_company", "target_role", "timer_remaining_secs",
         "last_checkpoint_at", "conversation_history", "detected_weaknesses",
-        "avoided_topics",
+        "avoided_topics", "question_quotas", "question_counters", "ability_vector",
     }
     payload = {k: v for k, v in updates.items() if k in allowed_columns}
     if not payload:
@@ -1543,6 +1546,170 @@ def upsert_external_links(user_id: str, data: dict) -> bool:
     except Exception as e:
         print(f"[upsert_external_links] error: {e}")
         return False
+
+
+# ── Question Bank ─────────────────────────────────────────────────────────────
+
+_ELO_BANDS: dict[str, tuple[float, float]] = {
+    "easy":   (700,  1050),
+    "medium": (900,  1250),
+    "hard":   (1150, 1600),
+}
+
+_DIFF_NORMALIZE: dict[str, str] = {
+    "fresher":   "easy",
+    "fresh":     "easy",
+    "junior":    "easy",
+    "easy":      "easy",
+    "mid-level": "medium",
+    "midlevel":  "medium",
+    "mid":       "medium",
+    "medium":    "medium",
+    "senior":    "hard",
+    "hard":      "hard",
+    "expert":    "hard",
+}
+
+_CS_PILLARS = ["OS", "DBMS", "CN", "OOP", "DSA", "System Design"]
+_HR_CATEGORIES = [
+    # Original 8 from migration 013
+    "Leadership & Ownership",
+    "Conflict Resolution",
+    "Failure & Learning",
+    "Teamwork & Collaboration",
+    "Initiative & Innovation",
+    "Time Management",
+    "Adaptability",
+    "Communication",
+    # Extended categories from migration 014 (50-question bank)
+    "Problem-Solving Under Pressure",
+    "Communication & Influence",
+    "Customer/User Focus",
+    "Execution & Delivery",
+    "Values & Ethics",
+]
+
+
+def fetch_db_question(
+    round_type: str,
+    difficulty: str,
+    used_pillars: list[str],
+    user_id: str | None = None,
+) -> dict | None:
+    """
+    Pull one question from question_bank, matched by round_type and difficulty band.
+    Rotates through cs_pillar / hr_category to avoid repeating the same topic.
+    Excludes questions the user has already seen (question_seen table).
+
+    Returns a question dict ready for injection, or None if the bank is exhausted.
+    """
+    diff_norm = _DIFF_NORMALIZE.get((difficulty or "medium").lower(), "medium")
+    elo_min, elo_max = _ELO_BANDS.get(diff_norm, (900, 1250))
+
+    try:
+        db = _db()
+        query = (
+            db.table("question_bank")
+            .select("*")
+            .eq("round_type", round_type)
+            .gte("elo_difficulty", elo_min)
+            .lte("elo_difficulty", elo_max)
+        )
+
+        # Rotate pillars: prefer pillars not yet used this session
+        if round_type == "technical":
+            available = [p for p in _CS_PILLARS if p not in used_pillars]
+            if available:
+                query = query.in_("cs_pillar", available)
+        elif round_type == "hr":
+            available = [c for c in _HR_CATEGORIES if c not in used_pillars]
+            if available:
+                query = query.in_("topic", available)
+
+        # Exclude questions user has already seen
+        if user_id:
+            seen_res = (
+                db.table("question_seen")
+                .select("question_id")
+                .eq("user_id", user_id)
+                .execute()
+            )
+            seen_ids = [r["question_id"] for r in (seen_res.data or [])]
+            if seen_ids:
+                query = query.not_.in_("id", seen_ids)
+
+        res = query.limit(10).execute()
+        rows = res.data or []
+
+        if not rows:
+            # Fallback: any question in the difficulty band for this round_type
+            res2 = (
+                db.table("question_bank")
+                .select("*")
+                .eq("round_type", round_type)
+                .gte("elo_difficulty", elo_min)
+                .lte("elo_difficulty", elo_max)
+                .limit(10)
+                .execute()
+            )
+            rows = res2.data or []
+
+        if not rows:
+            return None
+
+        # Pick a random row from the result set
+        import random
+        row = random.choice(rows)
+
+        # Track as seen
+        if user_id:
+            try:
+                db.table("question_seen").upsert({
+                    "user_id": user_id,
+                    "question_id": row["id"],
+                    "seen_at": datetime.now(timezone.utc).isoformat(),
+                }).execute()
+            except Exception:
+                pass
+
+        # Increment times_served
+        try:
+            db.table("question_bank").update(
+                {"times_served": (row.get("times_served") or 0) + 1}
+            ).eq("id", row["id"]).execute()
+        except Exception:
+            pass
+
+        return row
+
+    except Exception as e:
+        print(f"[fetch_db_question] error: {e}")
+        return None
+
+
+def db_question_to_question_dict(row: dict, difficulty: str, round_type: str) -> dict:
+    """Convert a question_bank row into the session question schema."""
+    import uuid as _uuid
+    return {
+        "id":               str(_uuid.uuid4()),
+        "db_question_id":   row["id"],
+        "question_text":    row.get("text", ""),
+        "text":             row.get("text", ""),
+        "type":             "speech",
+        "topic":            row.get("topic") or row.get("cs_pillar") or "General",
+        "category":         row.get("cs_pillar") or row.get("topic") or "General",
+        "cs_pillar":        row.get("cs_pillar"),
+        "hr_category":      row.get("topic") if round_type == "hr" else None,
+        "expected_concepts": row.get("expected_concepts") or [],
+        "difficulty_level": difficulty,
+        "time_limit_secs":  _ELO_BANDS.get(difficulty, (900, 1250))[0] and 180,
+        "is_follow_up":     False,
+        "source":           "db",
+        "follow_up_shallow": row.get("follow_up_shallow"),
+        "follow_up_wrong":  row.get("follow_up_wrong"),
+        "follow_up_strong": row.get("follow_up_strong"),
+        "decision_reason":  "db_quota",
+    }
 
 
 # ── Benchmarks ────────────────────────────────────────────────────────────────

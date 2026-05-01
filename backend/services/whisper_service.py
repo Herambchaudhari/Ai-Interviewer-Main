@@ -25,7 +25,7 @@ async def transcribe_audio(file_path: str) -> Dict[str, Any]:
     segments is a list of dicts: [{start, end, text}] — used for
     pause detection, pace analysis, and "Review the Tape" timestamps.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _run():
         model = get_model()

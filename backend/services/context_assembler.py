@@ -42,7 +42,7 @@ async def assemble_context(
         get_external_links,
         get_past_reports_for_context,
     )
-    from services.web_researcher import scrape_links, search_company_trends
+    from services.web_researcher import scrape_links
 
     context: dict = {
         # --- resume / profile
@@ -170,38 +170,15 @@ async def assemble_context(
     except Exception as e:
         print(f"[context_assembler] past reports fetch failed: {e}")
 
-    # ── 6. Live company news + interview question intelligence ──────────────
+    # ── 6. Company question intelligence — static patterns (no Tavily per-session)
+    # Tavily is expensive per call ($0.008) and fetches news, not actual interview Qs.
+    # Company-specific topic injection is handled by _COMPANY_TOPICS in adaptive_engine.py.
+    # Static CS fundamentals are more reliable than scraped news snippets.
     if target_company:
-        from services.web_researcher import (
-            search_company_coding_questions,
-            search_company_interview_questions,
-            search_company_mcq_topics,
-        )
-
-        # Build tasks — always fetch news, fetch interview questions for technical round
-        news_task = search_company_trends(target_company)
-
-        async def _noop_str():
-            return ""
-
-        questions_task = (
-            search_company_interview_questions(target_company, job_role or "Software Engineer")
-            if round_type == "technical"
-            else search_company_coding_questions(target_company, job_role or "Software Engineer")
-            if round_type == "dsa"
-            else search_company_mcq_topics(target_company, job_role or "Software Engineer")
-            if round_type == "mcq_practice"
-            else _noop_str()
-        )
-
-        try:
-            news, questions_ctx = await asyncio.gather(
-                news_task, questions_task, return_exceptions=True
-            )
-            context["company_news_context"] = news if isinstance(news, str) else ""
-            context["company_questions_context"] = questions_ctx if isinstance(questions_ctx, str) else ""
-        except Exception as e:
-            print(f"[context_assembler] company intelligence fetch failed: {e}")
+        from services.web_researcher import _CS_FUNDAMENTALS_STATIC_FALLBACK
+        context["company_questions_context"] = _CS_FUNDAMENTALS_STATIC_FALLBACK.strip()
+        # Note: Tavily is still used for the dashboard news feed (fetch_personalized_news)
+        # but is NOT called on every session start to save $0.04/session.
 
     return context
 

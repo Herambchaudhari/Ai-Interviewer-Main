@@ -15,8 +15,9 @@ _RADAR_AXES = {
         "DBMS & SQL", "OS & CN Concepts", "Project Knowledge", "Communication"
     ],
     "hr": [
-        "Communication", "Problem Solving", "Teamwork",
-        "Leadership", "Culture Fit", "Situational Judgment"
+        "STAR Story Quality", "Communication Clarity",
+        "Self-Awareness", "Growth Mindset",
+        "Behavioral Consistency", "Collaboration Quality"
     ],
     "dsa": [
         "Algorithm Design", "Code Readability",
@@ -92,9 +93,69 @@ def build_core_analysis_prompt(
             f"- Variable naming score: {naming}/100\n"
         )
 
-    return f"""You are a senior talent evaluation expert with 15+ years of technical recruiting experience at top-tier companies.
+    # ── HR-specific extra fields ─────────────────────────────────────────────
+    hr_extra_schema = ""
+    hr_grading_rules = ""
+    hire_signal_schema = """\
+  "hire_signal": {
+    "technical_depth":  { "score": <1-10>, "rationale": "<1 sentence citing specific answer>" },
+    "communication":    { "score": <1-10>, "rationale": "<1 sentence>" },
+    "problem_solving":  { "score": <1-10>, "rationale": "<1 sentence>" },
+    "cultural_fit":     { "score": <1-10>, "rationale": "<1 sentence>" },
+    "growth_potential": { "score": <1-10>, "rationale": "<1 sentence — do they learn from hints?>" }
+  },"""
+
+    if round_type == "hr":
+        hire_signal_schema = """\
+  "hire_signal": {
+    "leadership_potential": { "score": <1-10>, "rationale": "<1 sentence — proactive ownership evidence>" },
+    "communication":        { "score": <1-10>, "rationale": "<1 sentence — clarity, structure, delivery>" },
+    "emotional_maturity":   { "score": <1-10>, "rationale": "<1 sentence — how they describe adversity, blame language>" },
+    "culture_fit":          { "score": <1-10>, "rationale": "<1 sentence — values alignment signals>" },
+    "growth_potential":     { "score": <1-10>, "rationale": "<1 sentence — evidence of learning from experience>" }
+  },"""
+        hr_extra_schema = """
+  "star_story_matrix": [
+    {
+      "question_id": "<Q1|Q2|...>",
+      "competency_category": "<Conflict Resolution|Leadership|Failure & Learning|Teamwork|Problem-Solving|Communication|Customer Focus|Execution>",
+      "situation_present": <true|false>,
+      "task_present": <true|false>,
+      "action_present": <true|false>,
+      "result_present": <true|false>,
+      "star_score": <integer 0-10, 10=all STAR elements with concrete specifics>,
+      "missing_element": "<the most important missing STAR element, or 'None'>",
+      "specificity_level": "<High (specific names/numbers/dates) | Medium (some specifics) | Low (generic/vague)>"
+    }
+  ],
+
+  "behavioral_category_coverage": [
+    {
+      "category": "<Conflict Resolution|Leadership & Ownership|Failure & Learning|...>",
+      "covered": <true|false>,
+      "question_numbers": [<1-indexed list>],
+      "performance": "<Strong|Adequate|Weak|Not Asked>"
+    }
+  ],
+
+  "communication_pattern": "<Anecdote-first (strong) | Abstract-first (needs grounding) | Rambling (needs structure) | Too-brief (needs elaboration)>",
+
+  "culture_fit_narrative": "<2-3 sentence qualitative assessment. What work environment suits this candidate? (startup vs enterprise, high-autonomy vs structured, IC vs manager-track). Base this ONLY on evidence from their stories, not on speculation.>",
+
+  "behavioral_red_flags": [
+    "<specific red flag observed, e.g. 'Consistently uses we instead of I — individual contribution unclear' or empty array []>"
+  ],"""
+        hr_grading_rules = """
+HR-SPECIFIC GRADING:
+- STAR story quality is the primary signal. Score 9-10 only if they gave concrete, specific stories.
+- Penalise heavily for: generic answers, hypothetical answers ('I would...'), no Result, blame-shifting.
+- Reward: specific Situations with names/dates/context, quantified Results, genuine self-reflection.
+- hire_recommendation: Strong Yes = candidate tells 80%+ complete STAR stories with concrete evidence.
+- radar_scores: STAR Story Quality 80+ = full STAR on most questions; Communication Clarity 80+ = structured, concise; Self-Awareness 80+ = genuine failure/feedback stories with accountability; Growth Mindset 80+ = explicit behavior change post-failure; Behavioral Consistency 80+ = coherent values across all answers; Collaboration Quality 80+ = clear individual contribution, credit to team."""
+
+    return f"""You are a senior behavioral talent evaluator with 15+ years of HR interviewing experience at top-tier companies.
 Analyze the complete interview transcript below and generate a brutally honest, highly specific, actionable report.
-NEVER be generic — always cite specific answers, specific concepts missed, specific evidence.
+NEVER be generic — always cite specific stories, specific behaviors, specific evidence from the answers.
 
 CANDIDATE: {name}
 TARGET COMPANY: {target_co}
@@ -116,12 +177,14 @@ Return ONLY valid JSON. No markdown, no text outside the JSON object:
     {radar_schema}
   }},
 
-  "category_breakdown": [
+  {hire_signal_schema}
+
+  "failure_patterns": [
     {{
-      "category": "<e.g. OOP>",
-      "score": <integer 0-100>,
-      "verdict": "<Strong|Good|Average|Weak>",
-      "comment": "<1 specific sentence citing actual answer evidence>"
+      "pattern": "<short descriptive pattern name, e.g. 'Consistent gaps on OS internals'>",
+      "affected_questions": [<1-indexed question numbers that show this pattern>],
+      "root_cause": "<1-2 sentences on WHY this pattern likely occurred>",
+      "fix": "<1-2 specific, actionable sentences on how to fix it>"
     }}
   ],
 
@@ -137,7 +200,7 @@ Return ONLY valid JSON. No markdown, no text outside the JSON object:
     {{
       "area": "<name>",
       "what_was_missed": "<specific concept, formula, or pattern they couldn't articulate>",
-      "how_to_improve": "<concrete, actionable 1-2 sentence advice>",
+      "how_to_improve": "<concrete, 3-4 sentence actionable advice with specific resources>",
       "score": <integer 0-100>
     }}
   ],
@@ -146,6 +209,12 @@ Return ONLY valid JSON. No markdown, no text outside the JSON object:
     "<Only include if candidate showed extreme arrogance, blame-shifting, or cultural toxicity. Empty array [] if none.>"
   ],
 
+  "interview_tips": [
+    "<actionable technique tip 1 — specific to their performance patterns>",
+    "<tip 2>",
+    "<tip 3>"
+  ],
+{hr_extra_schema}
   "per_question_analysis": [
     {{
       "question_id": "<Q1|Q2|...>",
@@ -156,29 +225,6 @@ Return ONLY valid JSON. No markdown, no text outside the JSON object:
       "key_insight": "<1 sharp, specific actionable insight — what they must learn from this question>",
       "category": "<category>"
     }}
-  ],
-
-  "interview_tips": [
-    "<actionable technique tip 1 — specific to their performance patterns>",
-    "<tip 2>",
-    "<tip 3>"
-  ],
-
-  "hire_signal": {{
-    "technical_depth":  {{ "score": <1-10>, "rationale": "<1 sentence citing specific answer>" }},
-    "communication":    {{ "score": <1-10>, "rationale": "<1 sentence>" }},
-    "problem_solving":  {{ "score": <1-10>, "rationale": "<1 sentence>" }},
-    "cultural_fit":     {{ "score": <1-10>, "rationale": "<1 sentence>" }},
-    "growth_potential": {{ "score": <1-10>, "rationale": "<1 sentence — do they learn from hints?>" }}
-  }},
-
-  "failure_patterns": [
-    {{
-      "pattern": "<short descriptive pattern name, e.g. 'Consistent gaps on OS internals'>",
-      "affected_questions": [<1-indexed question numbers that show this pattern>],
-      "root_cause": "<1-2 sentences on WHY this pattern likely occurred>",
-      "fix": "<1-2 specific, actionable sentences on how to fix it>"
-    }}
   ]
 }}
 
@@ -186,7 +232,9 @@ GRADING RULES:
 - 90-100 = A+, 80-89 = A, 70-79 = B+, 60-69 = B, 50-59 = C+, 40-49 = C, <40 = D
 - hire_recommendation: Strong Yes ≥85, Yes 70-84, Maybe 50-69, No <50
 - Minimum: 2 strong_areas, 2 weak_areas, complete per_question_analysis for ALL questions
-- failure_patterns: identify at least 1 if overall score <80, empty array only if near-perfect"""
+- failure_patterns: identify at least 1 if overall score <80, empty array only if near-perfect
+- hire_signal MUST always be fully populated with all 5 sub-scores and rationale strings
+{hr_grading_rules}"""
 
 
 # ── STAGE 2: CV Audit Prompt ─────────────────────────────────────────────────

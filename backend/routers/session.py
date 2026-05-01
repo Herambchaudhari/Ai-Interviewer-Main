@@ -187,6 +187,8 @@ class SessionStartRequest(BaseModel):
     job_role: Optional[str] = None
     is_full_loop: Optional[bool] = False
     target_interview_date: Optional[str] = None       # ISO date e.g. "2026-05-10"; feeds study schedule horizon
+    mcq_category: Optional[str] = None               # MCQ: 'dsa'|'core_cs'|'frontend'|'backend'|'ml'|'mixed'
+    mcq_topics:   Optional[list] = None              # MCQ: specific topics within category
 
 
 _DIFFICULTY_MAP = {
@@ -204,6 +206,67 @@ _TIME_LIMITS = {
     "medium": 180,
     "hard":   240,
 }
+
+_ELO_START = 1200
+
+_EVAL_DIMENSIONS = [
+    "technical_accuracy", "depth_completeness", "communication_clarity",
+    "confidence_delivery", "example_quality", "structure",
+]
+
+
+def _compute_question_quotas(num_questions: int, round_type: str) -> dict:
+    """
+    Technical: 20% CS core from DB · 50% role-based LLM · 30% resume LLM
+    HR:        80% behavioral from DB · 20% resume-grilling LLM (personalized)
+              Research-backed: DB-dominant HR interviews have better validity and
+              coverage guarantees across STAR competency categories.
+    DSA/MCQ:   0% DB (all LLM-generated or pre-built bank)
+    """
+    if round_type == "technical":
+        db_q     = max(1, round(num_questions * 0.20))
+        resume_q = max(1, round(num_questions * 0.30))
+        live_q   = num_questions - db_q - resume_q
+        return {"db": db_q, "live": max(0, live_q), "resume": resume_q}
+    elif round_type == "hr":
+        # 80% DB ensures full STAR competency category coverage + auditability.
+        # 20% LLM generates resume-personalized behavioral probes.
+        db_q     = max(1, round(num_questions * 0.80))
+        resume_q = max(0, num_questions - db_q)
+        return {"db": db_q, "live": 0, "resume": resume_q}
+    else:
+        # DSA / MCQ — no DB questions from question_bank
+        return {"db": 0, "live": num_questions, "resume": 0}
+
+
+def _compute_initial_ability_vector() -> dict:
+    return {
+        "scores": {dim: _ELO_START for dim in _EVAL_DIMENSIONS},
+        "answered_count": 0,
+    }
+
+
+def _update_ability_vector(ability_vector: dict, evaluation: dict) -> dict:
+    """ELO-style update: adjust each dimension score based on the answer quality."""
+    if not isinstance(ability_vector, dict):
+        ability_vector = _compute_initial_ability_vector()
+
+    scores  = dict(ability_vector.get("scores") or {dim: _ELO_START for dim in _EVAL_DIMENSIONS})
+    count   = (ability_vector.get("answered_count") or 0) + 1
+    raw_score = float(evaluation.get("score") or 5)
+
+    # K-factor: aggressive early (fewer answered), conservative later
+    K = 48 if count <= 3 else 32 if count <= 6 else 20
+
+    # Expected score on a 0-10 scale mapped to 0-1
+    for dim in _EVAL_DIMENSIONS:
+        dim_score = float((evaluation.get("dimension_scores") or {}).get(dim, raw_score))
+        # ELO expected vs actual (both normalised 0-1)
+        expected  = 1 / (1 + 10 ** ((1200 - scores.get(dim, _ELO_START)) / 400))
+        actual    = dim_score / 10.0
+        scores[dim] = round(scores.get(dim, _ELO_START) + K * (actual - expected), 2)
+
+    return {"scores": scores, "answered_count": count}
 
 
 @router.post("/start")
@@ -261,28 +324,73 @@ async def start_session(
     )
     context["session_label"] = session_label
 
-    # ── Generate only the first question — adaptive engine generates the rest ──
-    try:
-        first_q = await generate_first_question(
-            profile=context,
-            round_type=round_type,
+    # ── MCQ: fetch ALL questions from curated DB bank (no LLM) ──────────────────
+    if round_type == "mcq_practice":
+        from routers.mcq import fetch_mcq_questions_from_db
+        raw_qs = fetch_mcq_questions_from_db(
+            num_questions=body.num_questions,
             difficulty=difficulty,
+            category=body.mcq_category or "mixed",
+            topics=body.mcq_topics or None,
         )
-    except Exception as e:
-        err_str = str(e)
-        if "rate_limit_exceeded" in err_str or "429" in err_str:
-            return _err(
-                "AI service is temporarily rate-limited. Please wait a few minutes and try again.",
-                status=429,
-            )
-        return _err(f"Failed to generate first question: {err_str}", status=500)
+        if not raw_qs:
+            return _err("No MCQ questions found for the selected criteria. Try a different category.", status=404)
+        questions = []
+        for i, q in enumerate(raw_qs):
+            diff_q = q.get("difficulty", difficulty)
+            questions.append({
+                "id":                  str(uuid.uuid4()),
+                "mcq_bank_id":         str(q["id"]),  # FK to mcq_question_bank
+                "question_text":       q.get("question_text", ""),
+                "options":             q.get("options") or [],
+                "correct_option_index": q.get("correct_option_index"),
+                "explanation":         q.get("explanation", ""),
+                "topic":               q.get("topic", ""),
+                "category":            q.get("category", ""),
+                "difficulty":          diff_q,
+                "tags":                q.get("tags") or [],
+                "order_index":         i,
+                "type":                "mcq",
+                "time_limit_secs":     _resolve_question_time_limit("mcq_practice", diff_q),
+                "source_signal":       "database",
+            })
+        first_q = questions[0]
 
-    time_limit = _resolve_question_time_limit(round_type, difficulty)
-    first_q["id"]             = str(uuid.uuid4())
-    first_q["order_index"]    = 0
-    first_q["type"]           = _resolve_question_type(round_type)
-    first_q["time_limit_secs"] = time_limit
-    questions = [first_q]
+    # ── LLM path for all other round types ──────────────────────────────────────
+    else:
+        try:
+            first_q = await generate_first_question(
+                profile=context,
+                round_type=round_type,
+                difficulty=difficulty,
+            )
+        except Exception as e:
+            err_str = str(e)
+            if "rate_limit_exceeded" in err_str or "429" in err_str:
+                return _err(
+                    "AI service is temporarily rate-limited. Please wait a few minutes and try again.",
+                    status=429,
+                )
+            return _err(f"Failed to generate first question: {err_str}", status=500)
+
+        time_limit = _resolve_question_time_limit(round_type, difficulty)
+        first_q["id"]              = str(uuid.uuid4())
+        first_q["order_index"]     = 0
+        first_q["type"]            = _resolve_question_type(round_type)
+        first_q["time_limit_secs"] = time_limit
+        questions = [first_q]
+
+    # ── Compute question quotas + initial ability vector ─────────────────────
+    quotas  = _compute_question_quotas(body.num_questions, round_type)
+    ability = _compute_initial_ability_vector()
+
+    # ── Tag the first question with its source (may be db or live) ────────────
+    # First question is always LLM-generated (resume intro / role opener)
+    # Count it against the resume or live bucket depending on round_type
+    if round_type == "hr":
+        initial_counters = {"db": 0, "live": 0, "resume": 1}
+    else:
+        initial_counters = {"db": 0, "live": 0, "resume": 1}
 
     # ── Save session ───────────────────────────────────────────────────────
     session_data = {
@@ -299,11 +407,14 @@ async def start_session(
         "target_company":        context.get("target_company", ""),
         "target_role":           context.get("job_role", ""),
         "current_question_index": 0,
-        "context_bundle":        context,      # full assembled context for adaptive engine
+        "context_bundle":        context,
         "conversation_history":  [],
         "detected_weaknesses":   {},
         "avoided_topics":        [],
         "target_interview_date": body.target_interview_date or None,
+        "question_quotas":       quotas,
+        "question_counters":     initial_counters,
+        "ability_vector":        ability,
     }
 
     # Save session
@@ -315,15 +426,21 @@ async def start_session(
         data={
             "session_id":     session_id,
             "first_question": {
-                "id":              first_question.get("id"),
-                "text":            first_question.get("question_text", ""),
-                "type":            first_question.get("type", _resolve_question_type(round_type)),
-                "time_limit_secs": first_question.get("time_limit_secs", 180),
-                "category":        first_question.get("category", ""),
-                "options":         first_question.get("options", []),
-                "explanation":     first_question.get("explanation", ""),
+                "id":                   first_question.get("id"),
+                "text":                 first_question.get("question_text", ""),
+                "question_text":        first_question.get("question_text", ""),
+                "type":                 first_question.get("type", _resolve_question_type(round_type)),
+                "time_limit_secs":      first_question.get("time_limit_secs", 180),
+                "category":             first_question.get("category", ""),
+                "options":              first_question.get("options", []),
+                "correct_option_index": first_question.get("correct_option_index"),
+                "explanation":          first_question.get("explanation", ""),
+                "order_index":          0,
+                "difficulty":           first_question.get("difficulty", difficulty),
             },
-            "questions": questions,          # only first question — rest generated adaptively via /answer
+            # MCQ: return all questions so InterviewRoom can navigate them directly
+            # Other rounds: return only first question (adaptive engine generates the rest)
+            "questions":     questions,
             "timer_mins":    body.timer_mins,
             "round_type":    round_type,
             "difficulty":    difficulty,
@@ -570,7 +687,14 @@ async def submit_answer(
             "answer_summary":     evaluation.get("answer_summary", ""),
             "category":           q_topic,
             "topic":              q_topic,
+            "difficulty":         (current_q or {}).get("difficulty", ""),
+            "time_taken_secs":    body.time_taken_secs or 0,
             "is_follow_up":       evaluation.get("is_follow_up", False),
+            # decision_reason from the adaptive engine — used by future calls to
+            # _get_used_pillars and probing_known_weak dedup in adaptive_engine.py
+            "decision_reason":    (current_q or {}).get("decision_reason", ""),
+            "cs_pillar":          (current_q or {}).get("cs_pillar", ""),
+            "hr_category":        (current_q or {}).get("hr_category", ""),
             "scoring_meta":       body.scoring_context or {},
             "dimension_scores":   evaluation.get("dimension_scores", {}),
             "red_flag_detected":  evaluation.get("red_flag_detected", ""),
@@ -587,15 +711,38 @@ async def submit_answer(
             detected_weaknesses, q_topic, float(evaluation.get("score") or 5)
         )
 
+        # Update ability vector (ELO-style)
+        ability_vector = dict(session.get("ability_vector") or {})
+        ability_vector = _update_ability_vector(ability_vector, evaluation)
+
         update_session(body.session_id, {
             "transcript":            existing_transcript,
             "scores":                existing_scores,
             "current_question_index": q_index + 1,
             "detected_weaknesses":   detected_weaknesses,
+            "ability_vector":        ability_vector,
         })
     except Exception as e:
         print(f"[submit_answer] persist failed: {e}")
         answered_count = q_index + 1
+
+    # ── MCQ: persist per-answer analytics to mcq_session_answers ─────────────
+    if is_mcq_round:
+        try:
+            from services.db_service import _db
+            mcq_bank_id = (current_q or {}).get("mcq_bank_id") or (current_q or {}).get("id")
+            _db().table("mcq_session_answers").insert({
+                "session_id":            body.session_id,
+                "question_id":           mcq_bank_id,
+                "topic":                 q_topic or "",
+                "category":              (current_q or {}).get("category", ""),
+                "difficulty":            (current_q or {}).get("difficulty", ""),
+                "selected_option_index": body.selected_option_index,
+                "is_correct":            evaluation.get("is_correct"),
+                "time_taken_seconds":    body.time_taken_secs,
+            }).execute()
+        except Exception as _mcq_err:
+            print(f"[submit_answer] mcq_session_answers insert failed: {_mcq_err}")
 
     # ── Check completion ───────────────────────────────────────────────────
     if body.is_last_question or answered_count >= num_questions:
@@ -769,7 +916,7 @@ async def skip_question(
 
     questions      = session.get("questions", [])
     num_questions  = session.get("num_questions", 8)
-    context_bundle = session.get("context_bundle") or {}
+    context_bundle = _resolve_context_bundle(session)   # was: raw context_bundle, missing parsed resume
     round_type     = session.get("round_type", "technical")
 
     current_q  = next((q for q in questions if q.get("id") == body.question_id), body.current_question)
@@ -936,6 +1083,8 @@ async def submit_answer_stream(
                 "question_id":        body.question_id,
                 "question":           q_text,
                 "answer":             body.transcript,
+                "language":           body.language,
+                "question_type":      "code" if is_code else "speech",
                 "score":              evaluation.get("score"),
                 "feedback":           evaluation.get("feedback", ""),
                 "verdict":            evaluation.get("verdict", ""),
@@ -945,9 +1094,15 @@ async def submit_answer_stream(
                 "answer_summary":     evaluation.get("answer_summary", ""),
                 "category":           q_topic,
                 "topic":              q_topic,
+                "is_follow_up":       bool((current_q or {}).get("is_follow_up", False)),
+                "decision_reason":    (current_q or {}).get("decision_reason", ""),
+                "cs_pillar":          (current_q or {}).get("cs_pillar", ""),
+                "hr_category":        (current_q or {}).get("hr_category", ""),
                 "scoring_meta":       body.scoring_context or {},
                 "dimension_scores":   evaluation.get("dimension_scores", {}),
                 "red_flag_detected":  evaluation.get("red_flag_detected", ""),
+                "audio_url":          body.audio_url or None,
+                "audio_path":         body.audio_path or None,
             })
             answered_count = len(existing_transcript)
             from services.adaptive_engine import _update_detected_weaknesses
@@ -955,11 +1110,15 @@ async def submit_answer_stream(
                 dict(session.get("detected_weaknesses") or {}),
                 q_topic, float(evaluation.get("score") or 5)
             )
+            ability_vector = _update_ability_vector(
+                dict(session.get("ability_vector") or {}), evaluation
+            )
             update_session(body.session_id, {
                 "transcript":             existing_transcript,
                 "scores":                 list(session.get("scores") or []) + [evaluation.get("score")],
                 "current_question_index": q_index + 1,
                 "detected_weaknesses":    dw,
+                "ability_vector":         ability_vector,
             })
         except Exception as e:
             print(f"[answer/stream] persist failed: {e}")

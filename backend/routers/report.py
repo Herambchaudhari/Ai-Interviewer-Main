@@ -33,14 +33,56 @@ from services.benchmarking_service import compute_peer_comparison
 from services.spaced_repetition_service import build_study_schedule
 from services.checklist_service import generate_checklist
 from services.code_runner import analyze_code_quality, aggregate_code_quality
-from services.web_researcher import search_company_trends
 from services.company_intelligence import analyze_company_fit
 from services.session_history_analyzer import analyze_cross_session
 from services.voice_analyzer import analyze_session_voice
 from prompts.stage3_prompt import build_communication_analysis_prompt
 from prompts.stage4_prompt import build_playbook_prompt
+from prompts.report_prompt import _RADAR_AXES
 
 router = APIRouter()
+
+
+def _mask_uncovered_radar_axes(
+    radar_scores: dict, question_scores: list, radar_skills: list
+) -> dict:
+    """
+    Zero out radar axes that have no matching questions in the transcript.
+    The LLM fills all 6 axes regardless — this masks axes for topics not actually covered.
+    Uses broad keyword matching so "NurseConnect Authentication" matches "Project Knowledge".
+    """
+    import re
+
+    def _words(s: str) -> set:
+        return set(re.sub(r"[^a-z0-9 ]", " ", s.lower()).split())
+
+    _AXIS_KEYWORDS: dict[str, set] = {
+        "oop & design patterns":            {"oop", "design", "pattern", "solid", "inherit",
+                                             "polymorphism", "class", "object", "encapsul"},
+        "data structures & algorithms":     {"dsa", "algorithm", "array", "tree", "graph",
+                                             "sort", "search", "dynamic", "complexity", "hash"},
+        "dbms & sql":                       {"dbms", "sql", "database", "query", "normaliz",
+                                             "acid", "index", "transaction", "join", "schema"},
+        "os & cn concepts":                 {"os", "cn", "process", "thread", "network", "tcp",
+                                             "http", "dns", "socket", "memory", "deadlock", "osi"},
+        "project knowledge":                {"project", "authentication", "auth", "api", "react",
+                                             "node", "flask", "django", "mern", "implementation",
+                                             "architecture", "feature", "build", "develop"},
+        "communication":                    {"communication", "clarity", "delivery", "structure"},
+    }
+
+    # Collect all question categories/topics asked this session
+    asked_words: set = set()
+    for q in question_scores:
+        cat = (q.get("category") or q.get("topic") or "").lower()
+        asked_words |= _words(cat)
+
+    result: dict = {}
+    for skill in radar_skills:
+        keywords = _AXIS_KEYWORDS.get(skill.lower(), _words(skill))
+        covered = bool(keywords & asked_words)
+        result[skill] = radar_scores.get(skill, 0) if covered else 0
+    return result
 
 _ROUND_AGENT_LABELS = {
     "technical":    "Technical",
@@ -157,15 +199,18 @@ def _normalize_report_payload(payload: dict) -> dict:
 
 
 def _is_complete_report(report: dict) -> bool:
-    # Only require Stage 1 keys — always generated and always saved.
-    # Stages 2-4 keys are bonuses; a report is "complete enough to serve" once
-    # core scoring data exists. This prevents regeneration when Stage 3/4 LLM
-    # calls fail or when older sessions were saved with a partial schema.
-    required_keys = {
-        "per_question_analysis",
-        "overall_score",
-    }
-    return isinstance(report, dict) and all(key in report for key in required_keys)
+    """
+    A report is 'complete enough to serve from cache' when:
+    - overall_score exists (always computed)
+    - grade is a non-empty string ("A", "B+", etc.) — confirms Stage 1 LLM succeeded
+    An empty grade ("") means Stage 1 returned bad data and the report needs regeneration.
+    """
+    if not isinstance(report, dict):
+        return False
+    if "overall_score" not in report:
+        return False
+    grade = report.get("grade")
+    return bool(grade) and isinstance(grade, str) and len(grade.strip()) >= 1
 
 
 def _merge_per_question_analysis(
@@ -213,6 +258,47 @@ def _merge_per_question_analysis(
         merged.append(payload)
 
     return merged
+
+
+def _build_verbal_category_breakdown(question_scores: list) -> list:
+    """
+    Build category_breakdown deterministically from question_scores for verbal rounds.
+    Groups questions by category, computes average score and verdict.
+    Never returns []. Replaces unreliable LLM generation for this field.
+    """
+    from collections import defaultdict
+    buckets: dict = defaultdict(lambda: {"scores": [], "count": 0})
+
+    for q in (question_scores or []):
+        if q.get("skipped"):
+            continue
+        cat = (q.get("category") or q.get("topic") or "General").strip()
+        score = q.get("score")
+        if score is not None:
+            buckets[cat]["scores"].append(float(score))
+            buckets[cat]["count"] += 1
+
+    result = []
+    for cat, data in buckets.items():
+        if not data["scores"]:
+            continue
+        avg = round(sum(data["scores"]) / len(data["scores"]), 1)
+        avg_pct = round(avg * 10)
+        verdict = (
+            "Strong"  if avg_pct >= 75 else
+            "Good"    if avg_pct >= 60 else
+            "Average" if avg_pct >= 40 else
+            "Weak"
+        )
+        result.append({
+            "category": cat,
+            "score":    avg_pct,
+            "verdict":  verdict,
+            "comment":  f"{data['count']} question(s) — avg {avg}/10",
+        })
+
+    result.sort(key=lambda x: x["score"], reverse=True)
+    return result
 
 
 def _build_mcq_category_breakdown(transcript: list) -> list:
@@ -382,7 +468,6 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
         "cv_audit": {"overall_cv_honesty_score": 0, "note": "Demo report.", "items": []},
         "study_roadmap": {"week_1": [], "week_2": [], "week_3": [], "week_4": []},
         "mock_ready_topics": [], "not_ready_topics": [],
-        "market_intelligence": None,
         "company_fit": None, "skill_decay": [],
         "repeated_offenders": [], "growth_trajectory": None,
         "interview_tips": ["Use the STAR method for behavioural questions."],
@@ -553,7 +638,7 @@ async def _generate_report_sse(session_id: str, user_id: str):
             if correct:
                 answer_text += f" | Correct: {correct}"
         raw_score = entry.get("score")
-        question_scores.append({
+        qs_entry = {
             "question_id":        entry.get("question_id", ""),
             "question_text":      entry.get("question", ""),
             "answer_text":        answer_text,
@@ -566,9 +651,21 @@ async def _generate_report_sse(session_id: str, user_id: str):
             "key_concept_missed": entry.get("key_concept_missed", ""),
             "answer_summary":     entry.get("answer_summary", ""),
             "category":           entry.get("category", round_type),
+            "topic":              entry.get("topic", entry.get("category", round_type)),
             "red_flag_detected":  entry.get("red_flag_detected", ""),
             "question_type":      entry.get("question_type", "speech"),
-        })
+        }
+        # MCQ-specific fields — surface raw answer data for per-question report UI
+        if entry.get("question_type") == "mcq":
+            qs_entry["is_correct"]             = entry.get("is_correct")
+            qs_entry["selected_option"]        = entry.get("selected_option") or ""
+            qs_entry["selected_option_index"]  = entry.get("selected_option_index")
+            qs_entry["correct_option"]         = entry.get("correct_option") or ""
+            qs_entry["correct_option_index"]   = entry.get("correct_option_index")
+            qs_entry["explanation"]            = entry.get("explanation") or ""
+            qs_entry["time_taken_seconds"]     = entry.get("time_taken_secs") or entry.get("time_taken_seconds") or 0
+            qs_entry["difficulty"]             = entry.get("difficulty") or ""
+        question_scores.append(qs_entry)
 
     # Only average questions that were answered and evaluated (score is a real number)
     scored = [q["score"] for q in question_scores
@@ -631,12 +728,7 @@ async def _generate_report_sse(session_id: str, user_id: str):
     # ── Stage 1+2: core + cv_audit + market + company_fit + cross-session ────
     yield _sse({"stage": "core_analysis", "progress": 10, "label": "Scoring your answers..."})
 
-    market_context = ""
-    if target_company:
-        try:
-            market_context = await search_company_trends(target_company)
-        except Exception:
-            pass
+    market_context = ""  # Tavily removed from report path — saves cost, was only news not interview Q data
 
     past_reports = []
     try:
@@ -697,6 +789,13 @@ async def _generate_report_sse(session_id: str, user_id: str):
 
     # Now rerun company_fit with actual radar scores from core
     radar_scores = core_result.get("radar_scores", {})
+
+    # ── Post-process radar: zero out axes with no matching questions ─────────
+    # The LLM fills in all axes even if only 2/6 topics were covered. We patch
+    # them to 0 so the radar only shows dimensions that were actually tested.
+    radar_skills = _RADAR_AXES.get(round_type, [])
+    if radar_skills and question_scores:
+        radar_scores = _mask_uncovered_radar_axes(radar_scores, question_scores, radar_skills)
     if target_company and radar_scores:
         try:
             company_fit = await analyze_company_fit(
@@ -856,14 +955,6 @@ async def _generate_report_sse(session_id: str, user_id: str):
     except Exception as _bm_e:
         print(f"[report/sse] Peer comparison failed: {_bm_e}")
 
-    # ── Market intelligence payload ───────────────────────────────────────────
-    market_intel = None
-    if target_company and market_context:
-        market_intel = {
-            "target_company": target_company,
-            "raw_context": market_context[:800],
-        }
-
     # ── Compute report quality from which stages failed ───────────────────────
     _core_failed = "stage1_core" in failed_stages or "stage2_cv" in failed_stages
     _secondary_failed = "stage3_communication" in failed_stages or "stage4_playbook" in failed_stages
@@ -913,13 +1004,12 @@ async def _generate_report_sse(session_id: str, user_id: str):
 
         # Charts
         "radar_scores":         radar_scores,
-        # For MCQ rounds, compute category breakdown deterministically from
-        # the transcript (is_correct + category per entry).  For other round
-        # types keep whatever the LLM core stage produced.
+        # category_breakdown: always built deterministically from question_scores
+        # so it's never empty. MCQ uses accuracy %; other rounds use avg score per category.
         "category_breakdown":   (
             _build_mcq_category_breakdown(transcript)
             if round_type == "mcq_practice"
-            else core_result.get("category_breakdown", [])
+            else _build_verbal_category_breakdown(question_scores)
         ),
 
         # Strong / Weak
@@ -930,6 +1020,13 @@ async def _generate_report_sse(session_id: str, user_id: str):
         # Hire signal + failure patterns
         "hire_signal":          core_result.get("hire_signal", {}),
         "failure_patterns":     core_result.get("failure_patterns", []),
+
+        # ── HR-specific behavioral analysis (populated only for hr rounds) ──
+        "star_story_matrix":           core_result.get("star_story_matrix", []),
+        "behavioral_category_coverage": core_result.get("behavioral_category_coverage", []),
+        "communication_pattern":        core_result.get("communication_pattern", ""),
+        "culture_fit_narrative":        core_result.get("culture_fit_narrative", ""),
+        "behavioral_red_flags":         core_result.get("behavioral_red_flags", []),
 
         # Per-question
         "per_question_analysis": per_question_analysis,
@@ -946,9 +1043,6 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "study_roadmap":        cv_result.get("study_roadmap", {}),
         "mock_ready_topics":    cv_result.get("mock_ready_topics", []),
         "not_ready_topics":     cv_result.get("not_ready_topics", []),
-
-        # Market Intelligence
-        "market_intelligence":  market_intel,
 
         # ── NEW: Communication & Behavioral (Stage 3) ──
         "communication_breakdown": comm_result.get("communication_breakdown", {}),

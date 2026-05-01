@@ -17,6 +17,7 @@ import LoadingSpinner     from '../components/LoadingSpinner'
 import DSACodeEditor      from '../components/DSACodeEditor'
 import DSAQuestionPanel   from '../components/DSAQuestionPanel'
 import MCQQuestionPanel   from '../components/MCQQuestionPanel'
+import MCQTestInterface   from '../components/MCQTestInterface'
 import { useAudioRecorder }         from '../hooks/useAudioRecorder'
 import { useInterviewGuard }        from '../hooks/useInterviewGuard'
 import { useTimer }                  from '../hooks/useTimer'
@@ -32,7 +33,7 @@ import { getReportRoute } from '../lib/routes'
 
 import {
   Mic, MicOff, Send, SkipForward,
-  ChevronRight, Loader2, AlertCircle, Flag, Star, Maximize
+  ChevronRight, Loader2, AlertCircle, Flag, MessageSquare, Maximize
 } from 'lucide-react'
 
 const LIVE_FLAG_LABELS = {
@@ -79,11 +80,13 @@ function TimerDisplay({ timeLeft, formattedTime, colorState, totalSeconds }) {
 export default function InterviewRoom() {
   const { sessionId } = useParams()
   const navigate      = useNavigate()
-  const [endingSession, setEndingSession] = useState(false)
+  const [endingSession,    setEndingSession]    = useState(false)
+  const [showEndConfirm,   setShowEndConfirm]   = useState(false)
   const endInterviewRef = useRef(null)
   const webcamVideoRef = useRef(null)
   const lastProctorToastRef = useRef('')
-  const mcqAutoSubmitRef = useRef('')
+  const mcqAutoSubmitRef   = useRef('')
+  const mcqLastResultRef   = useRef(null)  // { session_complete, next_question }
 
   // ── Session data ──────────────────────────────────────────────────────────
   const [session,   setSession]   = useState(null)
@@ -109,6 +112,8 @@ export default function InterviewRoom() {
   const [selectedOptionIndex, setSelectedOptionIndex] = useState(null)
   const [selectedOptionText, setSelectedOptionText] = useState('')
   const [mcqTimeLeft, setMcqTimeLeft] = useState(0)
+  const [mcqReveal,   setMcqReveal]   = useState(null)   // { isCorrect, correctIndex, explanation }
+  const [correctCount, setCorrectCount] = useState(0)
 
   // ── Streaming feedback (Phase 3) ──────────────────────────────────────────
   const [streamingFeedback, setStreamingFeedback] = useState('')
@@ -127,7 +132,19 @@ export default function InterviewRoom() {
   // ── Hooks ─────────────────────────────────────────────────────────────────
   const { isRecording, startRecording, stopRecording, resetRecording } = useAudioRecorder(120)
 
-  const totalSecs  = session ? (session.timer_minutes || 30) * 60 : 1800
+  // Read timer duration synchronously so useTimer initialises with the correct value.
+  // session state is null at mount (loaded via useEffect), so we can't rely on it here.
+  const totalSecs = (() => {
+    try {
+      const raw = sessionStorage.getItem(`session_${sessionId}`)
+      if (raw) {
+        const s = JSON.parse(raw)
+        const mins = s.timer_minutes || s.timer_mins || 30
+        return Math.max(300, mins * 60)   // minimum 5 minutes
+      }
+    } catch {}
+    return 1800  // 30-min fallback
+  })()
   const storageKey = sessionId ? `timer_${sessionId}` : null
 
   const handleWarning = useCallback(() => {
@@ -148,7 +165,7 @@ export default function InterviewRoom() {
     handleManualEndAttempt,
     releaseGuard,
   } = useInterviewGuard({
-    enabled: !loading && !loadError && Boolean(session) && status !== 'done',
+    enabled: !loading && !loadError && Boolean(session) && status !== 'done' && roundType !== 'mcq_practice',
     maxAttempts: 3,
     onLimitReached: async () => {
       await endInterviewRef.current?.('fullscreen_exit_limit', {
@@ -164,7 +181,7 @@ export default function InterviewRoom() {
     recentIncidents,
     summary: proctoringSummary,
   } = useProctoringMonitor({
-    enabled: !loading && !loadError && Boolean(session) && status !== 'done',
+    enabled: !loading && !loadError && Boolean(session) && status !== 'done' && roundType !== 'mcq_practice',
     videoRef: webcamVideoRef,
   })
 
@@ -241,6 +258,8 @@ export default function InterviewRoom() {
     setQStartTime(Date.now())
     setTimeElapsed(0)
 
+    setMcqReveal(null)
+
     if (!isDSA && !isMCQ) {
       setStatus('speaking')
       const text = currentQ.question_text || currentQ.text || ''
@@ -251,21 +270,9 @@ export default function InterviewRoom() {
     if (qIndex === 0 && !isRunning) startTimer()
   }, [currentQ?.id]) // eslint-disable-line
 
-  useEffect(() => {
-    if (!isMCQ || !currentQ) return undefined
-    const interval = setInterval(() => {
-      setMcqTimeLeft(prev => Math.max(0, prev - 1))
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [isMCQ, currentQ?.id])
-
-  useEffect(() => {
-    if (!isMCQ || !currentQ || mcqTimeLeft > 0 || status === 'evaluating' || status === 'done') return
-    if (mcqAutoSubmitRef.current === currentQ.id) return
-    mcqAutoSubmitRef.current = currentQ.id
-    toast('Question timed out. Submitting current selection...', { icon: '⏱️', duration: 2200 })
-    handleSubmit(false, null, { timedOut: true })
-  }, [isMCQ, currentQ, mcqTimeLeft, status]) // eslint-disable-line
+  // MCQ flow uses MCQTestInterface which manages its own per-question state and global timer.
+  // The legacy per-question MCQ timer + auto-submit effects were removed to prevent the first
+  // question from being auto-submitted on mount (mcqTimeLeft initialises to 0).
 
   // ── Recording toggle ──────────────────────────────────────────────────────
   const handleRecordToggle = async () => {
@@ -297,7 +304,7 @@ export default function InterviewRoom() {
           question_difficulty: difficulty,
           round_type:          roundType,
           is_follow_up:        currentQ?.is_follow_up || false,
-          candidate_year:      JSON.parse(sessionStorage.getItem('student_meta') || '{}')?.year || null,
+          candidate_year:      JSON.parse(localStorage.getItem('student_meta') || '{}')?.year || null,
         })
         setStatus('idle')
       } catch {
@@ -434,24 +441,32 @@ export default function InterviewRoom() {
         const eval_   = inner?.evaluation || {}
         setScores(prev => [...prev, { ...eval_, score: eval_.score, question: currentQ?.question_text || `Q${qIndex + 1}` }])
         if (isMCQ) {
-          setStreamingFeedback(eval_?.feedback || '')
-          setShowFeedback(true)
+          const isCorrect = eval_?.is_correct ?? false
+          if (isCorrect) setCorrectCount(c => c + 1)
+          mcqLastResultRef.current = { session_complete: inner?.session_complete, next_question: inner?.next_question }
+          setMcqReveal({
+            isCorrect,
+            correctIndex: currentQ?.correct_option_index ?? eval_?.correct_option_index ?? -1,
+            explanation:  currentQ?.explanation || eval_?.explanation || '',
+          })
+          setStatus('idle')
+          if (submitMeta.timedOut) {
+            setTimeout(() => {
+              setMcqReveal(null)
+              if (inner?.session_complete) { endInterview(); return }
+              if (inner?.next_question) applyNextQuestion(inner.next_question)
+              else endInterview()
+            }, 1800)
+          }
+          return
         }
         if (inner?.session_complete) {
-          if (isMCQ) {
-            setTimeout(() => endInterview(), 1600)
-          } else {
-            endInterview()
-          }
+          endInterview()
           return
         }
         const next = inner?.next_question
         if (next) {
-          if (isMCQ) {
-            setTimeout(() => applyNextQuestion(next), submitMeta.timedOut ? 900 : 1600)
-          } else {
-            applyNextQuestion(next)
-          }
+          applyNextQuestion(next)
         } else {
           endInterview()
         }
@@ -554,6 +569,22 @@ export default function InterviewRoom() {
     </div>
   )
 
+  // ── MCQ: completely separate full-screen test interface ──────────────────
+  if (isMCQ) {
+    return (
+      <MCQTestInterface
+        questions={session?.questions || []}
+        sessionId={sessionId}
+        sessionLabel={sessionLabel}
+        timeLeft={timeLeft}
+        colorState={colorState}
+        totalSecs={totalSecs}
+        difficulty={difficulty}
+        onComplete={(reason) => endInterview(reason || 'completed')}
+      />
+    )
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen pt-16 flex flex-col" style={{ background: 'var(--color-bg)' }}>
@@ -587,6 +618,40 @@ export default function InterviewRoom() {
         </div>
       )}
 
+      {/* ── End Interview Confirmation Modal ─────────────────────────────── */}
+      {showEndConfirm && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
+          <div className="glass max-w-sm w-full p-7 text-center"
+            style={{ border: '1px solid rgba(239,68,68,0.35)' }}>
+            <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center"
+              style={{ background: 'rgba(239,68,68,0.15)' }}>
+              <Flag size={24} className="text-red-400" />
+            </div>
+            <h2 className="text-xl font-bold mb-2">End Interview?</h2>
+            <p className="text-muted text-sm leading-relaxed mb-6">
+              You have answered <strong>{qIndex}</strong> of <strong>{total}</strong> questions.
+              Ending now will generate your report based on answers submitted so far.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowEndConfirm(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:bg-white/5"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-muted)' }}>
+                Keep Going
+              </button>
+              <button
+                onClick={() => { setShowEndConfirm(false); endInterview('manual') }}
+                disabled={endingSession}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.45)', color: '#f87171' }}>
+                {endingSession ? 'Ending…' : 'End & Get Report'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-6 py-3 border-b flex-shrink-0"
         style={{ borderColor: 'var(--color-border)' }}>
@@ -611,25 +676,27 @@ export default function InterviewRoom() {
               {difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}
             </span>
           )}
-          {fullscreenSupported && (
+          {fullscreenSupported && !isMCQ && (
             <span className="text-xs px-2.5 py-1 rounded-lg font-semibold"
               style={{ background: 'rgba(239,68,68,0.12)', color: '#fca5a5' }}>
               Exit Attempts: {exitAttempts}/{maxAttempts}
             </span>
           )}
-          <span className="text-xs px-2.5 py-1 rounded-lg font-semibold"
-            style={{
-              background: attentionPct >= 80 ? 'rgba(74,222,128,0.12)' : attentionPct >= 60 ? 'rgba(250,204,21,0.12)' : 'rgba(248,113,113,0.12)',
-              color: attentionPct >= 80 ? '#86efac' : attentionPct >= 60 ? '#fde68a' : '#fca5a5',
-            }}>
-            Attention: {attentionPct}%
-          </span>
+          {!isMCQ && (
+            <span className="text-xs px-2.5 py-1 rounded-lg font-semibold"
+              style={{
+                background: attentionPct >= 80 ? 'rgba(74,222,128,0.12)' : attentionPct >= 60 ? 'rgba(250,204,21,0.12)' : 'rgba(248,113,113,0.12)',
+                color: attentionPct >= 80 ? '#86efac' : attentionPct >= 60 ? '#fde68a' : '#fca5a5',
+              }}>
+              Attention: {attentionPct}%
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <TimerDisplay timeLeft={timeLeft} formattedTime={formattedTime}
             colorState={colorState} totalSeconds={totalSecs} />
           <button id="end-interview-btn"
-            onClick={handleManualEndAttempt}
+            onClick={() => setShowEndConfirm(true)}
             className="btn-secondary text-xs py-2 px-3">
             <Flag size={13} /> End
           </button>
@@ -639,9 +706,9 @@ export default function InterviewRoom() {
       {/* ── Main split ───────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
 
-        {/* LEFT — Webcam or CodeEditor */}
+        {/* LEFT — CodeEditor (DSA) or Webcam (Technical/HR). Hidden for MCQ. */}
         <div
-          className={`${isDSA ? 'lg:w-3/5 flex' : 'hidden lg:flex lg:w-[55%]'} flex-col p-4 gap-3`}
+          className={`${isDSA ? 'lg:w-3/5 flex' : isMCQ ? 'hidden' : 'hidden lg:flex lg:w-[55%]'} flex-col p-4 gap-3`}
           style={{ borderRight: '1px solid var(--color-border)' }}
         >
           {isDSA ? (
@@ -651,30 +718,28 @@ export default function InterviewRoom() {
               onLanguageChange={lang => setCodeLang(lang)}
               disabled={status === 'evaluating'}
             />
-          ) : (
-            <>
-              <InterviewCamera
-                videoRef={webcamVideoRef}
-                overlay={liveFlags.length > 0 ? (
-                  <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-2">
-                    {liveFlags.map(flag => (
-                      <span
-                        key={flag}
-                        className="text-xs px-2.5 py-1 rounded-full font-semibold"
-                        style={{ background: 'rgba(248,113,113,0.16)', color: '#fecaca', border: '1px solid rgba(248,113,113,0.25)' }}
-                      >
-                        {LIVE_FLAG_LABELS[flag] || flag}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              />
-            </>
-          )}
+          ) : !isMCQ ? (
+            <InterviewCamera
+              videoRef={webcamVideoRef}
+              overlay={liveFlags.length > 0 ? (
+                <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-2">
+                  {liveFlags.map(flag => (
+                    <span
+                      key={flag}
+                      className="text-xs px-2.5 py-1 rounded-full font-semibold"
+                      style={{ background: 'rgba(248,113,113,0.16)', color: '#fecaca', border: '1px solid rgba(248,113,113,0.25)' }}
+                    >
+                      {LIVE_FLAG_LABELS[flag] || flag}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            />
+          ) : null}
         </div>
 
-        {/* RIGHT — Question + controls */}
-        <div className={`${isDSA ? 'lg:w-2/5' : 'w-full lg:w-[45%]'} flex flex-col p-5 gap-4 overflow-y-auto`}>
+        {/* RIGHT — Question + controls. MCQ takes full width with its own internal layout. */}
+        <div className={`${isDSA ? 'lg:w-2/5' : isMCQ ? 'w-full' : 'w-full lg:w-[45%]'} flex flex-col ${isMCQ ? 'p-6 lg:p-10' : 'p-5'} gap-4 overflow-y-auto`}>
 
           {/* Question display — DSA uses DSAQuestionPanel, others use QuestionPanel */}
           {isDSA ? (
@@ -725,9 +790,11 @@ export default function InterviewRoom() {
               totalQuestions={total}
               selectedOptionIndex={selectedOptionIndex}
               onSelect={handleMcqSelect}
-              disabled={status === 'evaluating'}
+              disabled={status === 'evaluating' || !!mcqReveal}
               status={status}
               timeLeft={mcqTimeLeft}
+              reveal={mcqReveal}
+              correctCount={correctCount}
             />
           ) : (
             <>
@@ -753,8 +820,8 @@ export default function InterviewRoom() {
             <div className="glass rounded-xl p-4 border"
               style={{ borderColor: 'rgba(124,58,237,0.3)', background: 'rgba(124,58,237,0.06)' }}>
               <div className="flex items-center gap-2 mb-2">
-                <Star size={13} className="text-purple-400" />
-                <span className="text-xs font-semibold text-purple-300 uppercase tracking-wider">Alex's Feedback</span>
+                <MessageSquare size={13} className="text-purple-400" />
+                <span className="text-xs font-semibold text-purple-300 uppercase tracking-wider">Interviewer Feedback</span>
                 {status === 'evaluating' && (
                   <span className="ml-auto inline-block w-1.5 h-4 bg-purple-400 animate-pulse rounded-sm" />
                 )}
@@ -831,30 +898,57 @@ export default function InterviewRoom() {
               </button>
             )}
 
-            {isMCQ && (
-              <div className="flex gap-3">
+            {isMCQ && !mcqReveal && (
+              <div className="flex gap-3 w-full max-w-5xl mx-auto">
                 <button
                   id="submit-answer-btn-mcq"
                   onClick={() => handleSubmit(false)}
                   disabled={status === 'evaluating' || !answerReady}
                   className="btn-primary flex-1 py-3.5 text-sm"
+                  style={{ background: 'linear-gradient(135deg,#f59e0b,#fb923c)', boxShadow: answerReady ? '0 4px 18px rgba(245,158,11,0.35)' : 'none' }}
                 >
                   {status === 'evaluating' ? (
-                    <><Loader2 size={18} className="animate-spin" /> Checking Answer...</>
+                    <><Loader2 size={18} className="animate-spin" /> Checking…</>
                   ) : qIndex + 1 >= total ? (
-                    <><Send size={18} /> Submit & Finish Practice</>
+                    <><Send size={18} /> Submit & Finish</>
                   ) : (
-                    <><ChevronRight size={18} /> Submit & Next Question</>
+                    <><ChevronRight size={18} /> Submit Answer</>
                   )}
                 </button>
                 <button
                   id="skip-btn-mcq"
                   onClick={() => handleSubmit(true)}
                   disabled={status === 'evaluating'}
-                  className="py-3 px-4 rounded-xl text-sm font-medium transition-all duration-200"
+                  title="Skip question"
+                  className="py-3 px-5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center gap-2"
                   style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--color-border)', color: 'var(--color-muted)' }}
                 >
-                  <SkipForward size={16} />
+                  <SkipForward size={15} /> Skip
+                </button>
+              </div>
+            )}
+
+            {/* After reveal: Next Question or Finish button */}
+            {isMCQ && mcqReveal && (
+              <div className="w-full max-w-5xl mx-auto">
+                <button
+                  onClick={() => {
+                    setMcqReveal(null)
+                    const last = mcqLastResultRef.current || {}
+                    if (last.session_complete || qIndex + 1 >= total) {
+                      endInterview()
+                    } else if (last.next_question) {
+                      applyNextQuestion(last.next_question)
+                    } else {
+                      endInterview()
+                    }
+                  }}
+                  className="btn-primary w-full py-3.5 text-sm"
+                  style={{ background: 'linear-gradient(135deg,#f59e0b,#fb923c)', boxShadow: '0 4px 18px rgba(245,158,11,0.3)' }}
+                >
+                  {qIndex + 1 >= total
+                    ? <><Send size={18} /> Finish Practice & View Report</>
+                    : <><ChevronRight size={18} /> Next Question</>}
                 </button>
               </div>
             )}

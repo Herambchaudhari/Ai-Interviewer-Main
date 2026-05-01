@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
-from routers import resume, interview, transcribe, report, reports, session, context_hub, portfolio, news, progress, share, admin
+from routers import resume, interview, transcribe, report, reports, session, context_hub, portfolio, news, progress, share, admin, tts, mcq
 
 logger = logging.getLogger(__name__)
 
@@ -49,20 +49,30 @@ app.include_router(news.router,      prefix=f"{API_PREFIX}/news",      tags=["Ne
 app.include_router(progress.router,  prefix=f"{API_PREFIX}/progress",  tags=["Progress"])
 app.include_router(share.router,     prefix=f"{API_PREFIX}/share",     tags=["Share"])
 app.include_router(admin.router,     prefix=f"{API_PREFIX}/admin",     tags=["Admin"])
+app.include_router(tts.router,       prefix=f"{API_PREFIX}/tts",       tags=["TTS"])
+app.include_router(mcq.router,       prefix=f"{API_PREFIX}/mcq",       tags=["MCQ"])
 
 
-# ── Startup: quiet background backfill for old sessions ───────────────────────
+# ── Startup: warm whisper model + backfill old sessions ───────────────────────
 @app.on_event("startup")
-async def _startup_backfill():
+async def _startup_tasks():
     """
-    On every cold start, kick off a small backfill batch (5 sessions).
-    This drains the queue of old sessions over successive deploys/restarts
-    without any manual intervention.  The lock inside run_backfill_batch
-    prevents overlapping runs if the server restarts quickly.
+    On every cold start:
+    1. Pre-warm the faster-whisper model so the first transcription isn't slow.
+    2. Kick off a small backfill batch (5 sessions) for old missing reports.
     """
-    from services.backfill_service import run_backfill_batch
+    async def _warmup_whisper():
+        try:
+            import asyncio as _asyncio
+            loop = _asyncio.get_running_loop()
+            from services.whisper_service import get_model
+            await loop.run_in_executor(None, get_model)
+            logger.info("[startup] Whisper model pre-warmed.")
+        except Exception as e:
+            logger.warning("[startup] Whisper warmup failed: %s", e)
 
-    async def _run():
+    async def _run_backfill():
+        from services.backfill_service import run_backfill_batch
         try:
             result = await run_backfill_batch(limit=5, delay_seconds=3.0)
             logger.info("[startup] Backfill result: %s", result)
@@ -70,7 +80,8 @@ async def _startup_backfill():
             logger.warning("[startup] Backfill startup task failed: %s", e)
 
     # Fire-and-forget — don't block server startup
-    asyncio.create_task(_run())
+    asyncio.create_task(_warmup_whisper())
+    asyncio.create_task(_run_backfill())
 
 
 # ── Standard Response Helpers ─────────────────────────────────────────────────

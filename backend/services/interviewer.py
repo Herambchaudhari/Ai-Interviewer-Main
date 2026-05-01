@@ -149,17 +149,18 @@ async def generate_next_question(
     user_msg = (
         "Based on the interview so far, generate the next question. "
         "Review the conversation history and:\n"
-        "1. Identify topics NOT yet covered.\n"
-        "2. If the candidate struggled with something, probe from a different angle — "
-        "   but do not repeat the same topic directly.\n"
-        "3. Keep the difficulty appropriate and progress naturally.\n"
-        "4. The question must be on a DIFFERENT topic from the ones already covered.\n"
+        "1. Identify topics NOT yet covered from the required distribution.\n"
+        "2. If the candidate struggled, probe from a different angle — do not repeat the same topic.\n"
+        "3. Keep difficulty appropriate and progress naturally.\n"
+        "4. The question MUST cover a DIFFERENT topic from those already asked.\n"
         "Generate the next question now."
     )
     if round_type == "technical":
         user_msg += (
-            "\n5. Prefer a resume/project deep-dive grounded in the candidate's actual projects and skills "
-            "unless the adaptive directive explicitly forces a standalone CS fundamentals question."
+            "\n5. STRICTLY follow the question distribution in your system prompt (20% CS core / 50% role-based / 30% resume). "
+            "ONLY generate a resume/project question if the ADAPTIVE ENGINE DIRECTIVE explicitly says to. "
+            "If no resume directive is given, generate a STANDALONE CS fundamentals or role-specific question "
+            "(OOP, DBMS, OS, CN, Algorithms, or {job_role} role topics) — NOT about the candidate's specific projects."
         )
 
     # Adaptive challenge: only when candidate scored ≤ 5 on the last 2 consecutive evaluations

@@ -324,7 +324,18 @@ CALIBRATION: Deduct 1pt if >5 fillers; add 0.5pt if time_used_ratio 0.5-0.8 (con
 
     weight_note = ""
     if round_type == "hr":
-        weight_note = "HR WEIGHTS: communication=35%, relevance=25%, technical=10%, rest split."
+        weight_note = (
+            "HR SCORING RULES:\n"
+            "  - This is a BEHAVIORAL question. Score STAR story quality, NOT CS knowledge.\n"
+            "  - dimension_scores weights: communication_clarity=30%, example_quality=25%, "
+            "relevance=20%, confidence_delivery=15%, depth_completeness=10%.\n"
+            "  - technical_accuracy: score 5 if not applicable; only score lower if they gave "
+            "factually wrong statements about their own role/company.\n"
+            "  - example_quality: HIGH (8-10) only if they gave a specific, concrete STAR story "
+            "(Situation+Task+Action+Result). Score 5 if they stayed general. Score 2-3 if no example.\n"
+            "  - key_concept_missed: what aspect of STAR they skipped (e.g. 'Result/outcome missing').\n"
+            "  - Composite score formula: 0.30*comm + 0.25*example + 0.20*relevance + 0.15*confidence + 0.10*depth."
+        )
     elif round_type == "dsa":
         weight_note = "DSA WEIGHTS: technical_accuracy=60%, depth=30%, communication=10%."
     else:
