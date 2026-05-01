@@ -964,7 +964,11 @@ export default function ReportPage() {
               {target_company && <> · <span className="text-purple-400">{target_company}</span></>}
             </p>
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap no-print">
+            <button onClick={() => window.print()}
+              className="flex items-center gap-1.5 btn-secondary text-sm py-2 px-4">
+              <Download size={14} /> Download PDF
+            </button>
             <button onClick={() => setShareOpen(true)}
               className="flex items-center gap-1.5 btn-secondary text-sm py-2 px-4">
               <Share2 size={14} /> Share
@@ -1092,9 +1096,9 @@ export default function ReportPage() {
         {/* ── Two-Radar Grid: Technical Knowledge + Hire Signal ────────────── */}
         <SectionErrorBoundary>
         {(legacyRadarData.length > 0 || Object.keys(hire_signal || {}).length >= 3) && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {legacyRadarData.length > 0 && (() => {
-              // Only show axes that were actually assessed (score > 0)
+          <div className={legacyRadarData.length > 0 && round_type !== 'hr' ? 'grid grid-cols-1 lg:grid-cols-2 gap-5' : ''}>
+            {/* Technical Knowledge — hidden for HR rounds (not relevant to behavioral assessment) */}
+            {legacyRadarData.length > 0 && round_type !== 'hr' && (() => {
               const assessedAxes = legacyRadarData.filter(d => d.A > 0)
               const notAssessed  = legacyRadarData.filter(d => d.A === 0).map(d => d.subject)
               return (
@@ -1138,11 +1142,17 @@ export default function ReportPage() {
               )
             })()}
             {Object.keys(hire_signal || {}).length >= 3 && (
-              <SectionCard icon={<Target size={16}/>} title="Hire Signal" color="#f59e0b">
+              <SectionCard
+                icon={<Target size={16}/>}
+                title={round_type === 'hr' ? 'Candidate Signal' : 'Hire Signal'}
+                color={round_type === 'hr' ? '#ec4899' : '#f59e0b'}
+              >
                 <p className="text-xs text-muted mb-3">
-                  How a hiring manager would rate your readiness across 5 dimensions.
+                  {round_type === 'hr'
+                    ? 'How a hiring manager would assess this candidate across 5 behavioral dimensions.'
+                    : 'How a hiring manager would rate your readiness across 5 dimensions.'}
                 </p>
-                <HireSignalRadar hireSignal={hire_signal} />
+                <HireSignalRadar hireSignal={hire_signal} roundType={round_type} />
               </SectionCard>
             )}
           </div>
@@ -1160,14 +1170,19 @@ export default function ReportPage() {
           />
         ) : (radarData.length > 0 || deliveryArc.length > 0) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {radarData.length > 0 && (
-              <SectionCard icon={<MessageSquare size={16}/>} title="Communication (6-Axis)" color="#22d3ee">
+            {radarData.length > 0 && (() => {
+              const isHR     = round_type === 'hr'
+              const axColor  = isHR ? '#ec4899' : '#22d3ee'
+              const axDot    = isHR ? '#f472b6' : '#67e8f9'
+              const axTitle  = isHR ? 'Behavioral Competency Profile' : 'Communication (6-Axis)'
+              return (
+              <SectionCard icon={<MessageSquare size={16}/>} title={axTitle} color={axColor}>
                 <ResponsiveContainer width="100%" height={260}>
                   <RadarChart data={radarData} margin={{ top: 0, right: 30, bottom: 0, left: 30 }}>
                     <PolarGrid stroke="rgba(255,255,255,0.08)" />
                     <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                    <Radar name="Score" dataKey="A" stroke="#22d3ee" fill="#22d3ee" fillOpacity={0.2}
-                      dot={{ r: 3, fill: '#67e8f9' }} />
+                    <Radar name="Score" dataKey="A" stroke={axColor} fill={axColor} fillOpacity={0.2}
+                      dot={{ r: 3, fill: axDot }} />
                   </RadarChart>
                 </ResponsiveContainer>
                 {communication_breakdown && Object.keys(communication_breakdown ?? {}).length > 0 && (
@@ -1181,7 +1196,8 @@ export default function ReportPage() {
                   </div>
                 )}
               </SectionCard>
-            )}
+            )
+            })()}
 
             {deliveryArc.length > 0 && (
               <SectionCard icon={<TrendingUp size={16}/>} title="Delivery Consistency" color="#a78bfa">
@@ -1319,8 +1335,8 @@ export default function ReportPage() {
           </SectionCard>
         </SectionErrorBoundary>
 
-        {/* ── Verbal Category Breakdown ────────────────────────────────────── */}
-        {round_type !== 'mcq_practice' && category_breakdown?.length > 0 && (
+        {/* ── Verbal Category Breakdown (technical/DSA only) ───────────────── */}
+        {round_type !== 'mcq_practice' && round_type !== 'hr' && category_breakdown?.length > 0 && (
           <SectionCard icon={<BarChart2 size={16}/>} title="Performance by Topic Category" color="#7c3aed">
             <p className="text-xs text-muted mb-3">
               Average score per CS pillar — shows exactly where preparation is needed.
@@ -1390,70 +1406,142 @@ export default function ReportPage() {
         </div>
 
 
-        {/* ── HR: STAR Story Quality Matrix ───────────────────────────────── */}
-        {round_type === 'hr' && star_story_matrix?.length > 0 && (
-          <SectionCard icon={<Star size={16}/>} title="STAR Story Quality" color="#ec4899">
-            <p className="text-xs text-muted mb-3">
-              Did each answer include all four STAR elements with concrete specifics?
-            </p>
-            <div className="space-y-2">
-              {star_story_matrix.map((q, i) => {
-                const starScore = q.star_score ?? 0
-                const color = starScore >= 8 ? '#4ade80' : starScore >= 5 ? '#facc15' : '#f87171'
-                return (
-                  <div key={i} className="p-3 rounded-xl flex items-center gap-3"
-                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)' }}>
-                    <span className="text-xs font-bold flex-shrink-0" style={{ color }}>{q.question_id}</span>
-                    <div className="flex gap-1 flex-shrink-0">
-                      {['situation_present','task_present','action_present','result_present'].map((key, j) => (
-                        <span key={j} className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-                          style={{
-                            background: q[key] ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.12)',
-                            color: q[key] ? '#4ade80' : '#f87171',
-                          }}>
-                          {'STAR'[j]}
-                        </span>
-                      ))}
-                    </div>
-                    <span className="text-xs text-muted truncate flex-1">{q.competency_category}</span>
-                    <span className="text-xs flex-shrink-0" style={{ color }}>
-                      {q.specificity_level?.split(' ')[0] || ''}
-                    </span>
-                    {q.missing_element && q.missing_element !== 'None' && (
-                      <span className="text-xs text-amber-400 flex-shrink-0">Missing: {q.missing_element}</span>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </SectionCard>
-        )}
+        {/* ── HR: Story Completeness Analysis ─────────────────────────────── */}
+        {round_type === 'hr' && star_story_matrix?.length > 0 && (() => {
+          const total       = star_story_matrix.length
+          const avgCompletion = Math.round(
+            star_story_matrix.reduce((s, q) => s + (q.star_score ?? 0), 0) / total * 10
+          )
+          const elemCounts = {
+            S: star_story_matrix.filter(q => q.situation_present).length,
+            T: star_story_matrix.filter(q => q.task_present).length,
+            A: star_story_matrix.filter(q => q.action_present).length,
+            R: star_story_matrix.filter(q => q.result_present).length,
+          }
+          const missingMap = star_story_matrix
+            .map(q => q.missing_element)
+            .filter(m => m && m !== 'None')
+            .reduce((acc, m) => ({ ...acc, [m]: (acc[m] || 0) + 1 }), {})
+          const topMissing   = Object.entries(missingMap).sort(([,a],[,b]) => b - a)[0]?.[0] || 'None'
+          const highSpecCount = star_story_matrix.filter(q => q.specificity_level?.startsWith('High')).length
+          const compColor    = avgCompletion >= 75 ? '#4ade80' : avgCompletion >= 50 ? '#facc15' : '#f87171'
 
-        {/* ── HR: Behavioral Category Coverage ────────────────────────────── */}
+          const ELEMS = [
+            { key: 'S', label: 'Situation', field: 'situation_present', hint: 'Set the scene with context' },
+            { key: 'T', label: 'Task',      field: 'task_present',      hint: 'Defined your responsibility' },
+            { key: 'A', label: 'Action',    field: 'action_present',    hint: 'What you specifically did' },
+            { key: 'R', label: 'Result',    field: 'result_present',    hint: 'Outcome with evidence' },
+          ]
+
+          return (
+            <SectionCard icon={<CheckCircle size={16}/>} title="Story Completeness Analysis" color="#ec4899">
+              {/* Aggregate stats */}
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                {[
+                  { label: 'Avg Completeness', value: `${avgCompletion}%`, color: compColor, sub: null },
+                  { label: 'Most Missed',       value: topMissing,         color: '#f59e0b', sub: 'element' },
+                  { label: 'High Specificity',  value: highSpecCount,      color: '#4ade80', sub: `/ ${total} answers` },
+                ].map(({ label, value, color, sub }) => (
+                  <div key={label} className="rounded-xl p-3 text-center"
+                    style={{ background: 'rgba(236,72,153,0.07)', border: '1px solid rgba(236,72,153,0.18)' }}>
+                    <p className="text-lg font-bold leading-tight truncate" style={{ color }}>{value}</p>
+                    {sub && <p className="text-[10px] text-muted leading-none mt-0.5">{sub}</p>}
+                    <p className="text-[10px] text-muted mt-1">{label}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Element presence distribution */}
+              <p className="text-xs text-muted uppercase tracking-wider mb-2">Element Presence Across All Answers</p>
+              <div className="space-y-2 mb-5">
+                {ELEMS.map(({ key, label, field }) => {
+                  const count = elemCounts[key]
+                  const pct   = Math.round(count / total * 100)
+                  const c     = pct >= 80 ? '#4ade80' : pct >= 60 ? '#facc15' : '#f87171'
+                  return (
+                    <div key={key} className="flex items-center gap-3">
+                      <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                        style={{ background: `${c}22`, color: c }}>{key}</span>
+                      <span className="text-xs text-muted w-16 flex-shrink-0">{label}</span>
+                      <div className="flex-1 bg-white/5 rounded-full h-2">
+                        <div className="h-2 rounded-full transition-all duration-500"
+                          style={{ width: `${pct}%`, background: c }} />
+                      </div>
+                      <span className="text-xs font-semibold w-20 text-right flex-shrink-0" style={{ color: c }}>
+                        {count}/{total} ({pct}%)
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Per-answer compact breakdown */}
+              <p className="text-xs text-muted uppercase tracking-wider mb-2">Per-Answer Breakdown</p>
+              <div className="space-y-1.5">
+                {star_story_matrix.map((q, i) => {
+                  const sc = q.star_score ?? 0
+                  const c  = sc >= 8 ? '#4ade80' : sc >= 5 ? '#facc15' : '#f87171'
+                  return (
+                    <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg"
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)' }}>
+                      <span className="text-xs font-bold w-6 flex-shrink-0" style={{ color: c }}>{q.question_id}</span>
+                      <span className="text-xs text-muted truncate flex-1 min-w-0">{q.competency_category}</span>
+                      {/* Element dots */}
+                      <div className="flex gap-1 flex-shrink-0">
+                        {[
+                          { k: 'S', v: q.situation_present },
+                          { k: 'T', v: q.task_present },
+                          { k: 'A', v: q.action_present },
+                          { k: 'R', v: q.result_present },
+                        ].map(({ k, v }) => (
+                          <span key={k} className="w-4 h-4 rounded text-[9px] font-bold flex items-center justify-center"
+                            style={{
+                              background: v ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.04)',
+                              color: v ? '#4ade80' : '#475569',
+                            }}>{k}</span>
+                        ))}
+                      </div>
+                      <span className="text-xs font-semibold flex-shrink-0 w-9 text-right" style={{ color: c }}>{sc}/10</span>
+                      {q.missing_element && q.missing_element !== 'None' && (
+                        <span className="text-[10px] text-amber-400 flex-shrink-0 hidden sm:block w-24 text-right truncate">
+                          ✗ {q.missing_element}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </SectionCard>
+          )
+        })()}
+
+        {/* ── HR: Behavioral Competency Coverage ──────────────────────────── */}
         {round_type === 'hr' && behavioral_category_coverage?.length > 0 && (
-          <SectionCard icon={<BarChart2 size={16}/>} title="Competency Coverage" color="#ec4899">
+          <SectionCard icon={<BarChart2 size={16}/>} title="Behavioral Competency Coverage" color="#ec4899">
             <p className="text-xs text-muted mb-3">
-              Which behavioral competencies were assessed this session.
+              Which competency areas were assessed and how well they were demonstrated.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {behavioral_category_coverage.map((cat, i) => {
-                const perfColor = cat.performance === 'Strong' ? '#4ade80'
+                const perfColor = cat.performance === 'Strong'   ? '#4ade80'
                   : cat.performance === 'Adequate' ? '#facc15'
-                  : cat.performance === 'Weak' ? '#f87171'
-                  : '#64748b'
+                  : cat.performance === 'Weak'     ? '#f87171'
+                  : '#475569'
+                const bgColor = cat.covered
+                  ? `${perfColor}0d`
+                  : 'rgba(255,255,255,0.02)'
                 return (
-                  <div key={i} className="flex items-center gap-2 p-2 rounded-lg"
-                    style={{ background: 'rgba(255,255,255,0.03)' }}>
-                    {cat.covered
-                      ? <CheckCircle size={12} className="flex-shrink-0" style={{ color: perfColor }} />
-                      : <Minus size={12} className="text-muted flex-shrink-0" />}
-                    <span className="text-xs flex-1 truncate"
+                  <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-lg"
+                    style={{ background: bgColor, border: `1px solid ${cat.covered ? `${perfColor}28` : 'var(--color-border)'}` }}>
+                    <span className="flex-1 text-xs truncate"
                       style={{ color: cat.covered ? 'var(--color-text)' : 'var(--color-muted)' }}>
                       {cat.category}
                     </span>
-                    {cat.covered && (
-                      <Chip label={cat.performance} size="xs" color={perfColor} />
-                    )}
+                    <Chip
+                      label={cat.covered ? cat.performance : 'Not Asked'}
+                      size="xs"
+                      color={perfColor}
+                    />
                   </div>
                 )
               })}
@@ -1461,36 +1549,41 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
-        {/* ── HR: Culture Fit + Communication Pattern ──────────────────────── */}
+        {/* ── HR: Culture Fit + Communication Pattern + Observations ─────── */}
         {round_type === 'hr' && (culture_fit_narrative || communication_pattern || behavioral_red_flags?.length > 0) && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             {(culture_fit_narrative || communication_pattern) && (
               <SectionCard icon={<Users size={16}/>} title="Culture Fit & Communication Style" color="#ec4899">
-                {communication_pattern && (
-                  <div className="mb-3">
-                    <p className="text-xs text-muted uppercase tracking-wider mb-1">Communication Pattern</p>
-                    <p className="text-sm font-medium" style={{
-                      color: communication_pattern.includes('Anecdote') ? '#4ade80'
-                        : communication_pattern.includes('Too-brief') ? '#f87171'
-                        : '#facc15'
-                    }}>{communication_pattern}</p>
-                  </div>
-                )}
+                {communication_pattern && (() => {
+                  const isStrong = communication_pattern.includes('Anecdote')
+                  const isWeak   = communication_pattern.includes('Too-brief') || communication_pattern.includes('Rambling')
+                  const patColor = isStrong ? '#4ade80' : isWeak ? '#f87171' : '#facc15'
+                  return (
+                    <div className="mb-4 p-3 rounded-lg" style={{ background: `${patColor}0d`, border: `1px solid ${patColor}28` }}>
+                      <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Communication Pattern</p>
+                      <p className="text-sm font-semibold" style={{ color: patColor }}>{communication_pattern}</p>
+                    </div>
+                  )
+                })()}
                 {culture_fit_narrative && (
                   <div>
-                    <p className="text-xs text-muted uppercase tracking-wider mb-1">Culture Fit</p>
+                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1.5">Environment Fit</p>
                     <p className="text-sm text-muted leading-relaxed">{culture_fit_narrative}</p>
                   </div>
                 )}
               </SectionCard>
             )}
             {behavioral_red_flags?.length > 0 && (
-              <SectionCard icon={<AlertTriangle size={16}/>} title="Behavioral Red Flags" color="#f87171">
+              <SectionCard icon={<AlertTriangle size={16}/>} title="Behavioral Observations" color="#f59e0b">
+                <p className="text-xs text-muted mb-3">
+                  Patterns worth discussing in a debrief.
+                </p>
                 <div className="space-y-2">
                   {behavioral_red_flags.map((flag, i) => (
-                    <div key={i} className="flex gap-2">
-                      <AlertTriangle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
-                      <p className="text-xs text-muted">{flag}</p>
+                    <div key={i} className="flex gap-2.5 p-2.5 rounded-lg"
+                      style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                      <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+                      <p className="text-xs text-muted leading-relaxed">{flag}</p>
                     </div>
                   ))}
                 </div>

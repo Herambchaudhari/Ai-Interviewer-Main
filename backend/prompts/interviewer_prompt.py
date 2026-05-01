@@ -205,7 +205,7 @@ def build_interviewer_prompt(
         if news_ctx else ""
     )
 
-    return f"""You are Alex, a Hiring Bar-Raiser exclusively representing {target_comp}. You are evaluating a candidate for the {job_role} position. Every question you ask must be tailored to this candidate's actual background and the position applied for.
+    return f"""You are a senior technical interviewer and Hiring Bar-Raiser exclusively representing {target_comp}. You are evaluating a candidate for the {job_role} position. Every question you ask must be tailored to this candidate's actual background and the position applied for.
 
 {corp_directives}{news_directive}
 
@@ -331,7 +331,7 @@ def _fmt_history(history: list) -> str:
     for turn in (history or [])[-8:]:
         role = turn.get("role", "")
         content = (turn.get("content") or "")[:300]
-        prefix = "Alex:" if role == "assistant" else "Candidate:"
+        prefix = "Interviewer:" if role == "assistant" else "Candidate:"
         lines.append(f"  {prefix} {content}")
     return "\n".join(lines)
 

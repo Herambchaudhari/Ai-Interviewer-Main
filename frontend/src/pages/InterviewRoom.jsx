@@ -32,7 +32,7 @@ import { getReportRoute } from '../lib/routes'
 
 import {
   Mic, MicOff, Send, SkipForward,
-  ChevronRight, Loader2, AlertCircle, Flag, Star, Maximize
+  ChevronRight, Loader2, AlertCircle, Flag, MessageSquare, Maximize
 } from 'lucide-react'
 
 const LIVE_FLAG_LABELS = {
@@ -780,32 +780,6 @@ export default function InterviewRoom() {
             />
           ) : (
             <>
-              {/* ── STAR method reminder (HR rounds only) ─────────────────── */}
-              {roundType === 'hr' && (
-                <div className="rounded-xl p-3 text-xs"
-                  style={{ background: 'rgba(236,72,153,0.07)', border: '1px solid rgba(236,72,153,0.22)' }}>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-pink-400 font-bold text-sm">★</span>
-                    <span className="font-semibold text-pink-300">STAR structure — use for every answer</span>
-                  </div>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {[
-                      { letter: 'S', label: 'Situation', hint: 'Set the scene' },
-                      { letter: 'T', label: 'Task', hint: 'Your responsibility' },
-                      { letter: 'A', label: 'Action', hint: 'What YOU did' },
-                      { letter: 'R', label: 'Result', hint: 'Outcome + metric' },
-                    ].map(({ letter, label, hint }) => (
-                      <div key={letter} className="text-center p-1.5 rounded-lg"
-                        style={{ background: 'rgba(255,255,255,0.04)' }}>
-                        <p className="font-bold text-pink-300">{letter}</p>
-                        <p className="text-white font-medium text-[10px]">{label}</p>
-                        <p className="text-muted text-[9px]">{hint}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <QuestionPanel
                 question={currentQ}
                 questionIndex={qIndex}
@@ -828,8 +802,8 @@ export default function InterviewRoom() {
             <div className="glass rounded-xl p-4 border"
               style={{ borderColor: 'rgba(124,58,237,0.3)', background: 'rgba(124,58,237,0.06)' }}>
               <div className="flex items-center gap-2 mb-2">
-                <Star size={13} className="text-purple-400" />
-                <span className="text-xs font-semibold text-purple-300 uppercase tracking-wider">Alex's Feedback</span>
+                <MessageSquare size={13} className="text-purple-400" />
+                <span className="text-xs font-semibold text-purple-300 uppercase tracking-wider">Interviewer Feedback</span>
                 {status === 'evaluating' && (
                   <span className="ml-auto inline-block w-1.5 h-4 bg-purple-400 animate-pulse rounded-sm" />
                 )}

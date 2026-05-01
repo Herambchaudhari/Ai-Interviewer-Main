@@ -161,18 +161,6 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
       </div>
 
       {/* ── Round-specific info blurb ──────────────────────────────────────── */}
-      {roundType === 'hr' && (
-        <div className="mb-5 p-3.5 rounded-xl text-sm"
-          style={{ background: 'rgba(236,72,153,0.08)', border: '1px solid rgba(236,72,153,0.25)' }}>
-          <p className="font-semibold text-pink-300 mb-1 flex items-center gap-1.5">
-            <span>✦</span> STAR Method Required
-          </p>
-          <p className="text-muted text-xs leading-relaxed">
-            Structure every answer as: <span className="text-white font-medium">Situation → Task → Action → Result</span>.
-            Describe a real experience — not what you "would" do. Specific examples with outcomes score highest.
-          </p>
-        </div>
-      )}
       {roundType === 'technical' && (
         <div className="mb-5 p-3.5 rounded-xl text-sm"
           style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.25)' }}>
