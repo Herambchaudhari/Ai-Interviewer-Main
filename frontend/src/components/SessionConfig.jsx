@@ -3,7 +3,7 @@
  * Props: { roundType, onStart, onBack }
  */
 import { useState, useEffect } from 'react'
-import { ChevronLeft, Zap, Clock, Loader2, Play, Sparkles, Building2, Briefcase, Repeat } from 'lucide-react'
+import { ChevronLeft, Zap, Clock, Loader2, Play, Sparkles, Building2, Briefcase, Repeat, ListChecks } from 'lucide-react'
 import { startSession } from '../lib/api'
 import { requestAppFullscreen } from '../lib/fullscreen'
 import { useNavigate } from 'react-router-dom'
@@ -77,10 +77,6 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
       toast.error('No resume found. Please upload your resume first.')
       return
     }
-    if (roundType === 'mcq_practice' && !targetCompany.trim()) {
-      toast.error('Enter a target company to start the MCQ practice round.')
-      return
-    }
     setStarting(true)
     try {
       await requestAppFullscreen()
@@ -111,6 +107,9 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
       if (targetCompany.trim()) payload.target_company = targetCompany.trim();
       if (jobRole.trim())       payload.job_role       = jobRole.trim();
       if (isFullLoop)           payload.is_full_loop   = true;
+      if (roundType === 'mcq_practice') {
+        payload.mcq_category = 'mixed'
+      }
 
       const res = await startSession(payload)
 
@@ -180,6 +179,19 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
           </p>
           <p className="text-muted text-xs leading-relaxed">
             You will get algorithmic problems to solve. Think out loud — explain your approach, complexity, and edge cases before writing code.
+          </p>
+        </div>
+      )}
+
+      {/* ── MCQ info blurb ──────────────────────────────────────────────── */}
+      {roundType === 'mcq_practice' && (
+        <div className="mb-5 p-3.5 rounded-xl text-sm"
+          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
+          <p className="font-semibold text-amber-300 mb-1 flex items-center gap-1.5">
+            <ListChecks size={14} /> Standardised Question Bank
+          </p>
+          <p className="text-muted text-xs leading-relaxed">
+            Questions are drawn from our curated bank across DSA, OOPs, DBMS, OS, and Computer Networks — balanced for your experience level.
           </p>
         </div>
       )}
@@ -335,7 +347,7 @@ export default function SessionConfig({ roundType, onStart, onBack }) {
           `${roundType === 'mcq_practice'
             ? Math.min(20, Math.max(5, Math.floor(timerMins / 2)))
             : Math.min(18, Math.max(4, Math.round(timerMins / 3))) } Qs`,
-        ].map(label => (
+        ].filter(Boolean).map(label => (
           <span key={label} className="badge-purple text-xs">{label}</span>
         ))}
       </div>

@@ -33,6 +33,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
   BarChart, Bar, LineChart, Line,
+  ScatterChart, Scatter, ZAxis, ReferenceLine,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
 import { getReportWithSSE, getCachedReportOnly, generateShareLink, getUserChecklists, toggleChecklistItem, retrySaveReport, retryStages } from '../lib/api'
@@ -45,6 +46,7 @@ import {
   Target, Zap, Brain, ArrowUp, ArrowDown, Minus, Shield,
   MessageSquare, BarChart2, Clock, Flame, Eye,
   Share2, Download, Play, Pause, Volume2, X, Copy, Check, Users,
+  Activity, Layers, Timer,
 } from 'lucide-react'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -495,6 +497,38 @@ function ReportLoading({ stage, progress, label, isFirstGeneration }) {
 }
 
 // ── Custom Tooltips ───────────────────────────────────────────────────────────
+
+// Theme-aware tooltip — uses CSS variables so it auto-adapts to light/dark mode.
+// Used by MCQ charts where the legacy dark-only contentStyle was unreadable on light.
+function ThemeTooltip({ active, payload, label, valueFormatter, labelFormatter }) {
+  if (!active || !payload?.length) return null
+  const formattedLabel = labelFormatter ? labelFormatter(label, payload) : label
+  return (
+    <div style={{
+      background: 'var(--color-surface)',
+      border: '1px solid var(--color-border)',
+      borderRadius: 8,
+      padding: '8px 12px',
+      boxShadow: 'var(--shadow-md)',
+      fontSize: 12,
+      color: 'var(--color-text)',
+    }}>
+      {formattedLabel != null && formattedLabel !== '' && (
+        <p style={{ fontWeight: 600, marginBottom: 4, color: 'var(--color-text)' }}>{formattedLabel}</p>
+      )}
+      {payload.map((p, i) => {
+        const formatted = valueFormatter ? valueFormatter(p.value, p.name, p.payload) : [`${p.value}`, p.name]
+        const [val, name] = Array.isArray(formatted) ? formatted : [formatted, p.name]
+        return (
+          <p key={i} style={{ margin: 0, color: 'var(--color-muted)' }}>
+            {name && <span>{name}: </span>}
+            <span style={{ color: 'var(--color-text)', fontWeight: 600 }}>{val}</span>
+          </p>
+        )
+      })}
+    </div>
+  )
+}
 
 function QTooltip({ active, payload }) {
   if (!active || !payload?.length) return null
@@ -1069,6 +1103,611 @@ export default function ReportPage() {
           </div>
         </div>
 
+        {/* ══════════════════════════════════════════════════════════════════
+            MCQ PRACTICE — In-depth analytics (mcq_practice only)
+           ══════════════════════════════════════════════════════════════════ */}
+        {round_type === 'mcq_practice' && (() => {
+          // question_scores has raw MCQ fields (is_correct, selected_option, etc.)
+          const mcqAnswers  = (question_scores?.length ? question_scores : per_question_analysis) || []
+          const totalQ      = mcqAnswers.length || num_questions
+          const correctQ    = mcqAnswers.filter(q => q.is_correct === true).length
+          const incorrectQ  = mcqAnswers.filter(q => q.is_correct === false && !q.skipped).length
+          const skippedQ    = mcqAnswers.filter(q => q.skipped).length
+          const accuracyPct = totalQ > 0 ? Math.round((correctQ / totalQ) * 100) : 0
+
+          // Time analysis (only entries with time data)
+          const timedQ    = mcqAnswers.filter(q => (q.time_taken_seconds ?? 0) > 0)
+          const avgTime   = timedQ.length > 0
+            ? Math.round(timedQ.reduce((s, q) => s + (q.time_taken_seconds || 0), 0) / timedQ.length)
+            : null
+          const quickCount = timedQ.filter(q => q.time_taken_seconds < 15).length
+          const slowCount  = timedQ.filter(q => q.time_taken_seconds > 90).length
+
+          // Difficulty breakdown
+          const diffBuckets = {
+            easy:   { label: 'Easy',   color: '#4ade80', bg: 'rgba(74,222,128,0.09)',   border: 'rgba(74,222,128,0.25)',   c: 0, t: 0 },
+            medium: { label: 'Medium', color: '#facc15', bg: 'rgba(250,204,21,0.09)',   border: 'rgba(250,204,21,0.25)',   c: 0, t: 0 },
+            hard:   { label: 'Hard',   color: '#f87171', bg: 'rgba(248,113,113,0.09)',  border: 'rgba(248,113,113,0.25)',  c: 0, t: 0 },
+          }
+          mcqAnswers.forEach(q => {
+            const d = (q.difficulty || '').toLowerCase()
+            if (diffBuckets[d]) {
+              diffBuckets[d].t++
+              if (q.is_correct) diffBuckets[d].c++
+            }
+          })
+          const hasDiffData = Object.values(diffBuckets).some(b => b.t > 0)
+
+          // Topic accuracy (prefer category_breakdown from backend, else build from answers)
+          const topicMap = {}
+          mcqAnswers.forEach(q => {
+            const t = q.topic || q.category || 'General'
+            if (!topicMap[t]) topicMap[t] = { correct: 0, total: 0 }
+            topicMap[t].total++
+            if (q.is_correct) topicMap[t].correct++
+          })
+          const topicData    = mcqCategoryData.length > 0
+            ? mcqCategoryData
+            : Object.entries(topicMap).map(([t, v]) => ({
+                category: t,
+                accuracy: v.total > 0 ? Math.round((v.correct / v.total) * 100) : 0,
+                correct: v.correct, total: v.total,
+              }))
+          const sortedTopics = [...topicData].sort((a, b) => b.total - a.total)
+          const weakTopics   = sortedTopics.filter(t => t.accuracy < 60)
+          const strongTopics = sortedTopics.filter(t => t.accuracy >= 80)
+
+          // Option label helper
+          const optLabel = idx => (idx != null && idx >= 0 && idx < 26)
+            ? String.fromCharCode(65 + idx) : '?'
+          const timeBadgeColor = secs =>
+            secs < 15 ? '#f87171' : secs > 90 ? '#f59e0b' : '#94a3b8'
+
+          return (
+            <>
+              {/* ── 1: Performance Summary Grid ─────────────────────────────── */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  {
+                    label: 'Accuracy',
+                    val: `${accuracyPct}%`,
+                    sub: accuracyPct >= 80 ? 'Excellent' : accuracyPct >= 60 ? 'Good' : accuracyPct >= 40 ? 'Needs Work' : 'Poor',
+                    color: accuracyPct >= 80 ? '#4ade80' : accuracyPct >= 60 ? '#facc15' : accuracyPct >= 40 ? '#fb923c' : '#f87171',
+                    icon: <Target size={14} />,
+                  },
+                  {
+                    label: 'Score',
+                    val: `${correctQ}/${totalQ}`,
+                    sub: `${incorrectQ} wrong · ${skippedQ} skip`,
+                    color: '#4ade80',
+                    icon: <CheckCircle size={14} />,
+                  },
+                  {
+                    label: 'Avg Time / Q',
+                    val: avgTime != null ? `${avgTime}s` : '—',
+                    sub: avgTime != null ? (avgTime < 30 ? 'Fast pace' : avgTime > 75 ? 'Careful' : 'Normal pace') : 'No data',
+                    color: avgTime != null ? (avgTime < 30 ? '#4ade80' : avgTime > 75 ? '#f59e0b' : '#94a3b8') : '#4b5563',
+                    icon: <Timer size={14} />,
+                  },
+                  {
+                    label: 'Grade',
+                    val: grade || (accuracyPct >= 90 ? 'A+' : accuracyPct >= 80 ? 'A' : accuracyPct >= 70 ? 'B+' : accuracyPct >= 60 ? 'B' : accuracyPct >= 50 ? 'C' : 'D'),
+                    sub: hire_recommendation || (accuracyPct >= 70 ? 'Hire' : 'Needs Prep'),
+                    color: accuracyPct >= 80 ? '#4ade80' : accuracyPct >= 60 ? '#facc15' : '#f87171',
+                    icon: <Trophy size={14} />,
+                  },
+                ].map(({ label, val, sub, color, icon }) => (
+                  <div key={label} className="glass p-4 rounded-2xl flex flex-col gap-1.5"
+                    style={{ border: '1px solid var(--color-border)' }}>
+                    <div className="flex items-center gap-1.5 mb-0.5" style={{ color: '#6b7280' }}>
+                      {icon}
+                      <span className="text-[10px] font-semibold uppercase tracking-wide">{label}</span>
+                    </div>
+                    <p className="text-2xl font-bold tabular-nums" style={{ color }}>{val}</p>
+                    <p className="text-[10.5px]" style={{ color: '#6b7280' }}>{sub}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── 2: Difficulty Breakdown ──────────────────────────────────── */}
+              {hasDiffData && (
+                <SectionCard icon={<Layers size={16}/>} title="Performance by Difficulty" color="#6366f1">
+                  <p className="text-xs text-muted mb-4">How you performed across each difficulty tier.</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    {Object.entries(diffBuckets).map(([key, d]) => {
+                      if (d.t === 0) return null
+                      const acc = Math.round((d.c / d.t) * 100)
+                      return (
+                        <div key={key} className="rounded-xl p-4 text-center flex flex-col gap-2"
+                          style={{ background: d.bg, border: `1px solid ${d.border}` }}>
+                          <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: d.color }}>{d.label}</p>
+                          <p className="text-2xl font-bold tabular-nums" style={{ color: d.color }}>{acc}%</p>
+                          <p className="text-[10.5px]" style={{ color: '#6b7280' }}>{d.c} / {d.t} correct</p>
+                          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                            <div className="h-full rounded-full transition-all duration-1000"
+                              style={{ width: `${acc}%`, background: d.color }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* ── 3: Topic Accuracy Breakdown ──────────────────────────────── */}
+              {sortedTopics.length > 0 && (
+                <SectionCard icon={<BarChart2 size={16}/>} title="Topic Accuracy Breakdown" color="#f59e0b">
+                  <p className="text-xs text-muted mb-4">
+                    Per-topic accuracy. Topics below 60% are your study focus areas.
+                  </p>
+                  <div className="space-y-3 mb-5">
+                    {sortedTopics.map(({ category: cat, accuracy, correct, total: tot }) => (
+                      <div key={cat}>
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="text-sm font-medium">{cat}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs" style={{ color: '#6b7280' }}>{correct}/{tot}</span>
+                            <span className="text-sm font-bold tabular-nums w-10 text-right" style={{
+                              color: accuracy >= 80 ? '#4ade80' : accuracy >= 60 ? '#facc15' : '#f87171',
+                            }}>{accuracy}%</span>
+                          </div>
+                        </div>
+                        <div className="relative h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                          {/* 60% threshold marker */}
+                          <div className="absolute top-0 bottom-0 w-px" style={{ left: '60%', background: 'rgba(255,255,255,0.2)' }} />
+                          <div className="h-full rounded-full transition-all duration-1000"
+                            style={{
+                              width: `${accuracy}%`,
+                              background: accuracy >= 80 ? 'linear-gradient(90deg,#4ade80,#22c55e)'
+                                : accuracy >= 60 ? 'linear-gradient(90deg,#facc15,#f59e0b)'
+                                : 'linear-gradient(90deg,#f59e0b,#f87171)',
+                            }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[9.5px] text-muted mb-3">The vertical line at 60% marks the passing threshold.</p>
+                  {/* Strong / Weak callout pills */}
+                  {(weakTopics.length > 0 || strongTopics.length > 0) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {strongTopics.length > 0 && (
+                        <div className="p-3 rounded-xl" style={{ background: 'rgba(74,222,128,0.07)', border: '1px solid rgba(74,222,128,0.22)' }}>
+                          <p className="text-xs font-semibold mb-1.5" style={{ color: '#4ade80' }}>✓ Strong Areas</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {strongTopics.map(t => (
+                              <span key={t.category} className="text-xs px-2 py-0.5 rounded-full"
+                                style={{ background: 'rgba(74,222,128,0.12)', color: '#86efac', border: '1px solid rgba(74,222,128,0.28)' }}>
+                                {t.category}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {weakTopics.length > 0 && (
+                        <div className="p-3 rounded-xl" style={{ background: 'rgba(248,113,113,0.07)', border: '1px solid rgba(248,113,113,0.22)' }}>
+                          <p className="text-xs font-semibold mb-1.5" style={{ color: '#f87171' }}>⚑ Focus Areas</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {weakTopics.map(t => (
+                              <span key={t.category} className="text-xs px-2 py-0.5 rounded-full"
+                                style={{ background: 'rgba(248,113,113,0.12)', color: '#fca5a5', border: '1px solid rgba(248,113,113,0.28)' }}>
+                                {t.category}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </SectionCard>
+              )}
+
+              {/* ── 4: Time Intelligence ─────────────────────────────────────── */}
+              {timedQ.length > 0 && (
+                <SectionCard icon={<Activity size={16}/>} title="Time Intelligence" color="#6366f1">
+                  <p className="text-xs text-muted mb-4">
+                    How long you spent per question. Very fast answers (&lt;15s) may indicate guessing; slow answers (&gt;90s) indicate uncertainty.
+                  </p>
+                  <div className="grid grid-cols-3 gap-3 mb-5">
+                    {[
+                      { label: 'Avg Time / Q', val: `${avgTime}s`, color: avgTime < 30 ? '#4ade80' : avgTime > 75 ? '#f59e0b' : '#94a3b8' },
+                      { label: 'Quick (<15s)', val: quickCount, color: quickCount > 0 ? '#f87171' : '#4ade80', note: quickCount > 0 ? 'Possible guesses' : 'None' },
+                      { label: 'Slow (>90s)', val: slowCount,  color: slowCount > 0 ? '#f59e0b' : '#4ade80',  note: slowCount > 0 ? 'Needed more time' : 'None' },
+                    ].map(({ label, val, color, note }) => (
+                      <div key={label} className="rounded-xl p-3 text-center"
+                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                        <p className="text-xl font-bold tabular-nums" style={{ color }}>{val}</p>
+                        <p className="text-[10px] font-semibold mt-0.5" style={{ color: '#6b7280' }}>{label}</p>
+                        {note && <p className="text-[9.5px] mt-0.5" style={{ color: '#4b5563' }}>{note}</p>}
+                      </div>
+                    ))}
+                  </div>
+                  {/* Per-question time bar chart */}
+                  <ResponsiveContainer width="100%" height={90}>
+                    <BarChart data={mcqAnswers.map((q, i) => ({
+                      q: `Q${i + 1}`, t: q.time_taken_seconds || 0,
+                      fill: (q.time_taken_seconds || 0) < 15 ? '#f87171' : (q.time_taken_seconds || 0) > 90 ? '#f59e0b' : '#6366f1',
+                    }))} barGap={1} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                      <XAxis dataKey="q" tick={{ fill: '#64748b', fontSize: 9 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        cursor={{ fill: 'rgba(99,102,241,0.08)' }}
+                        content={
+                          <ThemeTooltip
+                            valueFormatter={(v) => [`${v}s`, 'Time']}
+                          />
+                        }
+                      />
+                      <Bar dataKey="t" radius={[3, 3, 0, 0]} maxBarSize={18}>
+                        {mcqAnswers.map((q, i) => (
+                          <Cell key={i} fill={timeBadgeColor(q.time_taken_seconds || 0)} opacity={0.8} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </SectionCard>
+              )}
+
+              {/* ── 4b: Answer Sequence Heatmap ─────────────────────────────── */}
+              {mcqAnswers.length > 0 && (
+                <SectionCard icon={<Activity size={16}/>} title="Answer Sequence" color="#22d3ee">
+                  <p className="text-xs text-muted mb-3">
+                    Question order vs outcome — useful for spotting fatigue clusters or momentum shifts.
+                  </p>
+                  <div className="flex items-center gap-4 mb-3 text-[10.5px]" style={{ color: 'var(--color-muted)' }}>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded" style={{ background: '#4ade80' }} />Correct
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded" style={{ background: '#f87171' }} />Incorrect
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded" style={{ background: 'rgba(148,163,184,0.45)' }} />Skipped
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {mcqAnswers.map((q, i) => {
+                      const isSkip = q.skipped
+                      const bg = isSkip ? 'rgba(148,163,184,0.45)'
+                        : q.is_correct ? '#4ade80' : '#f87171'
+                      const tipBits = [
+                        `Q${i + 1}`,
+                        q.topic || q.category || 'General',
+                        `${q.time_taken_seconds || 0}s`,
+                        isSkip ? 'Skipped' : q.is_correct ? 'Correct' : 'Incorrect',
+                      ]
+                      return (
+                        <div key={i} title={tipBits.join(' · ')}
+                          className="rounded transition-transform hover:scale-110 cursor-default"
+                          style={{
+                            width: 24, height: 24, background: bg,
+                            fontSize: 10, color: '#fff', fontWeight: 700,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                          {i + 1}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {(() => {
+                    let bestRight = 0, bestWrong = 0, curR = 0, curW = 0
+                    mcqAnswers.forEach(q => {
+                      if (q.skipped) { curR = 0; curW = 0; return }
+                      if (q.is_correct) { curR++; curW = 0; bestRight = Math.max(bestRight, curR) }
+                      else              { curW++; curR = 0; bestWrong = Math.max(bestWrong, curW) }
+                    })
+                    return (
+                      <div className="grid grid-cols-2 gap-3 mt-4">
+                        <div className="rounded-xl p-3 text-center"
+                          style={{ background: 'rgba(74,222,128,0.10)', border: '1px solid rgba(74,222,128,0.25)' }}>
+                          <p className="text-xl font-bold tabular-nums" style={{ color: '#4ade80' }}>{bestRight}</p>
+                          <p className="text-[10px] font-semibold mt-0.5" style={{ color: 'var(--color-muted)' }}>Longest Hot Streak</p>
+                        </div>
+                        <div className="rounded-xl p-3 text-center"
+                          style={{ background: 'rgba(248,113,113,0.10)', border: '1px solid rgba(248,113,113,0.25)' }}>
+                          <p className="text-xl font-bold tabular-nums" style={{ color: '#f87171' }}>{bestWrong}</p>
+                          <p className="text-[10px] font-semibold mt-0.5" style={{ color: 'var(--color-muted)' }}>Longest Cold Streak</p>
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </SectionCard>
+              )}
+
+              {/* ── 4c: Time vs Accuracy Quadrant ────────────────────────────── */}
+              {timedQ.length >= 3 && (
+                <SectionCard icon={<Target size={16}/>} title="Time vs Accuracy Quadrant" color="#06b6d4">
+                  <p className="text-xs text-muted mb-4">
+                    Each dot is one question. The quadrants tell you <em>why</em> points were lost — not just where.
+                  </p>
+                  {(() => {
+                    const avgT = avgTime || 30
+                    const points = mcqAnswers
+                      .map((q, i) => ({ q: i + 1, raw: q }))
+                      .filter(({ raw }) => (raw.time_taken_seconds ?? 0) > 0 && !raw.skipped)
+                      .map(({ q, raw }) => ({
+                        q,
+                        time: raw.time_taken_seconds,
+                        // jitter binary correctness so overlapping dots are visible
+                        correct: (raw.is_correct ? 1 : 0) + (((q * 7) % 19) / 100 - 0.09),
+                        isCorrect: !!raw.is_correct,
+                        topic: raw.topic || raw.category || 'General',
+                      }))
+                    const correctPts   = points.filter(p => p.isCorrect)
+                    const incorrectPts = points.filter(p => !p.isCorrect)
+                    const counts = {
+                      qr: correctPts.filter(p => p.time <  avgT).length,
+                      sr: correctPts.filter(p => p.time >= avgT).length,
+                      rw: incorrectPts.filter(p => p.time <  avgT).length,
+                      sw: incorrectPts.filter(p => p.time >= avgT).length,
+                    }
+                    const Quad = ({ bg, label, count, color, hint }) => (
+                      <div className="rounded-xl p-3" style={{ background: bg, border: `1px solid ${color}40` }}>
+                        <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color }}>{label}</p>
+                        <p className="text-xl font-bold tabular-nums mt-0.5" style={{ color }}>{count}</p>
+                        <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-muted)' }}>{hint}</p>
+                      </div>
+                    )
+                    return (
+                      <>
+                        <ResponsiveContainer width="100%" height={230}>
+                          <ScatterChart margin={{ top: 10, right: 14, bottom: 28, left: 6 }}>
+                            <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
+                            <XAxis type="number" dataKey="time" name="Time"
+                              tick={{ fill: '#64748b', fontSize: 10 }}
+                              label={{ value: 'Time (sec) →', position: 'insideBottom', offset: -10, fill: '#64748b', fontSize: 10 }} />
+                            <YAxis type="number" dataKey="correct" domain={[-0.3, 1.3]}
+                              ticks={[0, 1]} tickFormatter={(v) => v === 1 ? 'Correct' : v === 0 ? 'Wrong' : ''}
+                              tick={{ fill: '#64748b', fontSize: 10 }} width={60} />
+                            <ZAxis range={[60, 60]} />
+                            <ReferenceLine x={avgT} stroke="#06b6d4" strokeDasharray="4 3" label={{ value: 'avg', fill: '#06b6d4', fontSize: 9, position: 'top' }} />
+                            <ReferenceLine y={0.5} stroke="var(--color-border)" strokeDasharray="4 3" />
+                            <Tooltip
+                              cursor={{ stroke: '#06b6d4', strokeDasharray: '3 3' }}
+                              content={
+                                <ThemeTooltip
+                                  valueFormatter={(_v, _n, p) => [
+                                    `Q${p.q} · ${p.topic} · ${p.time}s · ${p.isCorrect ? 'Correct' : 'Wrong'}`,
+                                    'Question',
+                                  ]}
+                                />
+                              }
+                            />
+                            <Scatter data={correctPts}   fill="#4ade80" />
+                            <Scatter data={incorrectPts} fill="#f87171" />
+                          </ScatterChart>
+                        </ResponsiveContainer>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-4">
+                          <Quad label="Quick & Right" count={counts.qr} color="#4ade80" bg="rgba(74,222,128,0.08)"  hint="Mastered" />
+                          <Quad label="Slow & Right"  count={counts.sr} color="#22d3ee" bg="rgba(34,211,238,0.08)"  hint="Knew, hesitated" />
+                          <Quad label="Rushed Wrong"  count={counts.rw} color="#fb923c" bg="rgba(251,146,60,0.08)"  hint="Carelessness" />
+                          <Quad label="Stuck Wrong"   count={counts.sw} color="#f87171" bg="rgba(248,113,113,0.08)" hint="Genuine gap" />
+                        </div>
+                        <p className="text-[11px] mt-3 italic" style={{ color: 'var(--color-muted)' }}>
+                          Vertical dashed line marks your average time. Reduce <em>Rushed Wrong</em> by slowing down; tackle <em>Stuck Wrong</em> with focused study.
+                        </p>
+                      </>
+                    )
+                  })()}
+                </SectionCard>
+              )}
+
+              {/* ── 4d: Difficulty Performance Curve ─────────────────────────── */}
+              {hasDiffData && (
+                <SectionCard icon={<TrendingUp size={16}/>} title="Difficulty Performance Curve" color="#f59e0b">
+                  <p className="text-xs text-muted mb-4">
+                    How accuracy holds up as questions get harder — reveals your true skill ceiling.
+                  </p>
+                  {(() => {
+                    const curve = ['easy', 'medium', 'hard']
+                      .filter(d => diffBuckets[d].t > 0)
+                      .map(d => ({
+                        difficulty: diffBuckets[d].label,
+                        accuracy: Math.round((diffBuckets[d].c / diffBuckets[d].t) * 100),
+                        correct: diffBuckets[d].c,
+                        count: diffBuckets[d].t,
+                      }))
+                    const drop = curve.length >= 2 ? curve[0].accuracy - curve[curve.length - 1].accuracy : 0
+                    const verdict = drop <= 15 ? { txt: 'Steady — you handle harder questions well.', c: '#4ade80' }
+                      : drop <= 35           ? { txt: 'Moderate drop — strengthen advanced concepts.', c: '#f59e0b' }
+                      :                        { txt: 'Sharp drop — fundamentals need more depth.', c: '#f87171' }
+                    return (
+                      <>
+                        <ResponsiveContainer width="100%" height={210}>
+                          <LineChart data={curve} margin={{ top: 12, right: 20, bottom: 5, left: -10 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                            <XAxis dataKey="difficulty" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                            <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`}
+                              tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
+                            <Tooltip
+                              cursor={{ stroke: '#f59e0b', strokeDasharray: '3 3' }}
+                              content={
+                                <ThemeTooltip
+                                  valueFormatter={(_v, _n, p) => [`${p.accuracy}%  (${p.correct}/${p.count})`, 'Accuracy']}
+                                />
+                              }
+                            />
+                            <Line type="monotone" dataKey="accuracy" stroke="#f59e0b" strokeWidth={3}
+                              dot={{ r: 6, fill: '#f59e0b', stroke: 'var(--color-surface)', strokeWidth: 2 }}
+                              activeDot={{ r: 8 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                        <div className="mt-3 p-3 rounded-xl flex items-start gap-2.5"
+                          style={{ background: `${verdict.c}14`, border: `1px solid ${verdict.c}40` }}>
+                          <Activity size={13} style={{ color: verdict.c }} className="flex-shrink-0 mt-0.5" />
+                          <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
+                            <span className="font-semibold" style={{ color: verdict.c }}>
+                              {drop > 0 ? `${drop}-point drop` : 'No drop'}.
+                            </span>{' '}
+                            {verdict.txt}
+                          </p>
+                        </div>
+                      </>
+                    )
+                  })()}
+                </SectionCard>
+              )}
+
+              {/* ── 5: Study Recommendations (LLM-generated) ────────────────── */}
+              {study_recommendations?.length > 0 && (
+                <SectionCard icon={<Brain size={16}/>} title="AI Study Recommendations" color="#8b5cf6">
+                  <p className="text-xs text-muted mb-4">
+                    Personalized study plan based on your MCQ performance, generated by AI.
+                  </p>
+                  <div className="space-y-3">
+                    {study_recommendations.slice(0, 8).map((rec, i) => {
+                      const topic    = typeof rec === 'string' ? rec : (rec.topic || rec.area || rec.skill || `Topic ${i + 1}`)
+                      const reason   = typeof rec === 'object' ? (rec.reason || rec.description || '') : ''
+                      const priority = typeof rec === 'object' ? (rec.priority || 'medium') : 'medium'
+                      const priColor = priority === 'high' ? '#f87171' : priority === 'low' ? '#4ade80' : '#facc15'
+                      const priBg    = priority === 'high' ? 'rgba(248,113,113,0.10)' : priority === 'low' ? 'rgba(74,222,128,0.10)' : 'rgba(250,204,21,0.10)'
+                      return (
+                        <div key={i} className="flex items-start gap-3 p-3 rounded-xl"
+                          style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5"
+                            style={{ background: priBg, color: priColor, border: `1px solid ${priColor}40` }}>
+                            {priority.toUpperCase()}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold leading-snug">{topic}</p>
+                            {reason && <p className="text-xs text-muted mt-0.5 leading-relaxed">{reason}</p>}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {/* Not-ready topics */}
+                  {not_ready_topics?.length > 0 && (
+                    <div className="mt-4 p-3 rounded-xl" style={{ background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)' }}>
+                      <p className="text-xs font-semibold mb-2" style={{ color: '#f87171' }}>Not Interview-Ready</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {not_ready_topics.slice(0, 10).map((t, i) => (
+                          <span key={i} className="text-xs px-2 py-0.5 rounded-full"
+                            style={{ background: 'rgba(248,113,113,0.12)', color: '#fca5a5', border: '1px solid rgba(248,113,113,0.28)' }}>
+                            {typeof t === 'string' ? t : t.topic || t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </SectionCard>
+              )}
+
+              {/* ── 6: Per-Question Deep Review ──────────────────────────────── */}
+              {mcqAnswers.length > 0 && (
+                <SectionCard icon={<BookOpen size={16}/>} title="Question-by-Question Review" color="#f59e0b">
+                  <p className="text-xs text-muted mb-4">
+                    Expand any question to see the correct answer, your selection, and the explanation.
+                  </p>
+                  <div className="space-y-2">
+                    {mcqAnswers.map((q, i) => {
+                      const correct  = q.is_correct === true
+                      const skipped  = q.skipped === true
+                      const wrong    = !correct && !skipped
+                      const timeSecs = q.time_taken_seconds ?? 0
+                      const diff     = (q.difficulty || '').toLowerCase()
+                      const diffClr  = diff === 'easy' ? '#86efac' : diff === 'hard' ? '#fca5a5' : '#fde68a'
+                      const selIdx   = q.selected_option_index ?? -1
+                      const corIdx   = q.correct_option_index  ?? -1
+
+                      return (
+                        <details key={i}
+                          className="rounded-xl border overflow-hidden"
+                          style={{
+                            borderColor: correct ? 'rgba(74,222,128,0.28)' : skipped ? 'rgba(245,158,11,0.28)' : 'rgba(248,113,113,0.28)',
+                            background:  correct ? 'rgba(74,222,128,0.04)' : skipped ? 'rgba(245,158,11,0.04)' : 'rgba(248,113,113,0.04)',
+                          }}
+                        >
+                          {/* Summary row */}
+                          <summary className="flex items-center gap-3 px-4 py-3 cursor-pointer list-none select-none">
+                            {/* Q# badge */}
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
+                              style={{ background: 'rgba(255,255,255,0.07)' }}>
+                              {i + 1}
+                            </div>
+                            {/* Correctness icon */}
+                            {correct
+                              ? <CheckCircle size={14} style={{ color: '#4ade80', flexShrink: 0 }} />
+                              : skipped
+                                ? <AlertTriangle size={14} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                                : <XCircle size={14} style={{ color: '#f87171', flexShrink: 0 }} />}
+                            {/* Question text */}
+                            <p className="text-sm flex-1 leading-snug line-clamp-1 min-w-0">
+                              {q.question_text || q.question || `Question ${i + 1}`}
+                            </p>
+                            {/* Meta badges */}
+                            <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                              {diff && (
+                                <span className="text-[9.5px] font-semibold px-1.5 py-0.5 rounded"
+                                  style={{ background: `${diffClr}15`, color: diffClr, border: `1px solid ${diffClr}30` }}>
+                                  {diff.charAt(0).toUpperCase() + diff.slice(1)}
+                                </span>
+                              )}
+                              {timeSecs > 0 && (
+                                <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded flex items-center gap-0.5"
+                                  style={{ color: timeBadgeColor(timeSecs), background: `${timeBadgeColor(timeSecs)}12` }}>
+                                  {timeSecs}s
+                                </span>
+                              )}
+                              {q.topic && (
+                                <span className="text-[9.5px] px-1.5 py-0.5 rounded hidden sm:inline"
+                                  style={{ background: 'rgba(255,255,255,0.05)', color: '#6b7280' }}>
+                                  {q.topic}
+                                </span>
+                              )}
+                            </div>
+                          </summary>
+
+                          {/* Expanded detail */}
+                          <div className="px-4 pb-4 pt-3 space-y-2.5 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                            {/* Your answer */}
+                            <div className="flex items-start gap-2">
+                              <span className="text-[10px] font-semibold uppercase tracking-wide flex-shrink-0 w-20 mt-0.5"
+                                style={{ color: '#6b7280' }}>Your Answer</span>
+                              {skipped
+                                ? <span className="text-xs" style={{ color: '#f59e0b' }}>Skipped</span>
+                                : selIdx >= 0
+                                  ? <span className="text-xs font-semibold flex items-center gap-1.5"
+                                      style={{ color: correct ? '#4ade80' : '#f87171' }}>
+                                      <span className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                                        style={{ background: correct ? 'rgba(74,222,128,0.18)' : 'rgba(248,113,113,0.18)' }}>
+                                        {optLabel(selIdx)}
+                                      </span>
+                                      {q.selected_option || ''}
+                                    </span>
+                                  : <span className="text-xs" style={{ color: '#6b7280' }}>No option selected</span>}
+                            </div>
+                            {/* Correct answer (only if wrong) */}
+                            {wrong && corIdx >= 0 && (
+                              <div className="flex items-start gap-2">
+                                <span className="text-[10px] font-semibold uppercase tracking-wide flex-shrink-0 w-20 mt-0.5"
+                                  style={{ color: '#6b7280' }}>Correct</span>
+                                <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: '#4ade80' }}>
+                                  <span className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                                    style={{ background: 'rgba(74,222,128,0.18)' }}>
+                                    {optLabel(corIdx)}
+                                  </span>
+                                  {q.correct_option || ''}
+                                </span>
+                              </div>
+                            )}
+                            {/* Explanation */}
+                            {q.explanation && (
+                              <div className="flex items-start gap-2 pt-0.5">
+                                <Zap size={11} className="flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+                                <p className="text-xs leading-relaxed" style={{ color: '#9ca3af' }}>{q.explanation}</p>
+                              </div>
+                            )}
+                          </div>
+                        </details>
+                      )
+                    })}
+                  </div>
+                </SectionCard>
+              )}
+            </>
+          )
+        })()}
+        {/* ══ End MCQ sections ════════════════════════════════════════════════ */}
+
         {/* ── Failure Patterns ─────────────────────────────────────────────── */}
         {failure_patterns?.length > 0 && (
           <SectionCard icon={<AlertTriangle size={16}/>} title="What Went Wrong — Root Causes" color="#f87171">
@@ -1094,8 +1733,9 @@ export default function ReportPage() {
         )}
 
         {/* ── Two-Radar Grid: Technical Knowledge + Hire Signal ────────────── */}
+        {/* Hidden for MCQ — these radars assess verbal communication / hiring readiness */}
         <SectionErrorBoundary>
-        {(legacyRadarData.length > 0 || Object.keys(hire_signal || {}).length >= 3) && (
+        {round_type !== 'mcq_practice' && (legacyRadarData.length > 0 || Object.keys(hire_signal || {}).length >= 3) && (
           <div className={legacyRadarData.length > 0 && round_type !== 'hr' ? 'grid grid-cols-1 lg:grid-cols-2 gap-5' : ''}>
             {/* Technical Knowledge — hidden for HR rounds (not relevant to behavioral assessment) */}
             {legacyRadarData.length > 0 && round_type !== 'hr' && (() => {
@@ -1160,8 +1800,9 @@ export default function ReportPage() {
         </SectionErrorBoundary>
 
         {/* ── 6-Axis Communication Radar + Delivery Consistency ───────────── */}
+        {/* Hidden for MCQ — communication axes are derived from spoken answers */}
         <SectionErrorBoundary>
-        {failedSections.includes('communication_breakdown') && !stageRetrySuccess['stage3_communication'] ? (
+        {round_type === 'mcq_practice' ? null : failedSections.includes('communication_breakdown') && !stageRetrySuccess['stage3_communication'] ? (
           <SectionRetryCard
             sectionLabel="Communication Analysis"
             onRetry={() => handleRetryStage('stage3_communication')}
@@ -1239,7 +1880,7 @@ export default function ReportPage() {
                 <XAxis
                   type="number"
                   domain={[0, 100]}
-                  tick={{ fill: '#94a3b8', fontSize: 10 }}
+                  tick={{ fill: '#64748b', fontSize: 10 }}
                   axisLine={false}
                   tickLine={false}
                   tickFormatter={(v) => `${v}%`}
@@ -1248,17 +1889,20 @@ export default function ReportPage() {
                   type="category"
                   dataKey="category"
                   width={90}
-                  tick={{ fill: '#e2e8f0', fontSize: 11 }}
+                  tick={{ fill: '#475569', fontSize: 11 }}
                   axisLine={false}
                   tickLine={false}
                 />
                 <Tooltip
                   cursor={{ fill: 'rgba(245,158,11,0.08)' }}
-                  contentStyle={{ background: '#1e1e2e', border: '1px solid #f59e0b40', borderRadius: 8, fontSize: 12 }}
-                  formatter={(value, name, props) => [
-                    `${value}%  (${props.payload.correct}/${props.payload.total} correct)`,
-                    'Accuracy',
-                  ]}
+                  content={
+                    <ThemeTooltip
+                      valueFormatter={(value, _name, p) => [
+                        `${value}%  (${p.correct}/${p.total} correct)`,
+                        'Accuracy',
+                      ]}
+                    />
+                  }
                 />
                 <Bar dataKey="accuracy" radius={[0, 6, 6, 0]} maxBarSize={22}>
                   {mcqCategoryData.map((entry, i) => (
@@ -1294,8 +1938,9 @@ export default function ReportPage() {
         </SectionErrorBoundary>
 
         {/* ── Filler & Hesitation Heatmap ─────────────────────────────────── */}
+        {/* Hidden for MCQ — filler counts come from speech transcripts */}
         <SectionErrorBoundary>
-        {fillerData.length > 0 && (
+        {round_type !== 'mcq_practice' && fillerData.length > 0 && (
           <SectionCard icon={<BarChart2 size={16}/>} title="Filler Word Heatmap" color="#fb923c">
             <p className="text-xs text-muted mb-3">
               Higher bars = more filler words per question. Hover for details.
@@ -1315,7 +1960,9 @@ export default function ReportPage() {
         </SectionErrorBoundary>
 
         {/* ── Per-Question Scores Chart ────────────────────────────────────── */}
+        {/* Hidden for MCQ — the MCQ analytics block above already shows per-question time + correctness */}
         <SectionErrorBoundary>
+        {round_type !== 'mcq_practice' && (
           <SectionCard icon={<TrendingUp size={16}/>} title="Per-Question Scores" color="#4ade80">
             {qaData.length === 0
               ? <p className="text-muted text-sm text-center py-4">No question data available for this session.</p>
@@ -1333,6 +1980,7 @@ export default function ReportPage() {
               )
             }
           </SectionCard>
+        )}
         </SectionErrorBoundary>
 
         {/* ── Verbal Category Breakdown (technical/DSA only) ───────────────── */}
@@ -1723,8 +2371,12 @@ export default function ReportPage() {
                         <XAxis dataKey="axis" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
                         <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
                         <Tooltip
-                          contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12 }}
-                          formatter={(v, name) => [v, name === 'user_score' ? 'You' : 'Peer Avg']}
+                          cursor={{ fill: 'rgba(6,182,212,0.08)' }}
+                          content={
+                            <ThemeTooltip
+                              valueFormatter={(v, name) => [v, name === 'user_score' ? 'You' : 'Peer Avg']}
+                            />
+                          }
                         />
                         <Bar dataKey="user_score" name="you" fill="#06b6d4" radius={[3, 3, 0, 0]} />
                         <Bar dataKey="peer_avg"   name="peer_avg" fill="rgba(148,163,184,0.4)" radius={[3, 3, 0, 0]} />
@@ -1858,7 +2510,8 @@ export default function ReportPage() {
         )}
 
         {/* ── CV Audit ────────────────────────────────────────────────────── */}
-        {cv_audit?.items?.length > 0 && (
+        {/* Hidden for MCQ — CV claims aren't probed in a multiple-choice test */}
+        {round_type !== 'mcq_practice' && cv_audit?.items?.length > 0 && (
           <SectionCard icon={<Eye size={16}/>} title="CV Honesty Audit" color="#e879f9">
             <div className="flex items-center gap-4 mb-4">
               <ScoreRing score={cv_audit.overall_cv_honesty_score || 0} size={80} max={100} />
@@ -1951,7 +2604,8 @@ export default function ReportPage() {
         )}
 
         {/* ── Follow-Up Questions ─────────────────────────────────────────── */}
-        {follow_up_questions?.length > 0 && (
+        {/* Hidden for MCQ — interviewer follow-up framing doesn't fit a written test */}
+        {round_type !== 'mcq_practice' && follow_up_questions?.length > 0 && (
           <SectionCard icon={<MessageSquare size={16}/>} title="A Human Interviewer Would Now Ask…" color="#a78bfa">
             <div className="space-y-3">
               {follow_up_questions.map((q, i) => (
@@ -1986,8 +2640,9 @@ export default function ReportPage() {
         </SectionErrorBoundary>
 
         {/* ── Per-Question Deep Dive ───────────────────────────────────────── */}
+        {/* Hidden for MCQ — the MCQ analytics block above already shows option-level review */}
         <SectionErrorBoundary>
-        {(per_question_analysis?.length > 0 || question_scores?.length > 0) && (
+        {round_type !== 'mcq_practice' && (per_question_analysis?.length > 0 || question_scores?.length > 0) && (
           <div>
             <h2 className="font-bold mb-4 flex items-center gap-2">
               <ChevronRight size={16} className="text-purple-400" /> Question-by-Question Feedback
@@ -2220,7 +2875,8 @@ export default function ReportPage() {
         </SectionErrorBoundary>
 
         {/* ── Interview Integrity (proctoring) — shown at bottom ──────────── */}
-        {interview_integrity && (
+        {/* Hidden for MCQ — proctoring is disabled for written tests */}
+        {round_type !== 'mcq_practice' && interview_integrity && (
           <SectionCard icon={<Shield size={16}/>} title="Interview Integrity" color="#22d3ee">
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
               {[

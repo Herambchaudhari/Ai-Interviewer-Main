@@ -240,16 +240,31 @@ async def get_user_reports(
 
     try:
         db = init_supabase()
-        # Fetch sessions for this user, ordered by most recent
+        # Fetch sessions for this user, ordered by most recent.
+        # `session_label` and `questions` are pulled so we can defensively detect MCQ
+        # rounds whose round_type was mis-stored as 'technical' by older code paths.
         sessions_res = (
             db.table("sessions")
-            .select("id, round_type, difficulty, num_questions, status, created_at")
+            .select("id, round_type, difficulty, num_questions, status, created_at, session_label, questions")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
             .limit(20)
             .execute()
         )
         sessions = sessions_res.data or []
+
+        # ── Normalise round_type for legacy rows ────────────────────────────
+        # Some historical MCQ sessions were saved with round_type='technical'.
+        # Re-derive from session_label or the first question's type so the
+        # dashboard renders the correct round name.
+        for s in sessions:
+            label = (s.get("session_label") or "").lower()
+            qs    = s.get("questions") or []
+            first_type = (qs[0].get("type") if qs and isinstance(qs[0], dict) else "") or ""
+            if first_type == "mcq" or label.startswith("mcq"):
+                s["round_type"] = "mcq_practice"
+            # Drop the heavy `questions` blob from the response — only used for detection
+            s.pop("questions", None)
 
         # For each completed session, attach its overall_score from reports table
         if sessions:

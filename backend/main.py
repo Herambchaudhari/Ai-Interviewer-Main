@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
-from routers import resume, interview, transcribe, report, reports, session, context_hub, portfolio, news, progress, share, admin, tts
+from routers import resume, interview, transcribe, report, reports, session, context_hub, portfolio, news, progress, share, admin, tts, mcq
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ app.include_router(progress.router,  prefix=f"{API_PREFIX}/progress",  tags=["Pr
 app.include_router(share.router,     prefix=f"{API_PREFIX}/share",     tags=["Share"])
 app.include_router(admin.router,     prefix=f"{API_PREFIX}/admin",     tags=["Admin"])
 app.include_router(tts.router,       prefix=f"{API_PREFIX}/tts",       tags=["TTS"])
+app.include_router(mcq.router,       prefix=f"{API_PREFIX}/mcq",       tags=["MCQ"])
 
 
 # ── Startup: warm whisper model + backfill old sessions ───────────────────────

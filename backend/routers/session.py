@@ -187,6 +187,8 @@ class SessionStartRequest(BaseModel):
     job_role: Optional[str] = None
     is_full_loop: Optional[bool] = False
     target_interview_date: Optional[str] = None       # ISO date e.g. "2026-05-10"; feeds study schedule horizon
+    mcq_category: Optional[str] = None               # MCQ: 'dsa'|'core_cs'|'frontend'|'backend'|'ml'|'mixed'
+    mcq_topics:   Optional[list] = None              # MCQ: specific topics within category
 
 
 _DIFFICULTY_MAP = {
@@ -322,28 +324,61 @@ async def start_session(
     )
     context["session_label"] = session_label
 
-    # ── Generate only the first question — adaptive engine generates the rest ──
-    try:
-        first_q = await generate_first_question(
-            profile=context,
-            round_type=round_type,
+    # ── MCQ: fetch ALL questions from curated DB bank (no LLM) ──────────────────
+    if round_type == "mcq_practice":
+        from routers.mcq import fetch_mcq_questions_from_db
+        raw_qs = fetch_mcq_questions_from_db(
+            num_questions=body.num_questions,
             difficulty=difficulty,
+            category=body.mcq_category or "mixed",
+            topics=body.mcq_topics or None,
         )
-    except Exception as e:
-        err_str = str(e)
-        if "rate_limit_exceeded" in err_str or "429" in err_str:
-            return _err(
-                "AI service is temporarily rate-limited. Please wait a few minutes and try again.",
-                status=429,
-            )
-        return _err(f"Failed to generate first question: {err_str}", status=500)
+        if not raw_qs:
+            return _err("No MCQ questions found for the selected criteria. Try a different category.", status=404)
+        questions = []
+        for i, q in enumerate(raw_qs):
+            diff_q = q.get("difficulty", difficulty)
+            questions.append({
+                "id":                  str(uuid.uuid4()),
+                "mcq_bank_id":         str(q["id"]),  # FK to mcq_question_bank
+                "question_text":       q.get("question_text", ""),
+                "options":             q.get("options") or [],
+                "correct_option_index": q.get("correct_option_index"),
+                "explanation":         q.get("explanation", ""),
+                "topic":               q.get("topic", ""),
+                "category":            q.get("category", ""),
+                "difficulty":          diff_q,
+                "tags":                q.get("tags") or [],
+                "order_index":         i,
+                "type":                "mcq",
+                "time_limit_secs":     _resolve_question_time_limit("mcq_practice", diff_q),
+                "source_signal":       "database",
+            })
+        first_q = questions[0]
 
-    time_limit = _resolve_question_time_limit(round_type, difficulty)
-    first_q["id"]             = str(uuid.uuid4())
-    first_q["order_index"]    = 0
-    first_q["type"]           = _resolve_question_type(round_type)
-    first_q["time_limit_secs"] = time_limit
-    questions = [first_q]
+    # ── LLM path for all other round types ──────────────────────────────────────
+    else:
+        try:
+            first_q = await generate_first_question(
+                profile=context,
+                round_type=round_type,
+                difficulty=difficulty,
+            )
+        except Exception as e:
+            err_str = str(e)
+            if "rate_limit_exceeded" in err_str or "429" in err_str:
+                return _err(
+                    "AI service is temporarily rate-limited. Please wait a few minutes and try again.",
+                    status=429,
+                )
+            return _err(f"Failed to generate first question: {err_str}", status=500)
+
+        time_limit = _resolve_question_time_limit(round_type, difficulty)
+        first_q["id"]              = str(uuid.uuid4())
+        first_q["order_index"]     = 0
+        first_q["type"]            = _resolve_question_type(round_type)
+        first_q["time_limit_secs"] = time_limit
+        questions = [first_q]
 
     # ── Compute question quotas + initial ability vector ─────────────────────
     quotas  = _compute_question_quotas(body.num_questions, round_type)
@@ -391,15 +426,21 @@ async def start_session(
         data={
             "session_id":     session_id,
             "first_question": {
-                "id":              first_question.get("id"),
-                "text":            first_question.get("question_text", ""),
-                "type":            first_question.get("type", _resolve_question_type(round_type)),
-                "time_limit_secs": first_question.get("time_limit_secs", 180),
-                "category":        first_question.get("category", ""),
-                "options":         first_question.get("options", []),
-                "explanation":     first_question.get("explanation", ""),
+                "id":                   first_question.get("id"),
+                "text":                 first_question.get("question_text", ""),
+                "question_text":        first_question.get("question_text", ""),
+                "type":                 first_question.get("type", _resolve_question_type(round_type)),
+                "time_limit_secs":      first_question.get("time_limit_secs", 180),
+                "category":             first_question.get("category", ""),
+                "options":              first_question.get("options", []),
+                "correct_option_index": first_question.get("correct_option_index"),
+                "explanation":          first_question.get("explanation", ""),
+                "order_index":          0,
+                "difficulty":           first_question.get("difficulty", difficulty),
             },
-            "questions": questions,          # only first question — rest generated adaptively via /answer
+            # MCQ: return all questions so InterviewRoom can navigate them directly
+            # Other rounds: return only first question (adaptive engine generates the rest)
+            "questions":     questions,
             "timer_mins":    body.timer_mins,
             "round_type":    round_type,
             "difficulty":    difficulty,
@@ -646,6 +687,8 @@ async def submit_answer(
             "answer_summary":     evaluation.get("answer_summary", ""),
             "category":           q_topic,
             "topic":              q_topic,
+            "difficulty":         (current_q or {}).get("difficulty", ""),
+            "time_taken_secs":    body.time_taken_secs or 0,
             "is_follow_up":       evaluation.get("is_follow_up", False),
             # decision_reason from the adaptive engine — used by future calls to
             # _get_used_pillars and probing_known_weak dedup in adaptive_engine.py
@@ -682,6 +725,24 @@ async def submit_answer(
     except Exception as e:
         print(f"[submit_answer] persist failed: {e}")
         answered_count = q_index + 1
+
+    # ── MCQ: persist per-answer analytics to mcq_session_answers ─────────────
+    if is_mcq_round:
+        try:
+            from services.db_service import _db
+            mcq_bank_id = (current_q or {}).get("mcq_bank_id") or (current_q or {}).get("id")
+            _db().table("mcq_session_answers").insert({
+                "session_id":            body.session_id,
+                "question_id":           mcq_bank_id,
+                "topic":                 q_topic or "",
+                "category":              (current_q or {}).get("category", ""),
+                "difficulty":            (current_q or {}).get("difficulty", ""),
+                "selected_option_index": body.selected_option_index,
+                "is_correct":            evaluation.get("is_correct"),
+                "time_taken_seconds":    body.time_taken_secs,
+            }).execute()
+        except Exception as _mcq_err:
+            print(f"[submit_answer] mcq_session_answers insert failed: {_mcq_err}")
 
     # ── Check completion ───────────────────────────────────────────────────
     if body.is_last_question or answered_count >= num_questions:

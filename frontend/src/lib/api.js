@@ -74,6 +74,13 @@ export async function getSessionById(sessionId) {
   return data
 }
 
+// ── MCQ ───────────────────────────────────────────────────────────────────────
+/** GET /api/v1/mcq/topics — returns category → topic → {easy,medium,hard,total} counts */
+export async function getMCQTopics() {
+  const { data } = await api.get('/mcq/topics')
+  return data  // { success, data: { dsa: { label, topics: {...}, total }, … } }
+}
+
 // ── Interview (legacy) ─────────────────────────────────────────────────────
 export async function startInterview(payload) {
   const { data } = await api.post('/interview/start', payload)

@@ -52,7 +52,7 @@ User Auth (Supabase) → Resume/Context Upload → Interview Config
 
 **Entry point:** `main.py` registers all routers.
 
-**Routers** (`routers/`): `session.py` (interview lifecycle: start/answer/skip/end/checkpoint/resume), `report.py`/`reports.py`, `resume.py`, `context_hub.py`, `transcribe.py`, `interview.py`, `portfolio.py`, `news.py`, `progress.py`, `share.py`, `admin.py` (hardcoded-credential admin panel: login, all users/sessions/profiles, per-student detail; also exposes report backfill trigger + status endpoints)
+**Routers** (`routers/`): `session.py` (interview lifecycle: start/answer/skip/end/checkpoint/resume), `report.py`/`reports.py`, `resume.py`, `context_hub.py`, `transcribe.py`, `interview.py`, `portfolio.py`, `news.py`, `progress.py`, `share.py`, `mcq.py` (MCQ topic tree endpoint + `fetch_mcq_questions_from_db()` helper used by session.py), `tts.py`, `admin.py` (hardcoded-credential admin panel: login, all users/sessions/profiles, per-student detail; also exposes report backfill trigger + status endpoints)
 
 **Key Services** (`services/`):
 - `groq_service.py` — LLM inference with streaming (llama-3.3-70b-versatile), API key failover via `api_manager.py`
@@ -79,6 +79,8 @@ User Auth (Supabase) → Resume/Context Upload → Interview Config
 - `InterviewCamera.jsx` + `WebcamFeed.jsx` — MediaPipe-based proctoring (eye tracking, phone detection, posture)
 - `InterviewIntegrityPanel.jsx` — Proctoring warning display
 - `DSAQuestionPanel.jsx` + `DSACodeEditor.jsx` + `CodeEditor.jsx` (Monaco) — Coding interview UI
+- `MCQTestInterface.jsx` — Full-screen professional MCQ test UI (3-panel: header + sidebar navigator + main content + bottom bar); replaces MCQ path in InterviewRoom via early return; no answer reveal during test
+- `MCQQuestionPanel.jsx` — Legacy MCQ component (superseded by MCQTestInterface)
 - Chart components: `RadarChart.jsx`, `HireSignalRadar.jsx`, `AreaTimeline.jsx`, `ScoreBarChart.jsx`, `CVHonestyGauge.jsx`
 
 **Custom Hooks** (`hooks/`):

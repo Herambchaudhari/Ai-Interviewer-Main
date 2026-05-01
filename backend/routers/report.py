@@ -638,7 +638,7 @@ async def _generate_report_sse(session_id: str, user_id: str):
             if correct:
                 answer_text += f" | Correct: {correct}"
         raw_score = entry.get("score")
-        question_scores.append({
+        qs_entry = {
             "question_id":        entry.get("question_id", ""),
             "question_text":      entry.get("question", ""),
             "answer_text":        answer_text,
@@ -651,9 +651,21 @@ async def _generate_report_sse(session_id: str, user_id: str):
             "key_concept_missed": entry.get("key_concept_missed", ""),
             "answer_summary":     entry.get("answer_summary", ""),
             "category":           entry.get("category", round_type),
+            "topic":              entry.get("topic", entry.get("category", round_type)),
             "red_flag_detected":  entry.get("red_flag_detected", ""),
             "question_type":      entry.get("question_type", "speech"),
-        })
+        }
+        # MCQ-specific fields — surface raw answer data for per-question report UI
+        if entry.get("question_type") == "mcq":
+            qs_entry["is_correct"]             = entry.get("is_correct")
+            qs_entry["selected_option"]        = entry.get("selected_option") or ""
+            qs_entry["selected_option_index"]  = entry.get("selected_option_index")
+            qs_entry["correct_option"]         = entry.get("correct_option") or ""
+            qs_entry["correct_option_index"]   = entry.get("correct_option_index")
+            qs_entry["explanation"]            = entry.get("explanation") or ""
+            qs_entry["time_taken_seconds"]     = entry.get("time_taken_secs") or entry.get("time_taken_seconds") or 0
+            qs_entry["difficulty"]             = entry.get("difficulty") or ""
+        question_scores.append(qs_entry)
 
     # Only average questions that were answered and evaluated (score is a real number)
     scored = [q["score"] for q in question_scores
