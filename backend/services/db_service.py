@@ -352,6 +352,26 @@ _REPORT_MIGRATION_007_COLUMNS = ("checklist", "study_schedule", "peer_comparison
 # Columns added by migration 011
 _REPORT_MIGRATION_011_COLUMNS = ("report_quality", "failed_sections", "stage_errors")
 
+# Columns added by migrations 016 (HR Phase 1 core fields)
+_REPORT_MIGRATION_016_COLUMNS = (
+    "key_signals", "competency_scorecard", "hire_confidence",
+    "interview_datetime", "job_role",
+)
+
+# Columns added by migrations 017-023 (HR secondary fields)
+_REPORT_MIGRATION_017_COLUMNS = (
+    "culture_fit_dimensions", "eq_profile", "coachability_index",
+    "leadership_ic_fit", "reference_check_triggers", "assessment_confidence",
+)
+
+# Columns added by migrations 025-034 (HR Group A/B/C fields)
+_REPORT_MIGRATION_025_COLUMNS = (
+    "explicit_red_flags", "seniority_calibration", "answer_depth_progression",
+    "peer_benchmarking", "role_gap_analysis", "story_uniqueness",
+    "model_answer_comparison", "pipeline_followup_questions",
+    "hr_improvement_plan", "executive_brief",
+)
+
 
 def _report_flat_cols(report_data: dict, *column_sets) -> dict:
     """Return a dict of only the specified columns that exist in report_data."""
@@ -404,6 +424,21 @@ def _insert_report(session_id: str, report_id: str, created_at: str, report_data
         **_report_flat_cols(report_data, _REPORT_BASE_COLUMNS),
     }
 
+    # Tier 0: base + all migrations including HR columns (016/017/025)
+    try:
+        _db().table("reports").insert({
+            **base,
+            **_report_flat_cols(
+                report_data,
+                _REPORT_MIGRATION_001_COLUMNS, _REPORT_MIGRATION_007_COLUMNS,
+                _REPORT_MIGRATION_011_COLUMNS, _REPORT_MIGRATION_016_COLUMNS,
+                _REPORT_MIGRATION_017_COLUMNS, _REPORT_MIGRATION_025_COLUMNS,
+            ),
+        }).execute()
+        return
+    except Exception as e0:
+        print(f"[save_report] Tier-0 insert failed: {e0}")
+
     # Tier 1: base + migration 001 + migration 007 + migration 011 (all migrations applied)
     try:
         _db().table("reports").insert({
@@ -445,6 +480,21 @@ def _update_report(session_id: str, report_id: str, report_data: dict) -> None:
         "report_data": report_data,
         **_report_flat_cols(report_data, _REPORT_BASE_COLUMNS),
     }
+
+    # Tier 0: all columns including HR migrations 016/017/025
+    try:
+        _db().table("reports").update({
+            **base_update,
+            **_report_flat_cols(
+                report_data,
+                _REPORT_MIGRATION_001_COLUMNS, _REPORT_MIGRATION_007_COLUMNS,
+                _REPORT_MIGRATION_011_COLUMNS, _REPORT_MIGRATION_016_COLUMNS,
+                _REPORT_MIGRATION_017_COLUMNS, _REPORT_MIGRATION_025_COLUMNS,
+            ),
+        }).eq("id", report_id).execute()
+        return
+    except Exception as e0:
+        print(f"[save_report] Tier-0 update failed: {e0}")
 
     try:
         _db().table("reports").update({
