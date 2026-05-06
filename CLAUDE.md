@@ -72,6 +72,10 @@ User Auth (Supabase) → Resume/Context Upload → Interview Config
 
 **Pages** (`pages/`): `AuthPage.jsx` → `OnboardingPage.jsx`/`Upload.jsx` → `DashboardPage.jsx` → `InterviewPage.jsx` → `InterviewRoom.jsx` (main Q&A) or `CodingPage.jsx` (DSA) → `Report.jsx`/`ReportPage.jsx`
 
+**HR Report Enhancement (Groups A–D, `report_enhancement` branch):**
+- `ReportPage.jsx` — HR round shows 20+ additional sections across Groups A/B/C; `hrAudience` toggle (🎯 Candidate / 📋 Hiring Committee) gates which Group B/C sections are visible. Candidate view: Role Gap Analysis, Story Uniqueness, Model Answer Comparison, HR Improvement Plan, Pipeline Follow-Up Questions. Committee view: Peer Benchmarking, Executive Brief.
+- `SharedReportPage.jsx` — public share page updated with Group B/C parity: Executive Brief (verdict banner + evidence for/against), Peer Benchmarking (percentile + axis bars), Role Fit summary (readiness score), Pipeline Follow-Up Questions (top 3).
+
 **Admin Pages** (`pages/`): `AdminLoginPage.jsx` (`/admin`) → `AdminDashboardPage.jsx` (`/admin/dashboard`) — hardcoded-credential admin panel with three tabs (Registered Students, Assessment Activity, Resume Uploads) + student detail modal + search by name/email
 
 **Key Components** (`components/`):
