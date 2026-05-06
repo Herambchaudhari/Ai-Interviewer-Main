@@ -235,3 +235,16 @@ class ReportResponse(BaseModel):
     leadership_ic_fit: Optional[Dict[str, Any]] = None             # spectrum_position 1-10, label, recommended_track, evidence, reasoning
     reference_check_triggers: Optional[List[Dict[str, Any]]] = None  # [{topic, priority, suggested_question, reason}]
     assessment_confidence: Optional[Dict[str, Any]] = None         # score 0-100, label, limiting_factors, what_would_change_it
+    # HR Report Enhancement — Group A
+    explicit_red_flags: Optional[List[Dict[str, Any]]] = None      # [{type, severity, evidence_quote, signal_meaning, question_id}]
+    seniority_calibration: Optional[Dict[str, Any]] = None         # {level, rationale, evidence_signals[], confidence}
+    answer_depth_progression: Optional[Dict[str, Any]] = None      # {arc[], trend, peak_question, lowest_question, trend_rationale}
+    # HR Report Enhancement — Group B
+    peer_benchmarking: Optional[Dict[str, Any]] = None             # {overall_percentile, percentile_label, score_vs_avg, axis_percentiles{}, cohort_context}
+    role_gap_analysis: Optional[Dict[str, Any]] = None             # {target_role, target_level, expected_competencies[], readiness_score, readiness_label, summary}
+    story_uniqueness: Optional[Dict[str, Any]] = None              # {uniqueness_score, uniqueness_label, rehearsal_signals[], repeated_scenarios[], scenario_diversity_score, diversity_feedback, per_question_originality[]}
+    model_answer_comparison: Optional[List[Dict[str, Any]]] = None # [{question_id, what_was_missing[], model_answer_outline, improvement_instruction}]
+    # HR Report Enhancement — Group C
+    pipeline_followup_questions: Optional[List[Dict[str, Any]]] = None  # [{question, target_competency, purpose, difficulty, question_id_source}]
+    hr_improvement_plan: Optional[Dict[str, Any]] = None                # {priority_focus, overall_plan_label, weekly_sprints[], quick_wins[], curated_resources[]}
+    executive_brief: Optional[Dict[str, Any]] = None                    # {hire_verdict, verdict_color, one_liner, evidence_for[], evidence_against[], key_risk, recommended_action, committee_question}

@@ -115,6 +115,55 @@ _ROUND_AGENT_LABELS = {
 }
 
 
+def _compute_peer_benchmarking(
+    overall_score: float,
+    radar_scores: dict,
+    round_type: str,
+) -> dict:
+    """
+    Compute simulated peer benchmarking for HR rounds.
+    Uses a logistic-curve approximation: scores cluster around 60-70 in practice.
+    Returns percentile, per-axis percentile approximation, and cohort context.
+    """
+    import math
+
+    def _score_to_percentile(score: float) -> int:
+        # Logistic approximation: mean=65, std≈12
+        # P(X < score) approximated with sigmoid scaled to 0-100
+        z = (score - 65) / 12
+        pct = 1 / (1 + math.exp(-z * 1.7)) * 100
+        return max(1, min(99, round(pct)))
+
+    overall_pct = _score_to_percentile(overall_score)  # already 0-100
+
+    axis_percentiles: dict = {}
+    for axis, val in (radar_scores or {}).items():
+        axis_percentiles[axis] = _score_to_percentile(val)
+
+    # Determine label
+    if overall_pct >= 90:
+        label = "Top 10%"
+    elif overall_pct >= 75:
+        label = "Top 25%"
+    elif overall_pct >= 50:
+        label = "Top 50%"
+    elif overall_pct >= 25:
+        label = "Bottom 50%"
+    else:
+        label = "Bottom 25%"
+
+    # Score vs. average (avg overall is ~65, on 0-100 scale)
+    score_vs_avg = round(overall_score - 65, 1)
+
+    return {
+        "overall_percentile": overall_pct,
+        "percentile_label": label,
+        "score_vs_avg": score_vs_avg,
+        "axis_percentiles": axis_percentiles,
+        "cohort_context": f"Compared to candidates in {round_type.upper()} interview sessions at similar difficulty level",
+    }
+
+
 def _ok(data: dict, message: str = "Success") -> dict:
     return {"success": True, "data": data, "error": None, "message": message}
 
@@ -154,6 +203,12 @@ def _normalize_report_payload(payload: dict) -> dict:
         "culture_fit_dimensions",
         # HR Phase 3
         "reference_check_triggers",
+        # HR Report Enhancement — Group A
+        "explicit_red_flags",
+        # HR Report Enhancement — Group B
+        "model_answer_comparison",
+        # HR Report Enhancement — Group C
+        "pipeline_followup_questions",
     ]
     # ── Fields that must always be dicts ─────────────────────────────────────
     _DICT_FIELDS = [
@@ -164,6 +219,12 @@ def _normalize_report_payload(payload: dict) -> dict:
         "eq_profile",
         # HR Phase 3
         "coachability_index", "leadership_ic_fit", "assessment_confidence",
+        # HR Report Enhancement — Group A
+        "seniority_calibration", "answer_depth_progression",
+        # HR Report Enhancement — Group B
+        "peer_benchmarking", "role_gap_analysis", "story_uniqueness",
+        # HR Report Enhancement — Group C
+        "hr_improvement_plan", "executive_brief",
     ]
     # ── String fields that must not be null ──────────────────────────────────
     _STR_FIELDS = [
@@ -228,6 +289,58 @@ def _normalize_report_payload(payload: dict) -> dict:
         result["behavioral_red_flags"] = [
             {"flag": f, "severity": "Moderate", "evidence": ""} for f in brf
         ]
+
+    # ── Forward compat: star_story_matrix Q&A enrichment (Phase 0) ───────────
+    # Old entries lack question_text / answer_summary — default to "" so the
+    # frontend can render without crashing on undefined.
+    for entry in result.get("star_story_matrix") or []:
+        if isinstance(entry, dict):
+            entry.setdefault("question_text", "")
+            entry.setdefault("answer_summary", "")
+
+    # ── Forward compat: strong_areas HR enrichment (Phase 9) ─────────────────
+    # Old HR reports lack exact_moment / evidence_quote / why_it_landed.
+    for entry in result.get("strong_areas") or []:
+        if isinstance(entry, dict):
+            entry.setdefault("exact_moment", "")
+            entry.setdefault("evidence_quote", "")
+            entry.setdefault("why_it_landed", "")
+
+    # ── Forward compat: Group C fields ───────────────────────────────────────
+    for entry in result.get("pipeline_followup_questions") or []:
+        if isinstance(entry, dict):
+            entry.setdefault("target_competency", "")
+            entry.setdefault("purpose", "")
+            entry.setdefault("difficulty", "Medium")
+            entry.setdefault("question_id_source", "General")
+    plan = result.get("hr_improvement_plan") or {}
+    if isinstance(plan, dict):
+        for sprint in plan.get("weekly_sprints") or []:
+            if isinstance(sprint, dict):
+                sprint.setdefault("exercises", [])
+        plan.setdefault("quick_wins", [])
+        plan.setdefault("curated_resources", [])
+    brief = result.get("executive_brief") or {}
+    if isinstance(brief, dict):
+        brief.setdefault("evidence_for", [])
+        brief.setdefault("evidence_against", [])
+
+    # ── Forward compat: Group B fields ───────────────────────────────────────
+    for entry in result.get("model_answer_comparison") or []:
+        if isinstance(entry, dict):
+            entry.setdefault("what_was_missing", [])
+            entry.setdefault("model_answer_outline", "")
+            entry.setdefault("improvement_instruction", "")
+    for entry in (result.get("story_uniqueness") or {}).get("per_question_originality") or []:
+        if isinstance(entry, dict):
+            entry.setdefault("originality_score", 70)
+            entry.setdefault("rehearsal_flag", False)
+            entry.setdefault("signal", "")
+    for entry in (result.get("role_gap_analysis") or {}).get("expected_competencies") or []:
+        if isinstance(entry, dict):
+            entry.setdefault("gap", 0)
+            entry.setdefault("gap_severity", "Low")
+            entry.setdefault("gap_narrative", "")
 
     # ── Report quality metadata (migration 011) ───────────────────────────────
     # Ensures old cached reports (pre-fix) served from DB never crash the new
@@ -459,6 +572,131 @@ def _build_interview_integrity(proctoring_summary: dict | None) -> dict | None:
     }
 
 
+def _compute_answer_depth_progression(question_scores: list) -> dict:
+    """
+    Deterministic trend arc across the HR interview.
+    Returns {} when fewer than 2 scored answers exist (not enough data to show a trend).
+    """
+    scored = [
+        {"q": f"Q{i+1}", "score": round(q["score"] * 10), "skipped": False}
+        for i, q in enumerate(question_scores or [])
+        if q.get("score") is not None and not q.get("skipped")
+    ]
+    if len(scored) < 2:
+        return {}
+
+    scores = [s["score"] for s in scored]
+    mid = len(scores) // 2
+    first_half_avg  = sum(scores[:mid]) / mid if mid else scores[0]
+    second_half_avg = sum(scores[mid:]) / (len(scores) - mid) if (len(scores) - mid) else scores[-1]
+    delta = second_half_avg - first_half_avg
+
+    if delta > 8:
+        trend = "Improving"
+    elif delta < -8:
+        trend = "Declining"
+    elif max(scores) - min(scores) < 20:
+        trend = "Consistent"
+    else:
+        trend = "Inconsistent"
+
+    peak_idx = scores.index(max(scores))
+    low_idx  = scores.index(min(scores))
+
+    direction = "improved" if delta > 0 else "declined"
+    trend_rationale = (
+        f"Scores {direction} by {abs(round(delta))} points across the second half of the interview."
+        if abs(delta) > 2
+        else "Performance was consistent throughout the interview with no significant arc."
+    )
+
+    return {
+        "arc":            scored,
+        "trend":          trend,
+        "peak_question":  scored[peak_idx]["q"],
+        "lowest_question": scored[low_idx]["q"],
+        "trend_rationale": trend_rationale,
+    }
+
+
+def _compute_executive_brief(
+    hire_recommendation: str,
+    hire_confidence: str,
+    overall_score: float,
+    key_signals: list,
+    explicit_red_flags: list,
+    competency_scorecard: list,
+    reference_check_triggers: list,
+    summary: str,
+    job_role: str,
+) -> dict:
+    """
+    Deterministically compute a hiring-committee executive brief from already-generated fields.
+    No LLM call — derived entirely from Stage 1 output.
+    """
+    # Map hire_recommendation → executive verdict + color
+    _REC_MAP = {
+        "Strong Yes": ("Strong Hire",     "green"),
+        "Yes":        ("Conditional Yes", "green"),
+        "Maybe":      ("Conditional No",  "amber"),
+        "No":         ("No Hire",         "red"),
+    }
+    hire_verdict, verdict_color = _REC_MAP.get(hire_recommendation, ("Pending", "amber"))
+
+    # Confidence modulates verdict color (High confidence + Maybe → stronger red)
+    if hire_verdict == "Conditional No" and hire_confidence == "High":
+        verdict_color = "red"
+    if hire_verdict == "Conditional Yes" and hire_confidence == "Low":
+        verdict_color = "amber"
+
+    # Split key_signals into evidence_for / evidence_against
+    evidence_for    = [s for s in (key_signals or []) if s.get("valence") == "positive"]
+    evidence_against = [s for s in (key_signals or []) if s.get("valence") in ("negative", "mixed")]
+
+    # One-liner: first 2 sentences of summary (up to 200 chars)
+    sentences = [s.strip() for s in (summary or "").split(".") if s.strip()]
+    one_liner = ". ".join(sentences[:2]) + "." if sentences else "No summary available."
+    if len(one_liner) > 220:
+        one_liner = one_liner[:217] + "..."
+
+    # Key risk: highest-severity explicit red flag, or lowest-scoring competency
+    key_risk = ""
+    high_flags = [f for f in (explicit_red_flags or []) if f.get("severity") == "High"]
+    if high_flags:
+        f = high_flags[0]
+        key_risk = f.get("signal_meaning") or f.get("type", "High-severity flag detected")
+    elif competency_scorecard:
+        lowest = min(competency_scorecard, key=lambda x: x.get("rating_1_7", 7))
+        key_risk = f"{lowest.get('axis', 'Key competency')} scored {lowest.get('anchor_label', 'Below Bar')} — {lowest.get('rationale', '')}"
+
+    # Recommended action
+    _ACTION_MAP = {
+        "Strong Hire":     f"Advance to offer — confidence level is {hire_confidence.lower()}.",
+        "Conditional Yes": f"Advance with one additional {job_role or 'role-specific'} interview to confirm.",
+        "Conditional No":  "Hold — address key risk before advancing. One structured follow-up interview recommended.",
+        "No Hire":         "Do not advance — hire recommendation is No with supporting evidence.",
+    }
+    recommended_action = _ACTION_MAP.get(hire_verdict, "Consult hiring committee before advancing.")
+
+    # Committee question: from reference_check_triggers if available, else derive from key_risk
+    committee_question = ""
+    if reference_check_triggers:
+        committee_question = reference_check_triggers[0].get("suggested_question", "")
+    elif key_risk:
+        committee_question = f"How does the candidate handle situations where {key_risk[:80].lower()}?"
+
+    return {
+        "hire_verdict":       hire_verdict,
+        "verdict_color":      verdict_color,
+        "one_liner":          one_liner,
+        "evidence_for":       evidence_for[:3],
+        "evidence_against":   evidence_against[:2],
+        "key_risk":           key_risk,
+        "recommended_action": recommended_action,
+        "committee_question": committee_question,
+    }
+
+
 def _mock_report(session_id: str, round_type: str = "technical") -> dict:
     return {
         "session_id":    session_id,
@@ -479,7 +717,12 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
             "Answer Structure": 70, "Pacing": 72,
             "Relevance": 80, "Example Quality": 60,
         },
-        "strong_areas": [{"area": "Communication", "evidence": "Explained concepts clearly.", "score": 80}],
+        "strong_areas": [
+            {"area": "Communication", "evidence": "Explained concepts clearly.", "score": 80},
+        ] if round_type != "hr" else [
+            {"area": "Self-Awareness & Accountability", "evidence": "Owned mistake without deflection in Q3.", "score": 82, "exact_moment": "Q3", "evidence_quote": "I realised I had made an assumption without validating it with the client first.", "why_it_landed": "Signals genuine self-accountability — a rare quality that hiring committees weight heavily against coached candidates."},
+            {"area": "Leadership & Ownership", "evidence": "Set up war-room proactively in Q1.", "score": 76, "exact_moment": "Q1", "evidence_quote": "I took initiative and set up the war-room myself without being asked.", "why_it_landed": "Demonstrates proactive ownership at the team level, not just task-level execution."},
+        ],
         "weak_areas":   [{"area": "Screening accuracy", "what_was_missed": "Missed a few core fundamentals under time pressure", "how_to_improve": "Review explanations and practice timed company-style MCQs.", "score": 45}],
         "what_went_wrong": "Candidate lost points on accuracy and concept recall under screening-style time pressure.",
         "swot": {
@@ -521,9 +764,9 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
         "_debug_mock": True,
         # HR Phase 1 — populated only for hr rounds; empty fallbacks for others
         "star_story_matrix": [
-            {"question_id": "Q1", "competency_category": "Leadership", "situation_present": True, "task_present": True, "action_present": True, "result_present": False, "star_score": 7, "star_completeness_pct": 68, "missing_element": "Result", "specificity_level": "Medium", "best_verbatim_quote": "I took ownership and coordinated both teams to deliver on time."},
-            {"question_id": "Q2", "competency_category": "Conflict Resolution", "situation_present": True, "task_present": False, "action_present": True, "result_present": True, "star_score": 6, "star_completeness_pct": 56, "missing_element": "Task", "specificity_level": "Low", "best_verbatim_quote": "We resolved the issue by aligning on priorities."},
-            {"question_id": "Q3", "competency_category": "Failure & Learning", "situation_present": True, "task_present": True, "action_present": True, "result_present": True, "star_score": 8, "star_completeness_pct": 87, "missing_element": "None", "specificity_level": "High", "best_verbatim_quote": "I realised I had made an assumption without validating it with the client first, and I went back and rebuilt that piece."},
+            {"question_id": "Q1", "question_text": "Tell me about a time you took ownership of a project without being asked.", "answer_summary": "The candidate described coordinating two engineering teams during a production outage at their previous company. They set up a war-room, divided responsibilities, and tracked progress until the issue was resolved. They mentioned delivering on time but did not state the business impact of the resolution.", "competency_category": "Leadership", "situation_present": True, "task_present": True, "action_present": True, "result_present": False, "star_score": 7, "star_completeness_pct": 68, "missing_element": "Result", "specificity_level": "Medium", "best_verbatim_quote": "I took ownership and coordinated both teams to deliver on time."},
+            {"question_id": "Q2", "question_text": "Describe a situation where you had a conflict with a colleague and how you resolved it.", "answer_summary": "The candidate described a disagreement with a product manager over feature prioritization. They mentioned having a one-on-one conversation and eventually reaching an agreement, but did not specify what they personally argued for, what concessions were made, or what the outcome was for the product.", "competency_category": "Conflict Resolution", "situation_present": True, "task_present": False, "action_present": True, "result_present": True, "star_score": 6, "star_completeness_pct": 56, "missing_element": "Task", "specificity_level": "Low", "best_verbatim_quote": "We resolved the issue by aligning on priorities."},
+            {"question_id": "Q3", "question_text": "Tell me about a time you made a significant mistake and what you learned from it.", "answer_summary": "The candidate described launching a feature without validating assumptions with a key client stakeholder. When the client flagged the issue, they went back, rebuilt the affected component, and implemented a new pre-launch stakeholder review process. They acknowledged their initial assumption without deflecting blame.", "competency_category": "Failure & Learning", "situation_present": True, "task_present": True, "action_present": True, "result_present": True, "star_score": 8, "star_completeness_pct": 87, "missing_element": "None", "specificity_level": "High", "best_verbatim_quote": "I realised I had made an assumption without validating it with the client first, and I went back and rebuilt that piece."},
         ] if round_type == "hr" else [],
         "behavioral_category_coverage": [
             {"category": "Leadership & Ownership", "covered": True, "question_numbers": [1], "performance": "Adequate"},
@@ -612,6 +855,99 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
             ],
             "what_would_change_it": "A follow-up structured case interview focused specifically on conflict resolution and cross-functional stakeholder management would sharpen the hire recommendation significantly.",
         } if round_type == "hr" else {},
+        "explicit_red_flags": [
+            {"type": "Vague Ending", "severity": "Medium", "evidence_quote": "We resolved the issue by aligning on priorities.", "signal_meaning": "No quantified outcome or named resolution — candidate avoids committing to what actually changed.", "question_id": "Q2"},
+            {"type": "Hypothetical-as-Real", "severity": "High", "evidence_quote": "I think I would probably escalate it to my manager in that situation.", "signal_meaning": "Q5 answer was framed as hypothetical despite a real-experience prompt — suggests either inexperience or avoidance.", "question_id": "Q5"},
+        ] if round_type == "hr" else [],
+        "seniority_calibration": {
+            "level": "Mid-Level",
+            "rationale": "Behavioral stories in Q1 and Q3 show project-level ownership and initiative, but cross-functional influence is limited to one team. No evidence of mentoring, strategy-setting, or multi-stakeholder decisions across org boundaries.",
+            "evidence_signals": [
+                "Q1: Coordinated two teams during an outage — project-level, not org-level scope.",
+                "Q3: Identified and fixed a self-created problem — strong ownership but narrow blast radius.",
+            ],
+            "confidence": "Medium",
+        } if round_type == "hr" else {},
+        "answer_depth_progression": _compute_answer_depth_progression([
+            {"score": 7, "skipped": False},
+            {"score": 6, "skipped": False},
+            {"score": 8, "skipped": False},
+        ]) if round_type == "hr" else {},
+        # HR Report Enhancement — Group B
+        "peer_benchmarking": _compute_peer_benchmarking(72, {
+            "Communication Clarity": 72, "STAR Story Craft": 55,
+            "Self-Awareness & Accountability": 78, "Growth Mindset & Adaptability": 68,
+            "Leadership & Ownership": 76, "Collaboration & Stakeholder Fit": 52,
+            "Resilience Under Pressure": 65,
+        }, round_type) if round_type == "hr" else {},
+        "role_gap_analysis": {
+            "target_role": "Product Manager",
+            "target_level": "Mid-Level",
+            "expected_competencies": [
+                {"competency": "Communication Clarity", "expected_score": 70, "actual_score": 72, "gap": -2, "gap_severity": "Low", "gap_narrative": "Candidate exceeds the bar — answers are structured and jargon-free."},
+                {"competency": "STAR Story Craft", "expected_score": 70, "actual_score": 55, "gap": 15, "gap_severity": "Medium", "gap_narrative": "Moderate gap — results are absent or vague in most answers, which PMs at this level are expected to demonstrate clearly."},
+                {"competency": "Self-Awareness & Accountability", "expected_score": 65, "actual_score": 78, "gap": -13, "gap_severity": "Low", "gap_narrative": "Candidate exceeds expectation — genuine failure reflection was observed."},
+                {"competency": "Growth Mindset & Adaptability", "expected_score": 65, "actual_score": 68, "gap": -3, "gap_severity": "Low", "gap_narrative": "Candidate meets and slightly exceeds the expected adaptability bar for this level."},
+                {"competency": "Leadership & Ownership", "expected_score": 70, "actual_score": 76, "gap": -6, "gap_severity": "Low", "gap_narrative": "Ownership signals are clear; candidate exceeds the Mid-Level bar here."},
+                {"competency": "Collaboration & Stakeholder Fit", "expected_score": 72, "actual_score": 52, "gap": 20, "gap_severity": "High", "gap_narrative": "Critical gap — PMs at this level must articulate cross-functional influence; individual contribution was consistently unclear."},
+                {"competency": "Resilience Under Pressure", "expected_score": 65, "actual_score": 65, "gap": 0, "gap_severity": "Low", "gap_narrative": "Candidate meets the baseline expected at Mid-Level."},
+            ],
+            "readiness_score": 68,
+            "readiness_label": "Approaching Ready",
+            "summary": "Candidate is approaching readiness for a Mid-Level Product Manager role. The critical gap is Collaboration & Stakeholder Fit — a core PM competency where individual contribution language was weak across multiple answers. Strength in self-awareness and leadership ownership partially offsets this deficit.",
+        } if round_type == "hr" else {},
+        "story_uniqueness": {
+            "uniqueness_score": 62,
+            "uniqueness_label": "Mostly Original",
+            "rehearsal_signals": [
+                "Q1 had no natural hedges, corrections, or pauses — delivery was unusually polished for an impromptu answer.",
+                "Q3 produced an immediate, structured response without any thinking pauses — suggests this 'failure story' is a prepared set-piece.",
+            ],
+            "repeated_scenarios": [
+                "Production incident referenced in Q1 and indirectly echoed in Q4's 'high-pressure situation'.",
+            ],
+            "scenario_diversity_score": 58,
+            "diversity_feedback": "Two of the three main stories drew from the same category of experience (production incidents). Stronger answers would diversify across distinct contexts — e.g., a relationship conflict, a personal growth moment, and a cross-functional delivery challenge.",
+            "per_question_originality": [
+                {"question_id": "Q1", "originality_score": 55, "rehearsal_flag": True, "signal": "Immediate structured delivery with no hesitation — reads as a rehearsed 'leadership story' set-piece."},
+                {"question_id": "Q2", "originality_score": 72, "rehearsal_flag": False, "signal": "Answer contained natural course-corrections ('actually, let me back up') suggesting genuine recall."},
+                {"question_id": "Q3", "originality_score": 68, "rehearsal_flag": False, "signal": "Showed specificity and self-correction mid-answer — hallmarks of authentic recall rather than rehearsal."},
+            ],
+        } if round_type == "hr" else {},
+        "model_answer_comparison": [
+            {
+                "question_id": "Q1",
+                "candidate_score": 7,
+                "what_was_missing": [
+                    "Quantified business impact of the resolution (e.g., downtime reduced, revenue saved)",
+                    "Named stakeholders — who was affected, who approved the war-room setup",
+                    "Result: what happened after the incident was resolved (follow-up process change, recognition, etc.)",
+                ],
+                "model_answer_outline": "- Set the scene: team size, timeline, and what was at stake (SLA, revenue, customer impact)\n- Define the task: what was unclear or leaderless about the situation\n- Action: specific steps YOU took — not 'we'; name the decisions made\n- Result: quantified outcome (e.g., 'restored service in 40 minutes vs. 2-hour SLA') and a follow-up change\n- Reflection: what this experience revealed about your leadership style",
+                "improvement_instruction": "Practice ending the story with a number — even an approximate one ('roughly 30% faster than the previous incident'). Your setup and action were strong; the missing result makes the story feel unfinished to a hiring panel.",
+            },
+            {
+                "question_id": "Q2",
+                "candidate_score": 6,
+                "what_was_missing": [
+                    "Your specific argument or position — what did YOU want vs. what did the PM want",
+                    "How the disagreement was actually resolved — who conceded, what changed, why",
+                    "Individual contribution: 'we' used throughout without clarifying your personal role",
+                ],
+                "model_answer_outline": "- Situation: context of the relationship and why the conflict mattered\n- Task: your individual stake in the outcome — not just that a conflict existed\n- Action: the exact conversation or steps you personally took to address it\n- Resolution: who moved, what was agreed, what you each got\n- Learning: how this shaped your approach to cross-functional disagreements going forward",
+                "improvement_instruction": "Replace 'we resolved it' with 'I proposed X; the PM agreed to Y in exchange for Z' — give the hiring committee the specifics they need to assess your negotiation and influence skills.",
+            },
+            {
+                "question_id": "Q3",
+                "candidate_score": 8,
+                "what_was_missing": [
+                    "Stakeholder name or role — who was the client that flagged the issue",
+                    "Scale of impact — how many users/accounts were affected by the mistake",
+                ],
+                "model_answer_outline": "- Situation: what the project was and what assumption you made\n- Task: what you were responsible for delivering\n- Action: how you discovered and confirmed the mistake, what you rebuilt, and how quickly\n- Result: what changed (the rebuilt feature + the new stakeholder review process) — quantify if possible\n- Learning: what personal principle or practice changed permanently as a result",
+                "improvement_instruction": "This was your strongest answer. The only upgrade needed is adding one specific detail — the client's role or the scope of impact — to make the story feel concrete enough to share in a reference check.",
+            },
+        ] if round_type == "hr" else [],
         "radar_scores": {
             "Communication Clarity": 72, "STAR Story Craft": 55,
             "Self-Awareness & Accountability": 78, "Growth Mindset & Adaptability": 68,
@@ -622,6 +958,69 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
             "DBMS & SQL": 72, "OS & CN Concepts": 55,
             "Project Knowledge": 78, "Communication": 80,
         },
+        # HR Report Enhancement — Group C
+        "pipeline_followup_questions": [
+            {"question": "You mentioned 'we resolved the issue' in Q2 — walk me through exactly what you personally said or did to break the deadlock with the product manager.", "target_competency": "Collaboration & Stakeholder Fit", "purpose": "Probe individual contribution — candidate used collective 'we' language throughout the conflict story without specifying personal action.", "difficulty": "High", "question_id_source": "Q2"},
+            {"question": "In Q1 you set up the war-room — who gave you the authority to do that, and what would you have done if your manager had disagreed?", "target_competency": "Leadership & Ownership", "purpose": "Test whether the ownership story reflects genuine proactive authority or was implicitly sanctioned — key differentiator for senior vs mid-level placement.", "difficulty": "High", "question_id_source": "Q1"},
+            {"question": "You described rebuilding the feature in Q3 — what was the timeline, and how did you manage stakeholder expectations while the fix was in progress?", "target_competency": "STAR Story Craft", "purpose": "Surface the missing Result element — the resolution and its business impact were not stated.", "difficulty": "Medium", "question_id_source": "Q3"},
+            {"question": "Tell me about a time you had to influence a decision without formal authority — in a different context from the ones you've already shared.", "target_competency": "Collaboration & Stakeholder Fit", "purpose": "Cross-cutting — tests whether cross-functional influence is a consistent pattern or limited to the one example given.", "difficulty": "High", "question_id_source": "General"},
+        ] if round_type == "hr" else [],
+        "hr_improvement_plan": {
+            "priority_focus": "STAR Story Craft",
+            "overall_plan_label": "2-Week Intensive",
+            "weekly_sprints": [
+                {
+                    "week": 1,
+                    "theme": "Build Your Story Bank",
+                    "exercises": [
+                        {"exercise": "Rewrite all 3 stories with explicit Results", "duration_mins": 30, "frequency": "Daily", "how_to_practice": "Take each of your Q1, Q2, Q3 stories from today's interview. For each one, add one sentence at the end that states a number or outcome: 'As a result, [X happened] — [measurable impact].' If you don't know the exact number, use a range. Practice saying each revised ending aloud until it feels natural.", "target_competency": "STAR Story Craft"},
+                        {"exercise": "Replace 'we' with 'I' drill", "duration_mins": 15, "frequency": "Daily", "how_to_practice": "Record yourself re-answering Q2 (the conflict story). Listen back and count how many times you say 'we'. Rewrite the story replacing every 'we' with 'I [did X], then the team [did Y]' — separating your contribution from the group outcome. Your goal: zero unexplained 'we' in the action section.", "target_competency": "Collaboration & Stakeholder Fit"},
+                        {"exercise": "STAR timed answer drill", "duration_mins": 20, "frequency": "3x/week", "how_to_practice": "Set a 2-minute timer. Answer a behavioral question (e.g. 'Tell me about a conflict'). Stop at 2 minutes. Check: did you cover S, T, A, R? If any element is missing, re-answer with the missing element added. Repeat until all 4 elements appear within the 2-minute window.", "target_competency": "STAR Story Craft"},
+                    ],
+                },
+                {
+                    "week": 2,
+                    "theme": "Sharpen Under Pressure",
+                    "exercises": [
+                        {"exercise": "Mock interview with follow-up probing", "duration_mins": 45, "frequency": "3x/week", "how_to_practice": "Ask a friend or use an AI to give you a behavioral question, then immediately follow up with 'And what specifically did YOU do?' and 'What was the measurable outcome?' Practice answering these follow-ups smoothly — without starting over. These are the exact questions you'll face in a panel interview.", "target_competency": "STAR Story Craft"},
+                        {"exercise": "Scenario diversity audit", "duration_mins": 20, "frequency": "Weekly", "how_to_practice": "List your 5-6 prepared STAR stories and categorize each: Leadership, Conflict, Failure, Cross-functional, Innovation, Technical. If any category has 0 or 2+ stories, write a new one for the empty category. Your goal: at least one distinct, concrete story per category before your next interview.", "target_competency": "Growth Mindset & Adaptability"},
+                    ],
+                },
+            ],
+            "quick_wins": [
+                "End every story with a number — even approximate: 'roughly 30% faster', 'about 2 hours saved per week'.",
+                "When you say 'we', immediately add 'and my specific contribution was…' before moving on.",
+                "Before your next interview, write one sentence for each story: 'The measurable result was __.' Memorize it.",
+                "Start answers with the Situation in one sentence — don't pre-amble with context that isn't the story.",
+            ],
+            "curated_resources": [
+                {"title": "STAR Method — Amazon Leadership Principles Guide", "type": "Article", "why": "Amazon's STAR framework is the most rigorous behavioral answer structure used by top-tier companies — directly closes the Result gap observed in Q1 and Q2."},
+                {"title": "Lenny's Newsletter: How to ace behavioral interviews", "type": "Article", "why": "PM-specific behavioral interview patterns, including stakeholder conflict and cross-functional ownership stories — directly targets your target role gap."},
+                {"title": "Cracking the PM Interview by Gayle McDowell", "type": "Book", "why": "Chapter on behavioral interviews covers story structure and individual-vs-team attribution — the exact gap flagged in your Collaboration axis."},
+                {"title": "Mock Interview with ChatGPT (STAR follow-up drill)", "type": "Framework", "why": "Prompt: 'Ask me a behavioral question, then immediately follow up with two probing questions about my specific contribution and measurable outcome.' Repeat 10 times."},
+            ],
+        } if round_type == "hr" else {},
+        "executive_brief": _compute_executive_brief(
+            hire_recommendation="Yes",
+            hire_confidence="Medium",
+            overall_score=72,
+            key_signals=[
+                {"signal": "Demonstrated ownership on leadership question", "evidence": "\"I took initiative and set up the war-room myself without being asked\" (Q1)", "valence": "positive"},
+                {"signal": "STAR results missing on 2 of 3 answers", "evidence": "Q2 and Q3 ended with process descriptions, no quantified outcome", "valence": "negative"},
+                {"signal": "Self-reflection on failure story was genuine", "evidence": "\"I realised I had made an assumption without validating it with the client\" (Q3)", "valence": "positive"},
+            ] if round_type == "hr" else [],
+            explicit_red_flags=[
+                {"type": "Hypothetical-as-Real", "severity": "High", "evidence_quote": "I think I would probably escalate it to my manager in that situation.", "signal_meaning": "Q5 answer was framed as hypothetical despite a real-experience prompt.", "question_id": "Q5"},
+            ] if round_type == "hr" else [],
+            competency_scorecard=[
+                {"axis": "Collaboration & Stakeholder Fit", "rating_1_7": 4, "anchor_label": "Below Bar", "verbatim_quote": "We resolved the issue by aligning on priorities.", "rationale": "Individual contribution unclear."},
+            ] if round_type == "hr" else [],
+            reference_check_triggers=[
+                {"topic": "Conflict resolution", "priority": "Medium", "suggested_question": "Can you describe how this candidate handled disagreements with stakeholders from other departments?", "reason": "Q3 story was vague on resolution."},
+            ] if round_type == "hr" else [],
+            summary="Solid overall performance. The candidate demonstrated clear ownership and communication skills but needs to sharpen STAR story structure — results were absent or vague in most behavioural answers.",
+            job_role="Product Manager",
+        ) if round_type == "hr" else {},
         # Phase 5/6: always include these so the UI sections render in debug mode
         "peer_comparison": None,
         "study_schedule": None,
@@ -1158,7 +1557,13 @@ async def _generate_report_sse(session_id: str, user_id: str):
                         "culture_fit_dimensions", "eq_profile",
                         # HR Phase 3
                         "coachability_index", "leadership_ic_fit",
-                        "reference_check_triggers", "assessment_confidence"],
+                        "reference_check_triggers", "assessment_confidence",
+                        # HR Report Enhancement — Group A
+                        "explicit_red_flags", "seniority_calibration", "answer_depth_progression",
+                        # HR Report Enhancement — Group B
+                        "peer_benchmarking", "role_gap_analysis", "story_uniqueness", "model_answer_comparison",
+                        # HR Report Enhancement — Group C
+                        "pipeline_followup_questions", "hr_improvement_plan", "executive_brief"],
         "stage2_cv":   ["cv_audit", "study_roadmap", "study_recommendations",
                         "mock_ready_topics", "not_ready_topics"],
         "stage3_communication": ["communication_breakdown", "six_axis_radar", "bs_flag",
@@ -1230,6 +1635,29 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "leadership_ic_fit":            core_result.get("leadership_ic_fit", {}),
         "reference_check_triggers":     core_result.get("reference_check_triggers", []),
         "assessment_confidence":        core_result.get("assessment_confidence", {}),
+        # HR Report Enhancement — Group A new fields
+        "explicit_red_flags":           core_result.get("explicit_red_flags", []) if round_type == "hr" else [],
+        "seniority_calibration":        core_result.get("seniority_calibration", {}) if round_type == "hr" else {},
+        "answer_depth_progression":     _compute_answer_depth_progression(question_scores) if round_type == "hr" else {},
+        # HR Report Enhancement — Group B new fields
+        "peer_benchmarking":            _compute_peer_benchmarking(overall_pct, radar_scores, round_type) if round_type == "hr" else {},
+        "role_gap_analysis":            core_result.get("role_gap_analysis", {}) if round_type == "hr" else {},
+        "story_uniqueness":             core_result.get("story_uniqueness", {}) if round_type == "hr" else {},
+        "model_answer_comparison":      core_result.get("model_answer_comparison", []) if round_type == "hr" else [],
+        # HR Report Enhancement — Group C new fields
+        "pipeline_followup_questions":  core_result.get("pipeline_followup_questions", []) if round_type == "hr" else [],
+        "hr_improvement_plan":          core_result.get("hr_improvement_plan", {}) if round_type == "hr" else {},
+        "executive_brief":              _compute_executive_brief(
+            hire_recommendation=core_result.get("hire_recommendation", ""),
+            hire_confidence=_compute_hire_confidence(overall_pct, question_scores),
+            overall_score=overall_pct,
+            key_signals=core_result.get("key_signals", []),
+            explicit_red_flags=core_result.get("explicit_red_flags", []),
+            competency_scorecard=core_result.get("competency_scorecard", []),
+            reference_check_triggers=core_result.get("reference_check_triggers", []),
+            summary=core_result.get("summary", ""),
+            job_role=job_role,
+        ) if round_type == "hr" else {},
 
         # Per-question
         "per_question_analysis": per_question_analysis,
