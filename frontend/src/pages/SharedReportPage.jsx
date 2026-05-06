@@ -14,7 +14,7 @@ import { useParams, Link } from 'react-router-dom'
 import { getSharedReport } from '../lib/api'
 import {
   Brain, Trophy, CheckCircle, XCircle, BookOpen,
-  BarChart2, AlertTriangle, ExternalLink,
+  BarChart2, AlertTriangle, ExternalLink, Award,
 } from 'lucide-react'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -105,6 +105,9 @@ export default function SharedReportPage() {
     strong_areas = [], weak_areas = [],
     study_recommendations = [], summary = '',
     target_company = '', candidate_name = '',
+    // HR Phase 1 fields
+    key_signals = [], competency_scorecard = [],
+    hire_confidence = '', job_role = '',
   } = report
 
   // report_data JSONB may contain richer data
@@ -190,6 +193,75 @@ export default function SharedReportPage() {
             )}
           </div>
         </div>
+
+        {/* ── HR: Key Signals ──────────────────────────────────────────────────── */}
+        {round_type === 'hr' && key_signals?.length > 0 && (
+          <div className="glass p-5 space-y-3"
+            style={{ border: '1px solid rgba(236,72,153,0.3)' }}>
+            <h2 className="font-bold text-sm flex items-center gap-2" style={{ color: '#ec4899' }}>
+              <Award size={16} /> Key Hiring Signals
+            </h2>
+            <div className="space-y-3">
+              {key_signals.map((s, i) => {
+                const vc = s.valence === 'positive' ? '#4ade80' : s.valence === 'negative' ? '#f87171' : '#f59e0b'
+                return (
+                  <div key={i} className="rounded-lg p-3"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                    <div className="flex items-start gap-2 mb-1">
+                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5" style={{ background: vc }} />
+                      <p className="text-sm font-semibold leading-snug flex-1">{s.signal}</p>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 font-semibold"
+                        style={{ background: `${vc}15`, color: vc, border: `1px solid ${vc}40` }}>
+                        {s.valence}
+                      </span>
+                    </div>
+                    {s.evidence && (
+                      <p className="text-xs ml-3.5 italic" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                        "{s.evidence}"
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── HR: Competency Scorecard summary (no verbatim quotes in public view) ── */}
+        {round_type === 'hr' && competency_scorecard?.length > 0 && (
+          <div className="glass p-5 space-y-3"
+            style={{ border: '1px solid rgba(236,72,153,0.3)' }}>
+            <h2 className="font-bold text-sm flex items-center gap-2" style={{ color: '#ec4899' }}>
+              <BarChart2 size={16} /> Competency Ratings
+            </h2>
+            {hire_confidence && (
+              <p className="text-xs text-muted">
+                Assessment confidence: <span className="font-semibold"
+                  style={{ color: hire_confidence === 'High' ? '#4ade80' : hire_confidence === 'Medium' ? '#f59e0b' : '#f87171' }}>
+                  {hire_confidence}
+                </span>
+              </p>
+            )}
+            <div className="space-y-2">
+              {competency_scorecard.map((entry, i) => {
+                const ANCHOR_COLORS = { 'Exceptional': '#4ade80', 'Exceeds Bar': '#a3e635', 'Meets Bar': '#facc15', 'Below Bar': '#fb923c', 'Significantly Below Bar': '#f87171', 'Poor': '#ef4444', 'No Evidence': '#6b7280' }
+                const color = ANCHOR_COLORS[entry.anchor_label] || '#94a3b8'
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-xs text-muted flex-1 truncate">{entry.axis}</span>
+                    <span className="text-xs font-bold w-8 text-right flex-shrink-0" style={{ color }}>
+                      {entry.rating_1_7}/7
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold flex-shrink-0 hidden sm:inline"
+                      style={{ background: `${color}15`, color, border: `1px solid ${color}40` }}>
+                      {entry.anchor_label}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* ── Strong & Weak ────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

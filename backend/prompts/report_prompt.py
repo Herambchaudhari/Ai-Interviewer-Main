@@ -15,9 +15,13 @@ _RADAR_AXES = {
         "DBMS & SQL", "OS & CN Concepts", "Project Knowledge", "Communication"
     ],
     "hr": [
-        "STAR Story Quality", "Communication Clarity",
-        "Self-Awareness", "Growth Mindset",
-        "Behavioral Consistency", "Collaboration Quality"
+        "Communication Clarity",
+        "STAR Story Craft",
+        "Self-Awareness & Accountability",
+        "Growth Mindset & Adaptability",
+        "Leadership & Ownership",
+        "Collaboration & Stakeholder Fit",
+        "Resilience Under Pressure",
     ],
     "dsa": [
         "Algorithm Design", "Code Readability",
@@ -148,8 +152,10 @@ def build_core_analysis_prompt(
       "action_present": <true|false>,
       "result_present": <true|false>,
       "star_score": <integer 0-10, 10=all STAR elements with concrete specifics>,
+      "star_completeness_pct": <integer 0-100, formula: (elements_present / 4) * 100, then +0-25 bonus for specificity>,
       "missing_element": "<the most important missing STAR element, or 'None'>",
-      "specificity_level": "<High (specific names/numbers/dates) | Medium (some specifics) | Low (generic/vague)>"
+      "specificity_level": "<High (specific names/numbers/dates) | Medium (some specifics) | Low (generic/vague)>",
+      "best_verbatim_quote": "<literal transcription from the answer, max 40 words. NEVER paraphrase. If no notable quote, write 'No notable quote.'>"
     }
   ],
 
@@ -167,15 +173,175 @@ def build_core_analysis_prompt(
   "culture_fit_narrative": "<2-3 sentence qualitative assessment. What work environment suits this candidate? (startup vs enterprise, high-autonomy vs structured, IC vs manager-track). Base this ONLY on evidence from their stories, not on speculation.>",
 
   "behavioral_red_flags": [
-    "<specific red flag observed, e.g. 'Consistently uses we instead of I — individual contribution unclear' or empty array []>"
-  ],"""
+    {
+      "flag": "<short label, max 10 words, e.g. 'Individual contribution unclear across all answers'>",
+      "severity": "<Critical|Moderate|Minor>",
+      "evidence": "<verbatim quote or specific observation from the transcript, max 40 words. Never generic.>"
+    }
+  ],
+
+  "key_signals": [
+    {
+      "signal": "<short decisive hiring-committee statement — e.g. 'Demonstrated clear ownership by...' — max 15 words>",
+      "evidence": "<verbatim quote or specific reference: question number + what they said, max 40 words>",
+      "valence": "<positive|negative|mixed>"
+    }
+  ],
+
+  "competency_scorecard": [
+    {
+      "axis": "<exact axis name from radar_scores — one of the 7 listed>",
+      "rating_1_7": <integer 1-7>,
+      "anchor_label": "<Exceptional|Exceeds Bar|Meets Bar|Below Bar|Significantly Below Bar|Poor|No Evidence>",
+      "verbatim_quote": "<copy exact words from transcript, max 60 words. Write 'No response provided.' if no answer.>",
+      "rationale": "<1 sentence explaining this rating based on the evidence>"
+    }
+  ],
+
+  "culture_fit_dimensions": [
+    {
+      "dimension": "<exact label from the 5 fixed dimensions>",
+      "candidate_position": <integer 1-5, 1=strongly left pole, 3=center/neutral, 5=strongly right pole>,
+      "pole_left": "<left pole label>",
+      "pole_right": "<right pole label>",
+      "rationale": "<1 sentence — cite a specific story or behavior that places them at this position>"
+    }
+  ],
+
+  "eq_profile": {
+    "self_awareness": <integer 0-100>,
+    "self_regulation": <integer 0-100>,
+    "empathy": <integer 0-100>,
+    "social_skills": <integer 0-100>,
+    "intrinsic_motivation": <integer 0-100>,
+    "eq_summary": "<2 sentences max — what stands out most about their emotional intelligence from the interview>",
+    "eq_overall_label": "<High EQ|Moderate EQ|Developing EQ>"
+  },
+
+  "coachability_index": {
+    "score": <integer 0-100>,
+    "label": "<Highly Coachable|Coachable|Moderately Coachable|Resistant to Feedback>",
+    "positive_signals": ["<observed behavior showing openness to feedback — verbatim or brief paraphrase, max 20 words each>"],
+    "negative_signals": ["<observed behavior showing defensiveness or resistance — verbatim or brief paraphrase, max 20 words each>"],
+    "summary": "<2 sentences — what their interview behavior reveals about receptiveness to growth and correction>"
+  },
+
+  "leadership_ic_fit": {
+    "spectrum_position": <integer 1-10, 1=pure IC, 5=balanced hybrid, 10=pure leader>,
+    "label": "<Strong IC|IC-Leaning|Hybrid|Leader-Leaning|Strong Leader>",
+    "recommended_track": "<Individual Contributor|Tech Lead|People Manager|Hybrid IC-Lead>",
+    "evidence": "<1-2 sentences citing specific stories or answers that place them on this spectrum>",
+    "reasoning": "<1-2 sentences on what this spectrum position means for team and role fit>"
+  },
+
+  "reference_check_triggers": [
+    {
+      "topic": "<short topic label, max 8 words, e.g. 'Conflict with direct manager'>",
+      "priority": "<High|Medium|Low>",
+      "suggested_question": "<specific behavioral question for a reference, max 25 words, start with 'Can you describe...' or 'How did...'>",
+      "reason": "<1 sentence — what was ambiguous or concerning in this interview that warrants verification>"
+    }
+  ],
+
+  "assessment_confidence": {
+    "score": <integer 0-100>,
+    "label": "<High Confidence|Moderate Confidence|Low Confidence>",
+    "limiting_factors": ["<specific reason confidence is not higher, e.g. 'Only 3 behavioral answers — small sample size'>"],
+    "what_would_change_it": "<1 sentence — what additional evidence or follow-up would most shift the hire recommendation>"
+  },"""
         hr_grading_rules = """
 HR-SPECIFIC GRADING:
 - STAR story quality is the primary signal. Score 9-10 only if they gave concrete, specific stories.
 - Penalise heavily for: generic answers, hypothetical answers ('I would...'), no Result, blame-shifting.
 - Reward: specific Situations with names/dates/context, quantified Results, genuine self-reflection.
 - hire_recommendation: Strong Yes = candidate tells 80%+ complete STAR stories with concrete evidence.
-- radar_scores: STAR Story Quality 80+ = full STAR on most questions; Communication Clarity 80+ = structured, concise; Self-Awareness 80+ = genuine failure/feedback stories with accountability; Growth Mindset 80+ = explicit behavior change post-failure; Behavioral Consistency 80+ = coherent values across all answers; Collaboration Quality 80+ = clear individual contribution, credit to team."""
+
+7-AXIS RADAR CALIBRATION (radar_scores, 0-100):
+- Communication Clarity 80+ = structured, concise, jargon-free delivery; answers directly address the question.
+- STAR Story Craft 80+ = full S/T/A/R present on most answers with concrete specifics (names, dates, numbers).
+- Self-Awareness & Accountability 80+ = genuine failure stories, no blame-shifting, owns outcomes.
+- Growth Mindset & Adaptability 80+ = explicit behavioral change after failure/feedback, adapts to new info.
+- Leadership & Ownership 80+ = proactive initiative evidence, decisions made without being told, drives outcomes.
+- Collaboration & Stakeholder Fit 80+ = clear individual contribution AND credit to team, cross-functional evidence.
+- Resilience Under Pressure 80+ = composed under adversity, describes difficult moments without catastrophizing.
+
+key_signals RULES:
+- Exactly 3 items — the most decisive hiring-committee evidence points from the entire session.
+- Each must be specific: cite the question number OR use a direct quote. NEVER be generic.
+- valence must be one of: positive, negative, mixed.
+
+competency_scorecard RULES:
+- Exactly 7 entries — one per radar axis, in the same order as radar_scores.
+- rating_1_7 scale: 7=Exceptional, 6=Exceeds Bar, 5=Meets Bar, 4=Below Bar, 3=Significantly Below Bar, 2=Poor, 1=No Evidence.
+- anchor_label MUST match the rating: 7→Exceptional, 6→Exceeds Bar, 5→Meets Bar, 4→Below Bar, 3→Significantly Below Bar, 2→Poor, 1→No Evidence.
+- rating_1_7 must be consistent with radar_scores value: 85-100→7, 70-84→6, 55-69→5, 40-54→4, 25-39→3, 10-24→2, 0-9→1.
+- verbatim_quote: copy exact words from the transcript. Do NOT paraphrase. Min 10 words, max 60 words.
+
+star_completeness_pct RULES:
+- Formula: (elements_present_count / 4) * 75 + specificity_bonus (0=Low, 12=Medium, 25=High). Round to integer.
+- Example: S+A+R present (3/4) with Medium specificity = (3/4)*75 + 12 = 56 + 12 = 68.
+- best_verbatim_quote: must be a literal copy from the transcript — never paraphrased, never invented.
+
+culture_fit_dimensions RULES:
+- Exactly 5 entries, one per fixed dimension in this exact order:
+  1. dimension="Collaborative ↔ Independent", pole_left="Collaborative", pole_right="Independent"
+  2. dimension="Process-Driven ↔ Adaptive", pole_left="Process-Driven", pole_right="Adaptive/Agile"
+  3. dimension="Risk-Averse ↔ Risk-Tolerant", pole_left="Risk-Averse", pole_right="Risk-Tolerant"
+  4. dimension="Analytical ↔ Intuitive", pole_left="Analytical", pole_right="Intuitive"
+  5. dimension="Depth-Focused ↔ Breadth-Focused", pole_left="Depth-Focused", pole_right="Breadth-Focused"
+- candidate_position: 1=strongly left pole, 3=center/neutral, 5=strongly right pole. Must be 1-5.
+- rationale: cite a specific answer or story — never speculate.
+
+eq_profile RULES:
+- self_awareness: infer from depth of self-disclosure and accuracy of self-critique in answers.
+- self_regulation: infer from composure language during adversity stories.
+- empathy: infer from how they describe others (team members, stakeholders, customers).
+- social_skills: infer from collaboration and conflict resolution stories.
+- intrinsic_motivation: infer from stated reasons for actions and career choices.
+- All scores 0-100. Do NOT default to 50 for all — spread scores based on actual evidence.
+- eq_overall_label: High EQ if average ≥70, Moderate EQ if average 45-69, Developing EQ if average <45.
+
+behavioral_red_flags RULES:
+- Max 5 items. Return [] if no genuine red flags.
+- severity: Critical = patterns that signal dishonesty, blame-shifting, or entitlement; Moderate = patterns needing follow-up; Minor = style observations.
+- evidence: must cite question number or exact words. Never generic ("seemed evasive").
+
+coachability_index RULES:
+- score 0-100. Highly Coachable ≥75, Coachable 55-74, Moderately Coachable 35-54, Resistant to Feedback <35.
+- positive_signals: candidate mentions acting on feedback they received; uses "I learned", "my manager pointed out", "after that I changed"; pivots approach mid-answer when prompted.
+- negative_signals: deflects or justifies mistakes ("but I was right because..."); never attributes growth to external input; blame-shifts to teammates or circumstances.
+- positive_signals and negative_signals: 0-3 items each. Empty array [] if no evidence found.
+- Do NOT default to a neutral score — differentiate clearly based on actual language used.
+- summary: 2 sentences max. Reference specific answers by question number.
+
+leadership_ic_fit RULES:
+- spectrum_position 1-10. 1 = pure IC (loves deep solo work, avoids people management). 5 = balanced hybrid. 10 = pure leader.
+- Leader signals: mentions managing/mentoring others, driving team decisions, influencing without authority, cross-team coordination.
+- IC signals: "I built this myself", "I was the sole owner", deep technical explanations, preference for individual work, discomfort with management stories.
+- label mapping: 1-2=Strong IC, 3-4=IC-Leaning, 5=Hybrid, 6-7=Leader-Leaning, 8-10=Strong Leader.
+- recommended_track: derive from spectrum_position. Use Hybrid IC-Lead for 4-6 with mixed evidence.
+- evidence: cite question numbers or specific story details. Never speculate beyond what was said.
+- reasoning: explain what this track placement means for how a hiring manager should position this candidate.
+
+reference_check_triggers RULES:
+- 1-4 items. Return [] if no ambiguities or concerns warrant verification.
+- High priority: patterns suggesting potential dishonesty, toxic behavior, or major story inconsistency.
+- Medium priority: ambiguous stories where reference confirmation would meaningfully increase hiring confidence.
+- Low priority: minor gaps that a reference could clarify but wouldn't change the overall recommendation.
+- suggested_question: behavioral format ("Can you describe a time when..." or "How did [candidate] handle..."). Never yes/no questions.
+- NEVER generate triggers for competencies the candidate demonstrated clearly and consistently.
+
+assessment_confidence RULES:
+- score 0-100. High Confidence ≥70, Moderate Confidence 40-69, Low Confidence <40.
+- Start from 100 and subtract for each limiting factor present:
+  - Fewer than 4 behavioral answers given: −20
+  - Two or more answers were hypothetical ("I would..." / "I think I would..."): −15
+  - Major behavioral competency areas not covered: −10 per gap
+  - Significant inconsistencies between answers: −15
+  - Very short answers (under 3 sentences each): −10
+- Floor at 10. Ceiling at 95 (never claim perfect confidence).
+- limiting_factors: 1-3 items. Empty array [] if score ≥85.
+- what_would_change_it: must be actionable and specific — a concrete follow-up action or question type."""
 
     return f"""You are a senior behavioral talent evaluator with 15+ years of HR interviewing experience at top-tier companies.
 Analyze the complete interview transcript below and generate a brutally honest, highly specific, actionable report.

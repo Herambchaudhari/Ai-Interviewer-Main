@@ -48,8 +48,9 @@ def _mask_uncovered_radar_axes(
 ) -> dict:
     """
     Zero out radar axes that have no matching questions in the transcript.
-    The LLM fills all 6 axes regardless — this masks axes for topics not actually covered.
+    The LLM fills all axes regardless — this masks axes for topics not actually covered.
     Uses broad keyword matching so "NurseConnect Authentication" matches "Project Knowledge".
+    HR rounds are excluded — their axes are always fully covered by behavioral questions.
     """
     import re
 
@@ -83,6 +84,27 @@ def _mask_uncovered_radar_axes(
         covered = bool(keywords & asked_words)
         result[skill] = radar_scores.get(skill, 0) if covered else 0
     return result
+
+def _compute_hire_confidence(overall_pct: float, question_scores: list) -> str:
+    """
+    Deterministic confidence level for the HR executive summary.
+    High confidence = strong score + low variance across answers.
+    Low confidence = inconsistent signals or borderline score.
+    """
+    scored = [
+        q["score"] for q in question_scores
+        if q.get("score") is not None and not q.get("skipped")
+    ]
+    if len(scored) < 2:
+        return "Low"
+    mean = sum(scored) / len(scored)
+    variance = sum((s - mean) ** 2 for s in scored) / len(scored)
+    if overall_pct >= 75 and variance < 4:
+        return "High"
+    elif overall_pct >= 55 and variance < 9:
+        return "Medium"
+    return "Low"
+
 
 _ROUND_AGENT_LABELS = {
     "technical":    "Technical",
@@ -125,17 +147,31 @@ def _normalize_report_payload(payload: dict) -> dict:
         "blind_spots", "bs_flag", "skill_decay", "skills_to_work_on",
         "auto_resources", "follow_up_questions", "category_breakdown",
         "checklist", "filler_heatmap",
+        # HR Phase 1
+        "star_story_matrix", "behavioral_category_coverage", "behavioral_red_flags",
+        "key_signals", "competency_scorecard",
+        # HR Phase 2
+        "culture_fit_dimensions",
+        # HR Phase 3
+        "reference_check_triggers",
     ]
     # ── Fields that must always be dicts ─────────────────────────────────────
     _DICT_FIELDS = [
         "hire_signal", "communication_breakdown", "six_axis_radar",
         "delivery_consistency", "proctoring_summary", "swot",
         "thirty_day_plan", "cv_audit", "study_roadmap",
+        # HR Phase 2
+        "eq_profile",
+        # HR Phase 3
+        "coachability_index", "leadership_ic_fit", "assessment_confidence",
     ]
     # ── String fields that must not be null ──────────────────────────────────
     _STR_FIELDS = [
         "summary", "grade", "hire_recommendation", "difficulty",
         "compared_to_level", "session_label", "target_company", "candidate_name",
+        # HR Phase 1
+        "hire_confidence", "interview_datetime", "job_role",
+        "communication_pattern", "culture_fit_narrative",
     ]
 
     result = dict(payload)
@@ -184,6 +220,14 @@ def _normalize_report_payload(payload: dict) -> dict:
     if isinstance(ps, dict):
         if not isinstance(ps.get("counts"), dict):
             ps["counts"] = {}
+
+    # ── Backward compat: behavioral_red_flags Phase 1→Phase 2 coercion ──────────
+    # Old reports store List[str]; Phase 2 expects List[Dict[flag,severity,evidence]].
+    brf = result.get("behavioral_red_flags")
+    if isinstance(brf, list) and brf and isinstance(brf[0], str):
+        result["behavioral_red_flags"] = [
+            {"flag": f, "severity": "Moderate", "evidence": ""} for f in brf
+        ]
 
     # ── Report quality metadata (migration 011) ───────────────────────────────
     # Ensures old cached reports (pre-fix) served from DB never crash the new
@@ -424,12 +468,7 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
         "session_label": f"{_ROUND_AGENT_LABELS.get(round_type, 'Interview')} Interview",
         "grade": "B+",
         "hire_recommendation": "Yes",
-        "summary": "Solid overall performance. Focus on faster, more accurate screening decisions to level up.",
-        "radar_scores": {
-            "OOP & Design Patterns": 70, "Data Structures & Algorithms": 65,
-            "DBMS & SQL": 72, "OS & CN Concepts": 55,
-            "Project Knowledge": 78, "Communication": 80,
-        },
+        "summary": "Solid overall performance. The candidate demonstrated clear ownership and communication skills but needs to sharpen STAR story structure — results were absent or vague in most behavioural answers.",
         "six_axis_radar": {
             "Communication Clarity": 75, "Confidence": 65,
             "Answer Structure": 70, "Pacing": 72,
@@ -480,6 +519,109 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
         "interview_integrity": None,
         "is_mock": True,
         "_debug_mock": True,
+        # HR Phase 1 — populated only for hr rounds; empty fallbacks for others
+        "star_story_matrix": [
+            {"question_id": "Q1", "competency_category": "Leadership", "situation_present": True, "task_present": True, "action_present": True, "result_present": False, "star_score": 7, "star_completeness_pct": 68, "missing_element": "Result", "specificity_level": "Medium", "best_verbatim_quote": "I took ownership and coordinated both teams to deliver on time."},
+            {"question_id": "Q2", "competency_category": "Conflict Resolution", "situation_present": True, "task_present": False, "action_present": True, "result_present": True, "star_score": 6, "star_completeness_pct": 56, "missing_element": "Task", "specificity_level": "Low", "best_verbatim_quote": "We resolved the issue by aligning on priorities."},
+            {"question_id": "Q3", "competency_category": "Failure & Learning", "situation_present": True, "task_present": True, "action_present": True, "result_present": True, "star_score": 8, "star_completeness_pct": 87, "missing_element": "None", "specificity_level": "High", "best_verbatim_quote": "I realised I had made an assumption without validating it with the client first, and I went back and rebuilt that piece."},
+        ] if round_type == "hr" else [],
+        "behavioral_category_coverage": [
+            {"category": "Leadership & Ownership", "covered": True, "question_numbers": [1], "performance": "Adequate"},
+            {"category": "Conflict Resolution", "covered": True, "question_numbers": [2], "performance": "Adequate"},
+            {"category": "Failure & Learning", "covered": False, "question_numbers": [], "performance": "Not Asked"},
+        ] if round_type == "hr" else [],
+        "communication_pattern": "Abstract-first (needs grounding)" if round_type == "hr" else "",
+        "culture_fit_narrative": "Candidate shows strong alignment with collaborative, structured environments. Likely better suited to mid-size or enterprise settings than early-stage startups." if round_type == "hr" else "",
+        "behavioral_red_flags": [
+            {"flag": "Individual contribution unclear across conflict story", "severity": "Moderate", "evidence": "\"We resolved the issue\" — Q2 used collective language without specifying personal action."},
+            {"flag": "Result missing in 2 of 3 answers", "severity": "Minor", "evidence": "Q2 and Q3 ended with process descriptions; no quantified outcome or follow-up was provided."},
+        ] if round_type == "hr" else [],
+        "key_signals": [
+            {"signal": "Demonstrated ownership on leadership question", "evidence": "\"I took initiative and set up the war-room myself without being asked\" (Q1)", "valence": "positive"},
+            {"signal": "STAR results missing on 2 of 3 answers", "evidence": "Q2 and Q3 ended with process descriptions, no quantified outcome", "valence": "negative"},
+            {"signal": "Self-reflection on failure story was genuine", "evidence": "\"I realised I had made an assumption without validating it with the client\" (Q3)", "valence": "positive"},
+        ] if round_type == "hr" else [],
+        "competency_scorecard": [
+            {"axis": "Communication Clarity", "rating_1_7": 5, "anchor_label": "Meets Bar", "verbatim_quote": "I explained the situation clearly to all stakeholders before taking action.", "rationale": "Answers were structured but occasionally verbose with unnecessary context."},
+            {"axis": "STAR Story Craft", "rating_1_7": 4, "anchor_label": "Below Bar", "verbatim_quote": "We worked through the problem and eventually got it resolved.", "rationale": "Results were absent or vague in most answers; situations were well-set."},
+            {"axis": "Self-Awareness & Accountability", "rating_1_7": 6, "anchor_label": "Exceeds Bar", "verbatim_quote": "I realised I had made an assumption without validating it with the client first.", "rationale": "Genuine reflection with personal ownership language in Q3."},
+            {"axis": "Growth Mindset & Adaptability", "rating_1_7": 5, "anchor_label": "Meets Bar", "verbatim_quote": "After that experience I started doing pre-mortems before kicking off any project.", "rationale": "Demonstrated behavioral change but limited to one example."},
+            {"axis": "Leadership & Ownership", "rating_1_7": 6, "anchor_label": "Exceeds Bar", "verbatim_quote": "I took initiative and set up the war-room myself without being asked.", "rationale": "Proactive ownership clearly evidenced in Q1."},
+            {"axis": "Collaboration & Stakeholder Fit", "rating_1_7": 4, "anchor_label": "Below Bar", "verbatim_quote": "We resolved the issue by aligning on priorities.", "rationale": "Individual contribution unclear; defaulted to 'we' throughout conflict story."},
+            {"axis": "Resilience Under Pressure", "rating_1_7": 5, "anchor_label": "Meets Bar", "verbatim_quote": "It was stressful, but I kept the team focused on what we could control.", "rationale": "Composed language under adversity; could have elaborated on coping strategies."},
+        ] if round_type == "hr" else [],
+        "hire_confidence": "Medium" if round_type == "hr" else "",
+        "interview_datetime": "2026-05-06T10:30:00+00:00",
+        "job_role": "Product Manager" if round_type == "hr" else "Software Engineer",
+        # HR Phase 2
+        "culture_fit_dimensions": [
+            {"dimension": "Collaborative ↔ Independent", "candidate_position": 2, "pole_left": "Collaborative", "pole_right": "Independent", "rationale": "Consistently framed decisions as team consensus in Q1 and Q2; rarely described unilateral action."},
+            {"dimension": "Process-Driven ↔ Adaptive", "candidate_position": 3, "pole_left": "Process-Driven", "pole_right": "Adaptive/Agile", "rationale": "Mixed signals — described structured planning in Q1 but improvised under pressure in Q3."},
+            {"dimension": "Risk-Averse ↔ Risk-Tolerant", "candidate_position": 2, "pole_left": "Risk-Averse", "pole_right": "Risk-Tolerant", "rationale": "Emphasized validation and sign-off steps before launching; avoided ambiguous situations when possible."},
+            {"dimension": "Analytical ↔ Intuitive", "candidate_position": 4, "pole_left": "Analytical", "pole_right": "Intuitive", "rationale": "Made a key call in Q3 based on gut feel after one stakeholder conversation, not a data review."},
+            {"dimension": "Depth-Focused ↔ Breadth-Focused", "candidate_position": 3, "pole_left": "Depth-Focused", "pole_right": "Breadth-Focused", "rationale": "Showed solid depth in their core domain but cited cross-functional exposure as a growth area."},
+        ] if round_type == "hr" else [],
+        "eq_profile": {
+            "self_awareness": 78,
+            "self_regulation": 65,
+            "empathy": 72,
+            "social_skills": 70,
+            "intrinsic_motivation": 80,
+            "eq_summary": "Candidate shows strong intrinsic motivation and genuine self-awareness, particularly in the failure story where they owned their assumptions without deflecting. Self-regulation needs development — language became slightly defensive when discussing the conflict in Q2.",
+            "eq_overall_label": "Moderate EQ",
+        } if round_type == "hr" else {},
+        "coachability_index": {
+            "score": 72,
+            "label": "Coachable",
+            "positive_signals": [
+                "In Q2, mentioned incorporating manager feedback after a missed deadline: 'my manager pointed out I wasn't escalating early enough, and I changed that.'",
+                "In Q4, described actively seeking peer code review even when not required.",
+            ],
+            "negative_signals": [
+                "In Q3, justified initial approach without fully acknowledging the stakeholder's concern ('I still think my solution was right, but...').",
+            ],
+            "summary": "Candidate shows genuine openness to feedback in structured scenarios, especially around process and communication. A mild pattern of self-justification appears under direct challenge but does not dominate the overall impression.",
+        } if round_type == "hr" else {},
+        "leadership_ic_fit": {
+            "spectrum_position": 4,
+            "label": "IC-Leaning",
+            "recommended_track": "Hybrid IC-Lead",
+            "evidence": "Q2 answer focused on personal technical contribution ('I rebuilt the data pipeline myself over two weekends'). Q4 mentioned coordinating a 3-person sub-team but minimized people-management aspects, framing it as task delegation rather than leadership.",
+            "reasoning": "Best suited for senior IC roles with light tech-lead responsibilities. Would likely thrive as a staff engineer or tech lead but may struggle in full people-management positions without deliberate coaching.",
+        } if round_type == "hr" else {},
+        "reference_check_triggers": [
+            {
+                "topic": "Conflict resolution with cross-functional teams",
+                "priority": "Medium",
+                "suggested_question": "Can you describe how this candidate handled disagreements with stakeholders from other departments?",
+                "reason": "Q3 story about a stakeholder conflict was vague on how the disagreement was ultimately resolved — candidate moved past this quickly.",
+            },
+            {
+                "topic": "Consistency of ownership under pressure",
+                "priority": "Low",
+                "suggested_question": "How did this candidate respond when assigned high-stakes work with tight deadlines?",
+                "reason": "Strong ownership language in Q1 and Q2, but Q5 answer was noticeably brief — a reference would confirm whether this is consistent.",
+            },
+        ] if round_type == "hr" else [],
+        "assessment_confidence": {
+            "score": 68,
+            "label": "Moderate Confidence",
+            "limiting_factors": [
+                "Only 4 behavioral stories sampled — small dataset for a holistic HR assessment.",
+                "Two answers (Q3 and Q5) were partially hypothetical ('I think I would handle it by...').",
+            ],
+            "what_would_change_it": "A follow-up structured case interview focused specifically on conflict resolution and cross-functional stakeholder management would sharpen the hire recommendation significantly.",
+        } if round_type == "hr" else {},
+        "radar_scores": {
+            "Communication Clarity": 72, "STAR Story Craft": 55,
+            "Self-Awareness & Accountability": 78, "Growth Mindset & Adaptability": 68,
+            "Leadership & Ownership": 76, "Collaboration & Stakeholder Fit": 52,
+            "Resilience Under Pressure": 65,
+        } if round_type == "hr" else {
+            "OOP & Design Patterns": 70, "Data Structures & Algorithms": 65,
+            "DBMS & SQL": 72, "OS & CN Concepts": 55,
+            "Project Knowledge": 78, "Communication": 80,
+        },
         # Phase 5/6: always include these so the UI sections render in debug mode
         "peer_comparison": None,
         "study_schedule": None,
@@ -824,8 +966,9 @@ async def _generate_report_sse(session_id: str, user_id: str):
     # ── Post-process radar: zero out axes with no matching questions ─────────
     # The LLM fills in all axes even if only 2/6 topics were covered. We patch
     # them to 0 so the radar only shows dimensions that were actually tested.
+    # HR is excluded — behavioral questions always cover all 7 axes by design.
     radar_skills = _RADAR_AXES.get(round_type, [])
-    if radar_skills and question_scores:
+    if radar_skills and question_scores and round_type != "hr":
         radar_scores = _mask_uncovered_radar_axes(radar_scores, question_scores, radar_skills)
     if target_company and radar_scores:
         try:
@@ -1006,7 +1149,16 @@ async def _generate_report_sse(session_id: str, user_id: str):
     # Map failed stage keys to human-readable section names
     _STAGE_SECTION_MAP = {
         "stage1_core": ["overall_score", "radar_scores", "grade", "hire_recommendation",
-                        "strong_areas", "weak_areas", "failure_patterns", "per_question_analysis"],
+                        "strong_areas", "weak_areas", "failure_patterns", "per_question_analysis",
+                        # HR Phase 1
+                        "star_story_matrix", "behavioral_category_coverage",
+                        "key_signals", "competency_scorecard",
+                        "communication_pattern", "culture_fit_narrative", "behavioral_red_flags",
+                        # HR Phase 2
+                        "culture_fit_dimensions", "eq_profile",
+                        # HR Phase 3
+                        "coachability_index", "leadership_ic_fit",
+                        "reference_check_triggers", "assessment_confidence"],
         "stage2_cv":   ["cv_audit", "study_roadmap", "study_recommendations",
                         "mock_ready_topics", "not_ready_topics"],
         "stage3_communication": ["communication_breakdown", "six_axis_radar", "bs_flag",
@@ -1059,11 +1211,25 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "failure_patterns":     core_result.get("failure_patterns", []),
 
         # ── HR-specific behavioral analysis (populated only for hr rounds) ──
-        "star_story_matrix":           core_result.get("star_story_matrix", []),
+        "star_story_matrix":            core_result.get("star_story_matrix", []),
         "behavioral_category_coverage": core_result.get("behavioral_category_coverage", []),
         "communication_pattern":        core_result.get("communication_pattern", ""),
         "culture_fit_narrative":        core_result.get("culture_fit_narrative", ""),
         "behavioral_red_flags":         core_result.get("behavioral_red_flags", []),
+        # HR Phase 1 — new professional report fields
+        "key_signals":                  core_result.get("key_signals", []),
+        "competency_scorecard":         core_result.get("competency_scorecard", []),
+        "hire_confidence":              _compute_hire_confidence(overall_pct, question_scores),
+        "interview_datetime":           session.get("created_at") or session.get("started_at") or "",
+        "job_role":                     job_role,
+        # HR Phase 2 — visual enhancement fields
+        "culture_fit_dimensions":       core_result.get("culture_fit_dimensions", []),
+        "eq_profile":                   core_result.get("eq_profile", {}),
+        # HR Phase 3 — coaching & confidence fields
+        "coachability_index":           core_result.get("coachability_index", {}),
+        "leadership_ic_fit":            core_result.get("leadership_ic_fit", {}),
+        "reference_check_triggers":     core_result.get("reference_check_triggers", []),
+        "assessment_confidence":        core_result.get("assessment_confidence", {}),
 
         # Per-question
         "per_question_analysis": per_question_analysis,
@@ -1207,6 +1373,12 @@ async def _safe_generate_report_sse(session_id: str, user_id: str):
 
 
 # ── GET /api/v1/report/:session_id  (SSE stream) ─────────────────────────────
+@router.get("/mock-{round_type}")
+async def get_mock_report(round_type: str):
+    """Public endpoint — returns sample report data for UI development/testing."""
+    return _ok(data=_mock_report(f"mock-{round_type}", round_type=round_type))
+
+
 @router.get("/{session_id}")
 async def get_or_generate_report(
     session_id: str,
