@@ -1385,6 +1385,7 @@ def get_resume_versions(user_id: str) -> list:
                 "created_at":       row.get("created_at"),
                 "parsed_summary": {
                     "name":             pd.get("name", ""),
+                    "summary":          pd.get("summary", ""),
                     "skills":           pd.get("skills", []),
                     "skills_count":     len(pd.get("skills", [])),
                     "experience_count": len(pd.get("experience", [])),

@@ -393,6 +393,7 @@ async def reparse_resume_endpoint(
         "profile_id": profile_id,
         "parsed_summary": {
             "name":             parsed.get("name", ""),
+            "summary":          parsed.get("summary", ""),
             "skills":           parsed.get("skills", []),
             "skills_count":     len(parsed.get("skills", [])),
             "experience_count": len(parsed.get("experience", [])),

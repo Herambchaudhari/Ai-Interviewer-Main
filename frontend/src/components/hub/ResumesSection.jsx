@@ -254,6 +254,13 @@ function ResumeCard({ resume, onActivate, onRenamed, onReparsed }) {
             </div>
           )}
 
+          {ps?.summary && (
+            <div>
+              <p className="text-xs text-muted uppercase tracking-widest mb-1">Summary</p>
+              <p className="text-sm text-white/80 leading-relaxed">{ps.summary}</p>
+            </div>
+          )}
+
           {ps?.skills?.length > 0 && (
             <div>
               <p className="text-xs text-muted uppercase tracking-widest mb-1">Skills</p>
