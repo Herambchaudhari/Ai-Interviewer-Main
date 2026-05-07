@@ -46,7 +46,9 @@ import {
   Target, Zap, Brain, ArrowUp, ArrowDown, Minus, Shield,
   MessageSquare, BarChart2, Clock, Flame, Eye,
   Share2, Download, Play, Pause, Volume2, X, Copy, Check, Users,
-  Activity, Layers, Timer, Code2,
+  Activity, Layers, Timer, Code2, Briefcase, FileText, Award,
+  ShieldAlert, Info, Smile, Sliders,
+  TrendingUp as TrendingUpIcon, GitBranch, ClipboardCheck, BarChart2 as BarChart2Icon,
 } from 'lucide-react'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -97,7 +99,7 @@ function normArea(a) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function ScoreRing({ score, size = 120, max = 100 }) {
+function ScoreRing({ score, size = 120, max = 100, trackColor = 'var(--hr-header-ring-bg)' }) {
   const R   = (size / 2) - 10
   const C   = 2 * Math.PI * R
   const pct = Math.min(100, Math.max(0, score)) / max
@@ -106,7 +108,7 @@ function ScoreRing({ score, size = 120, max = 100 }) {
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
       <svg style={{ transform: 'rotate(-90deg)' }} width={size} height={size}>
-        <circle cx={size/2} cy={size/2} r={R} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={8}/>
+        <circle cx={size/2} cy={size/2} r={R} fill="none" stroke={trackColor} strokeWidth={8}/>
         <circle cx={size/2} cy={size/2} r={R} fill="none"
           stroke={col} strokeWidth={8} strokeLinecap="round"
           strokeDasharray={C} strokeDashoffset={off}
@@ -158,6 +160,617 @@ function Chip({ label, color = '#7c3aed', size = 'sm' }) {
   )
 }
 
+// ── HR Phase 1: Professional Document Header ──────────────────────────────────
+function HRDocumentHeader({ candidateName, jobRole, difficulty, interviewDatetime, sessionId, overallScore, grade, hireRecommendation, numQuestions, timerMins }) {
+  const dateStr = interviewDatetime
+    ? new Date(interviewDatetime).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+    : 'Date not recorded'
+  const shortId = sessionId ? (sessionId.slice(0, 8).toUpperCase() + '…') : '—'
+  const confColor = hireRecommendation?.includes('Strong') ? '#4ade80'
+    : hireRecommendation === 'Yes' ? '#a3e635'
+    : hireRecommendation === 'Maybe' ? '#facc15'
+    : '#f87171'
+
+  return (
+    <div className="rounded-2xl overflow-hidden"
+      style={{
+        background: 'var(--hr-header-bg)',
+        border: '1px solid var(--hr-header-border)',
+        color: 'var(--hr-header-text)',
+        boxShadow: 'var(--shadow-md)',
+      }}>
+      {/* Confidential strip */}
+      <div className="px-6 py-2 flex items-center justify-between"
+        style={{ background: 'var(--hr-header-strip-bg)', borderBottom: '1px solid var(--hr-header-strip-border)' }}>
+        <span className="text-[10px] font-bold tracking-[0.3em] uppercase"
+          style={{ color: '#ec4899' }}>Confidential — AI Interviewer Assessment</span>
+        <span className="text-[10px] tracking-wider" style={{ color: 'var(--hr-header-muted)' }}>HR / Behavioural Round</span>
+      </div>
+
+      <div className="px-6 pt-5 pb-2">
+        {/* Row 1: Name + badges */}
+        <div className="flex flex-wrap items-start gap-3 mb-3">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl font-bold truncate" style={{ color: 'var(--hr-header-text)' }}>{candidateName || 'Candidate'}</h1>
+            {jobRole && <p className="text-sm mt-0.5" style={{ color: 'var(--hr-header-muted)' }}>{jobRole}</p>}
+          </div>
+          <div className="flex flex-wrap gap-2 flex-shrink-0">
+            <Chip label={`${difficulty?.toUpperCase() || 'MEDIUM'} Difficulty`} color="#ec4899" size="xs" />
+            <Chip label="HR / Behavioural" color="#a78bfa" size="xs" />
+          </div>
+        </div>
+
+        {/* Row 2: metadata */}
+        <div className="flex flex-wrap gap-4 text-[11px] mb-5 pb-5"
+          style={{ borderBottom: '1px solid var(--hr-header-divider)', color: 'var(--hr-header-text-2)' }}>
+          <span><span style={{ color: 'var(--hr-header-muted)' }}>Date · </span>{dateStr}</span>
+          <span><span style={{ color: 'var(--hr-header-muted)' }}>Session · </span>{shortId}</span>
+          <span><span style={{ color: 'var(--hr-header-muted)' }}>Questions · </span>{numQuestions || '—'}</span>
+          <span><span style={{ color: 'var(--hr-header-muted)' }}>Duration · </span>{timerMins ? `${timerMins}m` : '—'}</span>
+        </div>
+
+        {/* Hero row: score + grade + recommendation */}
+        <div className="flex flex-wrap items-center gap-6 pb-6">
+          <ScoreRing score={overallScore} size={110} />
+          <div className="flex flex-col gap-2">
+            <div>
+              <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: 'var(--hr-header-muted)' }}>Overall Grade</p>
+              <p className="text-5xl font-black leading-none" style={{ color: gradeColor(grade) }}>{grade || '—'}</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <div>
+              <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: 'var(--hr-header-muted)' }}>Hiring Recommendation</p>
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: confColor }} />
+                <p className="text-xl font-bold" style={{ color: confColor }}>{hireRecommendation || '—'}</p>
+              </div>
+            </div>
+          </div>
+          <div className="ml-auto text-right hidden sm:block">
+            <p className="text-[10px]" style={{ color: 'var(--hr-header-muted)' }}>Generated by</p>
+            <p className="text-xs font-semibold" style={{ color: '#ec4899' }}>AI Interviewer</p>
+            <p className="text-[10px] mt-0.5" style={{ color: 'var(--hr-header-muted)' }}>{new Date().toLocaleDateString('en-IN', { dateStyle: 'medium' })}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── HR Phase 1: Executive Summary Panel ──────────────────────────────────────
+function HRExecutiveSummary({ hireRecommendation, hireConfidence, summary, grade, comparedToLevel, keySignals }) {
+  const confColor = hireConfidence === 'High' ? '#4ade80'
+    : hireConfidence === 'Medium' ? '#f59e0b'
+    : '#f87171'
+  const valenceColor = v => v === 'positive' ? '#4ade80' : v === 'negative' ? '#f87171' : '#f59e0b'
+
+  return (
+    <SectionCard icon={<FileText size={16}/>} title="Hiring Committee Briefing Note" color="#ec4899">
+      {/* Confidence + recommendation badge */}
+      <div className="flex flex-wrap items-center gap-2 mb-5">
+        {hireConfidence && (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
+            style={{ background: `${confColor}15`, border: `1px solid ${confColor}40`, color: confColor }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: confColor }} />
+            {hireConfidence} Confidence
+          </span>
+        )}
+        {hireRecommendation && (
+          <Chip label={hireRecommendation} color={hireRecommendation?.includes('Strong') ? '#4ade80' : hireRecommendation === 'Yes' ? '#a3e635' : hireRecommendation === 'Maybe' ? '#facc15' : '#f87171'} />
+        )}
+        {grade && <Chip label={`Grade: ${grade}`} color={gradeColor(grade)} />}
+      </div>
+
+      {/* Summary paragraph — formal block-quote */}
+      {summary && (
+        <div className="mb-5 pl-4 py-1"
+          style={{ borderLeft: '3px solid rgba(236,72,153,0.5)' }}>
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text)' }}>{summary}</p>
+          {comparedToLevel && (
+            <p className="text-xs text-muted mt-2 italic">{comparedToLevel}</p>
+          )}
+        </div>
+      )}
+
+      {/* Key Signals */}
+      {keySignals?.length > 0 && (
+        <>
+          <p className="text-[10px] text-muted uppercase tracking-wider mb-3">Key Hiring Signals</p>
+          <div className="space-y-3">
+            {keySignals.map((s, i) => (
+              <div key={i} className="rounded-xl p-3.5"
+                style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                <div className="flex items-start gap-2 mb-1.5">
+                  <Award size={13} className="flex-shrink-0 mt-0.5" style={{ color: valenceColor(s.valence) }} />
+                  <p className="text-sm font-semibold leading-snug">{s.signal}</p>
+                  <Chip label={s.valence || 'mixed'} color={valenceColor(s.valence)} size="xs" />
+                </div>
+                {s.evidence && (
+                  <p className="text-xs leading-relaxed ml-5"
+                    style={{ color: 'var(--color-muted)', fontStyle: 'italic' }}>
+                    "{s.evidence}"
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </SectionCard>
+  )
+}
+
+// ── HR Phase 1: Competency Scorecard ─────────────────────────────────────────
+function HRCompetencyScorecard({ competencyScorecard, axisPercentiles = {}, onRetry, isRetrying }) {
+  const ANCHOR_COLORS = {
+    'Exceptional':              '#4ade80',
+    'Exceeds Bar':              '#a3e635',
+    'Meets Bar':                '#facc15',
+    'Below Bar':                '#fb923c',
+    'Significantly Below Bar':  '#f87171',
+    'Poor':                     '#ef4444',
+    'No Evidence':              '#6b7280',
+  }
+
+  if (!competencyScorecard || competencyScorecard.length === 0) {
+    return (
+      <SectionCard icon={<BarChart2 size={16}/>} title="Competency Scorecard" color="#ec4899">
+        <div className="text-center py-6">
+          <p className="text-sm text-muted mb-3">Scorecard data not available for this session.</p>
+          {onRetry && (
+            <button onClick={onRetry} disabled={isRetrying}
+              className="text-xs font-semibold px-4 py-2 rounded-lg transition-all"
+              style={{ background: 'rgba(236,72,153,0.15)', border: '1px solid rgba(236,72,153,0.4)', color: '#ec4899', opacity: isRetrying ? 0.6 : 1 }}>
+              {isRetrying ? 'Regenerating…' : 'Regenerate Section'}
+            </button>
+          )}
+        </div>
+      </SectionCard>
+    )
+  }
+
+  const avg = (competencyScorecard.reduce((s, c) => s + (c.rating_1_7 || 0), 0) / competencyScorecard.length).toFixed(1)
+  const avgAnchor = avg >= 6.5 ? 'Exceptional' : avg >= 5.5 ? 'Exceeds Bar' : avg >= 4.5 ? 'Meets Bar'
+    : avg >= 3.5 ? 'Below Bar' : avg >= 2.5 ? 'Significantly Below Bar' : avg >= 1.5 ? 'Poor' : 'No Evidence'
+  const avgColor = ANCHOR_COLORS[avgAnchor] || '#94a3b8'
+
+  return (
+    <SectionCard icon={<BarChart2 size={16}/>} title="Competency Scorecard" color="#ec4899">
+      {/* Overall average */}
+      <div className="flex items-center justify-between mb-5 px-4 py-3 rounded-xl"
+        style={{ background: 'rgba(236,72,153,0.08)', border: '1px solid rgba(236,72,153,0.2)' }}>
+        <div>
+          <p className="text-[10px] text-muted uppercase tracking-wider">Overall Scorecard Average</p>
+          <p className="text-lg font-bold mt-0.5" style={{ color: avgColor }}>{avg} / 7</p>
+        </div>
+        <Chip label={avgAnchor} color={avgColor} />
+      </div>
+
+      {/* Per-axis rows */}
+      <div className="space-y-4">
+        {competencyScorecard.map((entry, i) => {
+          const color = ANCHOR_COLORS[entry.anchor_label] || '#94a3b8'
+          return (
+            <div key={i} className="rounded-xl overflow-hidden"
+              style={{ border: '1px solid var(--color-border)' }}>
+              {/* Header row */}
+              <div className="flex items-center gap-3 px-4 py-3"
+                style={{ background: 'var(--color-surface-2)' }}>
+                <span className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black flex-shrink-0"
+                  style={{ background: `${color}20`, color }}>
+                  {entry.rating_1_7 || '—'}
+                </span>
+                <span className="flex-1 text-sm font-semibold truncate">{entry.axis}</span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-xs font-bold" style={{ color }}>{entry.rating_1_7}/7</span>
+                  <Chip label={entry.anchor_label || '—'} color={color} size="xs" />
+                  {axisPercentiles[entry.axis] != null && (
+                    <span className="text-[10px] font-semibold flex-shrink-0" style={{ color: 'var(--color-muted)' }}>
+                      {axisPercentiles[entry.axis]}th pct
+                    </span>
+                  )}
+                </div>
+              </div>
+              {/* Verbatim quote */}
+              {entry.verbatim_quote && entry.verbatim_quote !== 'No response provided.' && (
+                <div className="px-4 py-2.5 ml-10"
+                  style={{ borderLeft: '3px solid rgba(236,72,153,0.35)', background: 'var(--color-surface-2)' }}>
+                  <p className="text-[11px] leading-relaxed"
+                    style={{ color: 'var(--color-muted)', fontStyle: 'italic' }}>
+                    "{entry.verbatim_quote}"
+                  </p>
+                </div>
+              )}
+              {/* Rationale */}
+              {entry.rationale && (
+                <div className="px-4 py-2 ml-10">
+                  <p className="text-[11px] text-muted leading-relaxed">{entry.rationale}</p>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </SectionCard>
+  )
+}
+
+// ── HR Phase 3: Coachability Index ───────────────────────────────────────────
+
+function CoachabilityCard({ data }) {
+  if (!data || typeof data.score !== 'number') return null
+
+  const score = data.score
+  const label = data.label || ''
+  const posSignals = data.positive_signals || []
+  const negSignals = data.negative_signals || []
+
+  const color = score >= 75 ? '#22c55e' : score >= 55 ? '#eab308' : score >= 35 ? '#f97316' : '#ef4444'
+  const trackColor = score >= 75 ? '#166534' : score >= 55 ? '#713f12' : score >= 35 ? '#7c2d12' : '#7f1d1d'
+  const bgColor   = score >= 75 ? 'rgba(34,197,94,0.08)' : score >= 55 ? 'rgba(234,179,8,0.08)' : score >= 35 ? 'rgba(249,115,22,0.08)' : 'rgba(239,68,68,0.08)'
+
+  return (
+    <SectionCard icon={<Smile size={16}/>} title="Coachability Index" color={color}>
+      <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        {/* Gauge */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '100px' }}>
+          <div style={{
+            width: '88px', height: '88px', borderRadius: '50%',
+            background: `conic-gradient(${color} ${score * 3.6}deg, #1e293b ${score * 3.6}deg)`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            position: 'relative',
+          }}>
+            <div style={{
+              width: '68px', height: '68px', borderRadius: '50%',
+              background: '#0f172a', display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <span style={{ fontSize: '20px', fontWeight: 700, color }}>{score}</span>
+              <span style={{ fontSize: '9px', color: '#64748b' }}>/100</span>
+            </div>
+          </div>
+          <span style={{
+            marginTop: '8px', fontSize: '11px', fontWeight: 600,
+            color, background: bgColor,
+            padding: '2px 8px', borderRadius: '12px', textAlign: 'center',
+          }}>{label}</span>
+        </div>
+
+        {/* Signals */}
+        <div style={{ flex: 1, minWidth: '200px' }}>
+          {posSignals.length > 0 && (
+            <div style={{ marginBottom: '12px' }}>
+              <p style={{ fontSize: '11px', fontWeight: 600, color: '#22c55e', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Positive Signals</p>
+              {posSignals.map((s, i) => (
+                <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '4px', alignItems: 'flex-start' }}>
+                  <CheckCircle size={13} style={{ color: '#22c55e', marginTop: '2px', flexShrink: 0 }} />
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>{s}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {negSignals.length > 0 && (
+            <div style={{ marginBottom: '12px' }}>
+              <p style={{ fontSize: '11px', fontWeight: 600, color: '#f87171', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Resistance Signals</p>
+              {negSignals.map((s, i) => (
+                <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '4px', alignItems: 'flex-start' }}>
+                  <XCircle size={13} style={{ color: '#f87171', marginTop: '2px', flexShrink: 0 }} />
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>{s}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {data.summary && (
+            <p style={{ fontSize: '12px', color: '#94a3b8', fontStyle: 'italic', borderLeft: '3px solid ' + color, paddingLeft: '10px', margin: 0 }}>
+              {data.summary}
+            </p>
+          )}
+        </div>
+      </div>
+    </SectionCard>
+  )
+}
+
+// ── HR Phase 3: Leadership vs IC Fit ─────────────────────────────────────────
+
+function LeadershipICFitBar({ data }) {
+  if (!data || typeof data.spectrum_position !== 'number') return null
+
+  const pos = data.spectrum_position  // 1-10
+  const pct = ((pos - 1) / 9) * 100
+  const label = data.label || ''
+  const track = data.recommended_track || ''
+
+  const trackColors = {
+    'Individual Contributor': '#60a5fa',
+    'Tech Lead': '#a78bfa',
+    'Hybrid IC-Lead': '#818cf8',
+    'People Manager': '#c084fc',
+  }
+  const trackColor = trackColors[track] || '#a78bfa'
+
+  return (
+    <SectionCard icon={<GitBranch size={16}/>} title="Leadership vs IC Fit" color="#a78bfa">
+      {/* Spectrum bar */}
+      <div style={{ marginBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: 600 }}>Individual Contributor</span>
+          <span style={{ fontSize: '11px', color: '#c084fc', fontWeight: 600 }}>People Manager</span>
+        </div>
+        <div style={{ position: 'relative', height: '10px', borderRadius: '8px', background: 'linear-gradient(to right, #1e3a5f, #3b1f5e)', overflow: 'visible' }}>
+          <div style={{
+            position: 'absolute',
+            left: `calc(${pct}% - 8px)`,
+            top: '-5px',
+            width: '20px', height: '20px',
+            borderRadius: '50%',
+            background: '#a78bfa',
+            boxShadow: '0 0 10px 3px rgba(167,139,250,0.5)',
+            border: '2px solid #1e1b4b',
+            zIndex: 2,
+          }} />
+        </div>
+        {/* Tick labels */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
+          {['Strong IC', 'IC-Lean', 'Hybrid', 'Leader-Lean', 'Strong Leader'].map((t, i) => (
+            <span key={i} style={{ fontSize: '9px', color: '#475569', textAlign: 'center', width: '20%' }}>{t}</span>
+          ))}
+        </div>
+      </div>
+
+      {/* Track badge + evidence */}
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <div>
+          <p style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Recommended Track</p>
+          <span style={{
+            fontSize: '13px', fontWeight: 700, color: trackColor,
+            background: `${trackColor}18`, border: `1px solid ${trackColor}40`,
+            padding: '4px 12px', borderRadius: '20px',
+          }}>{track}</span>
+        </div>
+        <div style={{ flex: 1, minWidth: '180px' }}>
+          {data.evidence && (
+            <p style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>
+              <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Evidence: </span>{data.evidence}
+            </p>
+          )}
+          {data.reasoning && (
+            <p style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>{data.reasoning}</p>
+          )}
+        </div>
+      </div>
+    </SectionCard>
+  )
+}
+
+// ── HR Phase 3: Reference Check Triggers ─────────────────────────────────────
+
+function ReferenceCheckPanel({ triggers }) {
+  if (!triggers || triggers.length === 0) return null
+
+  const priorityOrder = { High: 0, Medium: 1, Low: 2 }
+  const sorted = [...triggers].sort((a, b) => (priorityOrder[a.priority] ?? 3) - (priorityOrder[b.priority] ?? 3))
+
+  const priorityStyle = {
+    High:   { border: '#ef4444', bg: 'rgba(239,68,68,0.06)',   text: '#ef4444',  icon: <ShieldAlert size={14} style={{ color: '#ef4444' }} /> },
+    Medium: { border: '#f59e0b', bg: 'rgba(245,158,11,0.06)',  text: '#f59e0b',  icon: <AlertTriangle size={14} style={{ color: '#f59e0b' }} /> },
+    Low:    { border: '#64748b', bg: 'rgba(100,116,139,0.06)', text: '#94a3b8',  icon: <Info size={14} style={{ color: '#94a3b8' }} /> },
+  }
+
+  return (
+    <SectionCard icon={<ClipboardCheck size={16}/>} title="Reference Check Triggers" color="#f59e0b">
+      <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '14px' }}>
+        Topics that warrant verification with a reference before extending an offer.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {sorted.map((t, i) => {
+          const s = priorityStyle[t.priority] || priorityStyle.Low
+          return (
+            <div key={i} style={{
+              background: s.bg,
+              borderLeft: `3px solid ${s.border}`,
+              borderRadius: '6px',
+              padding: '10px 14px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                {s.icon}
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>{t.topic}</span>
+                <span style={{
+                  marginLeft: 'auto', fontSize: '10px', fontWeight: 600,
+                  color: s.text, background: `${s.border}18`,
+                  padding: '1px 7px', borderRadius: '10px',
+                }}>{t.priority}</span>
+              </div>
+              {t.suggested_question && (
+                <p style={{
+                  fontSize: '12px', color: '#a78bfa', fontStyle: 'italic',
+                  background: 'rgba(167,139,250,0.06)', padding: '6px 10px',
+                  borderRadius: '4px', marginBottom: '4px',
+                }}>
+                  "{t.suggested_question}"
+                </p>
+              )}
+              {t.reason && (
+                <p style={{ fontSize: '11px', color: '#64748b', margin: 0 }}>{t.reason}</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </SectionCard>
+  )
+}
+
+// ── HR Phase 3: Assessment Confidence ────────────────────────────────────────
+
+function AssessmentConfidenceCard({ data }) {
+  if (!data || typeof data.score !== 'number') return null
+
+  const score = data.score
+  const label = data.label || ''
+  const limiters = data.limiting_factors || []
+
+  const color = score >= 70 ? '#22c55e' : score >= 40 ? '#f59e0b' : '#ef4444'
+
+  return (
+    <SectionCard icon={<BarChart2Icon size={16}/>} title="Assessment Confidence" color={color}>
+      <div style={{ marginBottom: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>AI Confidence in Hire Recommendation</span>
+          <span style={{ fontSize: '13px', fontWeight: 700, color }}>{score}/100</span>
+        </div>
+        {/* Bar: red → yellow → green gradient */}
+        <div style={{ position: 'relative', height: '8px', borderRadius: '6px', background: 'linear-gradient(to right, #ef4444, #f59e0b, #22c55e)', overflow: 'visible' }}>
+          <div style={{
+            position: 'absolute',
+            left: `calc(${score}% - 7px)`,
+            top: '-5px',
+            width: '18px', height: '18px',
+            borderRadius: '50%',
+            background: color,
+            boxShadow: `0 0 8px 2px ${color}60`,
+            border: '2px solid #0f172a',
+          }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px' }}>
+          <span style={{ fontSize: '9px', color: '#ef4444' }}>Low Confidence</span>
+          <span style={{ fontSize: '11px', fontWeight: 600, color }}>{label}</span>
+          <span style={{ fontSize: '9px', color: '#22c55e' }}>High Confidence</span>
+        </div>
+      </div>
+
+      {limiters.length > 0 && (
+        <div style={{ marginBottom: '12px' }}>
+          <p style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Limiting Factors</p>
+          {limiters.map((f, i) => (
+            <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '4px', alignItems: 'flex-start' }}>
+              <Minus size={12} style={{ color: '#f59e0b', marginTop: '3px', flexShrink: 0 }} />
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>{f}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data.what_would_change_it && (
+        <blockquote style={{
+          margin: 0, padding: '8px 12px',
+          borderLeft: '3px solid ' + color,
+          background: 'var(--color-surface-2)',
+          borderRadius: '4px',
+        }}>
+          <p style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, marginBottom: '2px' }}>What would change this</p>
+          <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>{data.what_would_change_it}</p>
+        </blockquote>
+      )}
+    </SectionCard>
+  )
+}
+
+// ── HR Phase 2: Culture Fit Map ───────────────────────────────────────────────
+
+function CultureFitMap({ dimensions }) {
+  if (!dimensions || dimensions.length === 0) return null
+
+  return (
+    <SectionCard icon={<Sliders size={16}/>} title="Culture Fit Profile" color="#ec4899">
+      <p className="text-xs text-muted mb-4">
+        Where this candidate sits on 5 key work-style spectrums, inferred from their behavioral stories.
+      </p>
+      <div className="space-y-5">
+        {dimensions.map((dim, i) => {
+          const pos = Math.max(1, Math.min(5, dim.candidate_position || 3))
+          const pct = ((pos - 1) / 4) * 100
+          const col = pos <= 2 ? '#a78bfa' : pos === 3 ? '#94a3b8' : '#38bdf8'
+          return (
+            <div key={i}>
+              {/* Pole labels */}
+              <div className="flex justify-between mb-1.5">
+                <span className="text-[11px] font-semibold" style={{ color: '#a78bfa' }}>{dim.pole_left}</span>
+                <span className="text-[11px] font-semibold" style={{ color: '#38bdf8' }}>{dim.pole_right}</span>
+              </div>
+              {/* Spectrum bar with marker */}
+              <div className="relative h-2.5 rounded-full mb-2"
+                style={{ background: 'linear-gradient(to right, rgba(167,139,250,0.25), rgba(148,163,184,0.15), rgba(56,189,248,0.25))' }}>
+                <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 shadow-lg transition-all duration-700"
+                  style={{ left: `calc(${pct}% - 8px)`, background: col, borderColor: 'var(--color-bg)', boxShadow: `0 0 8px ${col}60` }} />
+              </div>
+              {/* Rationale */}
+              {dim.rationale && (
+                <p className="text-[11px] text-muted leading-relaxed">{dim.rationale}</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </SectionCard>
+  )
+}
+
+// ── HR Phase 2: EQ Profile Card ───────────────────────────────────────────────
+
+function EQProfileCard({ eqProfile }) {
+  if (!eqProfile || Object.keys(eqProfile).length === 0) return null
+
+  const EQ_DIMS = [
+    { key: 'self_awareness',      label: 'Self-Awareness',       color: '#a78bfa' },
+    { key: 'self_regulation',     label: 'Self-Regulation',      color: '#38bdf8' },
+    { key: 'empathy',             label: 'Empathy',              color: '#f472b6' },
+    { key: 'social_skills',       label: 'Social Skills',        color: '#4ade80' },
+    { key: 'intrinsic_motivation',label: 'Intrinsic Motivation', color: '#fb923c' },
+  ]
+
+  const labelColor = eqProfile.eq_overall_label === 'High EQ' ? '#4ade80'
+    : eqProfile.eq_overall_label === 'Moderate EQ' ? '#facc15'
+    : '#f87171'
+
+  const avg = Math.round(
+    EQ_DIMS.reduce((s, d) => s + (eqProfile[d.key] || 0), 0) / EQ_DIMS.length
+  )
+
+  return (
+    <SectionCard icon={<Smile size={16}/>} title="Emotional Intelligence Profile" color="#ec4899">
+      {/* Header: label + avg */}
+      <div className="flex items-center justify-between mb-5 px-4 py-3 rounded-xl"
+        style={{ background: 'rgba(236,72,153,0.07)', border: '1px solid rgba(236,72,153,0.18)' }}>
+        <div>
+          <p className="text-[10px] text-muted uppercase tracking-wider">EQ Assessment</p>
+          <p className="text-lg font-bold mt-0.5" style={{ color: labelColor }}>{eqProfile.eq_overall_label || '—'}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] text-muted uppercase tracking-wider">Avg Score</p>
+          <p className="text-2xl font-black" style={{ color: labelColor }}>{avg}</p>
+        </div>
+      </div>
+
+      {/* 5-dimension bars */}
+      <div className="space-y-3 mb-4">
+        {EQ_DIMS.map(({ key, label, color }) => {
+          const val = eqProfile[key] || 0
+          return (
+            <div key={key} className="flex items-center gap-3">
+              <span className="text-xs text-muted w-36 flex-shrink-0">{label}</span>
+              <div className="flex-1 rounded-full h-2.5" style={{ background: 'var(--color-surface-3)' }}>
+                <div className="h-2.5 rounded-full transition-all duration-700"
+                  style={{ width: `${val}%`, background: color }} />
+              </div>
+              <span className="text-xs font-bold w-10 text-right flex-shrink-0" style={{ color }}>{val}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Summary */}
+      {eqProfile.eq_summary && (
+        <div className="rounded-lg px-4 py-3"
+          style={{ background: 'rgba(236,72,153,0.05)', borderLeft: '3px solid rgba(236,72,153,0.4)' }}>
+          <p className="text-sm text-muted leading-relaxed italic">{eqProfile.eq_summary}</p>
+        </div>
+      )}
+    </SectionCard>
+  )
+}
+
 // ── Audio Clip Player ─────────────────────────────────────────────────────────
 
 function AudioClipPlayer({ audioUrl, startSec, label }) {
@@ -190,8 +803,8 @@ function AudioClipPlayer({ audioUrl, startSec, label }) {
         onClick={toggle}
         className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg transition-all"
         style={{
-          background: playing ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.06)',
-          border: `1px solid ${playing ? 'rgba(124,58,237,0.5)' : 'rgba(255,255,255,0.1)'}`,
+          background: playing ? 'rgba(124,58,237,0.2)' : 'var(--color-surface-2)',
+          border: `1px solid ${playing ? 'rgba(124,58,237,0.5)' : 'var(--color-border)'}`,
           color: playing ? '#a78bfa' : 'var(--color-muted)',
         }}>
         {playing ? <Pause size={11} /> : <Play size={11} />}
@@ -199,7 +812,7 @@ function AudioClipPlayer({ audioUrl, startSec, label }) {
         {label || 'Review the Tape'}
       </button>
       {playing && (
-        <div className="flex-1 max-w-[120px] h-1 rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }}>
+        <div className="flex-1 max-w-[120px] h-1 rounded-full" style={{ background: 'var(--color-surface-3)' }}>
           <div className="h-full rounded-full transition-all duration-300"
             style={{ width: `${progress}%`, background: '#7c3aed' }} />
         </div>
@@ -371,7 +984,7 @@ function ShareModal({ report, sessionId, onClose }) {
           {target_company && (
             <p className="text-xs text-muted">Target: <span className="text-cyan-400">{target_company}</span></p>
           )}
-          <p className="text-xs text-muted pt-1" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+          <p className="text-xs text-muted pt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
             Generated by AI Interviewer Platform
           </p>
         </div>
@@ -402,8 +1015,8 @@ function ShareModal({ report, sessionId, onClose }) {
                 value={shareUrl}
                 className="flex-1 text-xs px-3 py-2 rounded-lg font-mono truncate"
                 style={{
-                  background: 'rgba(255,255,255,0.06)',
-                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'var(--color-surface-2)',
+                  border: '1px solid var(--color-border)',
                   color: 'var(--color-text)',
                 }}
               />
@@ -411,8 +1024,8 @@ function ShareModal({ report, sessionId, onClose }) {
                 onClick={copyShareUrl}
                 className="flex items-center gap-1.5 text-xs py-2 px-3 rounded-lg transition-all"
                 style={{
-                  background: urlCopied ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.07)',
-                  border: `1px solid ${urlCopied ? '#4ade80' : 'rgba(255,255,255,0.12)'}`,
+                  background: urlCopied ? 'rgba(74,222,128,0.15)' : 'var(--color-surface-2)',
+                  border: `1px solid ${urlCopied ? '#4ade80' : 'var(--color-border)'}`,
                   color: urlCopied ? '#4ade80' : 'var(--color-muted)',
                 }}>
                 {urlCopied ? <Check size={13} /> : <Copy size={13} />}
@@ -427,7 +1040,7 @@ function ShareModal({ report, sessionId, onClose }) {
         <div className="flex gap-3">
           <button onClick={copyLink}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all"
-            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+            style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
             {copied ? <Check size={14} style={{ color: '#4ade80' }} /> : <Copy size={14} />}
             {copied ? 'Copied!' : 'Copy Page URL'}
           </button>
@@ -469,7 +1082,7 @@ function ReportLoading({ stage, progress, label, isFirstGeneration }) {
             <span>{label}</span>
             <span>{progress}%</span>
           </div>
-          <div className="h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.07)' }}>
+          <div className="h-2 rounded-full" style={{ background: 'var(--color-surface-3)' }}>
             <div className="h-full rounded-full transition-all duration-700"
               style={{
                 width: `${progress}%`,
@@ -480,12 +1093,11 @@ function ReportLoading({ stage, progress, label, isFirstGeneration }) {
         </div>
         <div className="space-y-1">
           {SSE_STAGES.map((s) => (
-            <div key={s.key} className={`flex items-center gap-2 text-xs transition-all ${
-              progress >= s.pct ? 'text-white' : 'text-muted'
-            }`}>
+            <div key={s.key} className="flex items-center gap-2 text-xs transition-all"
+              style={{ color: progress >= s.pct ? 'var(--color-text)' : 'var(--color-muted)' }}>
               {progress >= s.pct
                 ? <CheckCircle size={12} style={{ color: '#4ade80' }} />
-                : <div className="w-3 h-3 rounded-full" style={{ background: 'rgba(255,255,255,0.1)' }} />
+                : <div className="w-3 h-3 rounded-full" style={{ background: 'var(--color-surface-3)' }} />
               }
               {s.label}
             </div>
@@ -535,7 +1147,7 @@ function QTooltip({ active, payload }) {
   const d = payload[0]?.payload || {}
   return (
     <div className="glass p-3 text-xs max-w-xs" style={{ border: '1px solid rgba(124,58,237,0.4)' }}>
-      <p className="font-semibold mb-1 text-white text-sm">{d.label}</p>
+      <p className="font-semibold mb-1 text-sm" style={{ color: 'var(--color-text)' }}>{d.label}</p>
       <p className="text-muted">{d.question_text}</p>
       {d.skipped || d.score == null
         ? <p className="mt-1 text-yellow-400">Skipped</p>
@@ -550,7 +1162,7 @@ function FillerTooltip({ active, payload }) {
   const d = payload[0]?.payload || {}
   return (
     <div className="glass p-3 text-xs max-w-xs" style={{ border: '1px solid rgba(251,146,60,0.4)' }}>
-      <p className="font-semibold text-white mb-1">{d.question_id}</p>
+      <p className="font-semibold mb-1" style={{ color: 'var(--color-text)' }}>{d.question_id}</p>
       <p className="text-muted">Fillers: <span className="text-orange-400 font-bold">{d.filler_count}</span></p>
       {d.filler_words?.length > 0 && (
         <p className="text-muted mt-1">Words: {d.filler_words.slice(0, 5).join(', ')}</p>
@@ -584,6 +1196,7 @@ export default function ReportPage() {
   const [failedSections,    setFailedSections]    = useState([])       // list of section names that failed
   const [retryingStage,     setRetryingStage]     = useState(null)     // stage key currently retrying
   const [stageRetrySuccess, setStageRetrySuccess] = useState({})       // { stageKey: true } on success
+  const [hrAudience,        setHrAudience]        = useState('candidate') // 'candidate' | 'committee'
   const rawReportRef    = useRef(null)  // holds report payload for retry without re-render
   const startSSERef     = useRef(null)  // ref to startSSE so the error-screen "Try Again" can call it
   const sseWatchdogRef  = useRef(null)  // client-side 6-min watchdog for the SSE stream
@@ -707,6 +1320,19 @@ export default function ReportPage() {
     // Store reference so the error-screen "Try Again" button can re-invoke SSE.
     startSSERef.current = startSSE
 
+    // Mock route: /report/mock-hr or /report/mock-technical — no auth needed
+    if (sessionId.startsWith('mock-')) {
+      const roundType = sessionId.replace('mock-', '')
+      fetch(`/api/v1/report/${sessionId}?round_type=${roundType}`)
+        .then(r => r.json())
+        .then(json => {
+          if (json?.data) applyReport(json.data)
+          else setError('Mock report failed to load.')
+        })
+        .catch(() => setError('Could not reach backend. Is it running on port 8000?'))
+      return
+    }
+
     // Layer 1: sessionStorage — instant, no network needed
     try {
       const stored = sessionStorage.getItem(cacheKey)
@@ -822,6 +1448,33 @@ export default function ReportPage() {
     communication_pattern = '',
     culture_fit_narrative = '',
     behavioral_red_flags = [],
+    // HR Phase 1 — Professional Report Fields
+    key_signals = [],
+    competency_scorecard = [],
+    hire_confidence = '',
+    interview_datetime = '',
+    job_role = '',
+    // HR Phase 2 — Visual Enhancement Fields
+    culture_fit_dimensions = [],
+    eq_profile = {},
+    // HR Phase 3 — Coaching & Confidence Fields
+    coachability_index = {},
+    leadership_ic_fit = {},
+    reference_check_triggers = [],
+    assessment_confidence = {},
+    // HR Report Enhancement — Group A
+    explicit_red_flags = [],
+    seniority_calibration = {},
+    answer_depth_progression = {},
+    // HR Report Enhancement — Group B
+    peer_benchmarking = {},
+    role_gap_analysis = {},
+    story_uniqueness = {},
+    model_answer_comparison = [],
+    // HR Report Enhancement — Group C
+    pipeline_followup_questions = [],
+    hr_improvement_plan = {},
+    executive_brief = {},
     // Debug mode flag — set by backend when GROQ_API_KEY is missing
     _debug_mock = false,
   } = report
@@ -986,12 +1639,28 @@ export default function ReportPage() {
           </div>
         )}
 
+        {/* ── HR Phase 1: Professional Document Header ────────────────────── */}
+        {round_type === 'hr' && (
+          <HRDocumentHeader
+            candidateName={candidate_name}
+            jobRole={job_role}
+            difficulty={difficulty}
+            interviewDatetime={interview_datetime}
+            sessionId={sessionId}
+            overallScore={overall}
+            grade={grade}
+            hireRecommendation={hire_recommendation}
+            numQuestions={num_questions}
+            timerMins={timer_mins}
+          />
+        )}
+
         {/* ── Nav ─────────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold gradient-text mb-1">Interview Report</h1>
             {session_label && (
-              <p className="text-sm font-semibold text-white/90 mb-1">{session_label}</p>
+              <p className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text-2)' }}>{session_label}</p>
             )}
             <p className="text-muted text-sm">
               {ROUND_LABELS[round_type]} · {difficulty} · {num_questions} Qs · {timer_mins}m
@@ -1031,6 +1700,20 @@ export default function ReportPage() {
               <p className="text-sm leading-relaxed">{what_went_wrong}</p>
             </div>
           </div>
+        )}
+
+        {/* ── HR Phase 1: Executive Summary Panel ─────────────────────────── */}
+        {round_type === 'hr' && (
+          <SectionErrorBoundary>
+            <HRExecutiveSummary
+              hireRecommendation={hire_recommendation}
+              hireConfidence={hire_confidence}
+              summary={summary}
+              grade={grade}
+              comparedToLevel={compared_to_level}
+              keySignals={key_signals}
+            />
+          </SectionErrorBoundary>
         )}
 
         {/* ── Repeated Offenders alert ────────────────────────────────────── */}
@@ -1095,7 +1778,7 @@ export default function ReportPage() {
               { label: 'Grade',     val: grade || '—' },
             ].map(({ label, val }) => (
               <div key={label} className="text-center p-3 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
+                style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                 <p className="font-bold text-lg leading-none">{val}</p>
                 <p className="text-xs text-muted mt-0.5">{label}</p>
               </div>
@@ -1223,7 +1906,7 @@ export default function ReportPage() {
                           <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: d.color }}>{d.label}</p>
                           <p className="text-2xl font-bold tabular-nums" style={{ color: d.color }}>{acc}%</p>
                           <p className="text-[10.5px]" style={{ color: '#6b7280' }}>{d.c} / {d.t} correct</p>
-                          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-3)' }}>
                             <div className="h-full rounded-full transition-all duration-1000"
                               style={{ width: `${acc}%`, background: d.color }} />
                           </div>
@@ -1252,9 +1935,9 @@ export default function ReportPage() {
                             }}>{accuracy}%</span>
                           </div>
                         </div>
-                        <div className="relative h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                        <div className="relative h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-3)' }}>
                           {/* 60% threshold marker */}
-                          <div className="absolute top-0 bottom-0 w-px" style={{ left: '60%', background: 'rgba(255,255,255,0.2)' }} />
+                          <div className="absolute top-0 bottom-0 w-px" style={{ left: '60%', background: 'var(--color-border-strong)' }} />
                           <div className="h-full rounded-full transition-all duration-1000"
                             style={{
                               width: `${accuracy}%`,
@@ -1314,7 +1997,7 @@ export default function ReportPage() {
                       { label: 'Slow (>90s)', val: slowCount,  color: slowCount > 0 ? '#f59e0b' : '#4ade80',  note: slowCount > 0 ? 'Needed more time' : 'None' },
                     ].map(({ label, val, color, note }) => (
                       <div key={label} className="rounded-xl p-3 text-center"
-                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                        style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                         <p className="text-xl font-bold tabular-nums" style={{ color }}>{val}</p>
                         <p className="text-[10px] font-semibold mt-0.5" style={{ color: '#6b7280' }}>{label}</p>
                         {note && <p className="text-[9.5px] mt-0.5" style={{ color: '#4b5563' }}>{note}</p>}
@@ -1561,7 +2244,7 @@ export default function ReportPage() {
                       const priBg    = priority === 'high' ? 'rgba(248,113,113,0.10)' : priority === 'low' ? 'rgba(74,222,128,0.10)' : 'rgba(250,204,21,0.10)'
                       return (
                         <div key={i} className="flex items-start gap-3 p-3 rounded-xl"
-                          style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                          style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5"
                             style={{ background: priBg, color: priColor, border: `1px solid ${priColor}40` }}>
                             {priority.toUpperCase()}
@@ -1620,7 +2303,7 @@ export default function ReportPage() {
                           <summary className="flex items-center gap-3 px-4 py-3 cursor-pointer list-none select-none">
                             {/* Q# badge */}
                             <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
-                              style={{ background: 'rgba(255,255,255,0.07)' }}>
+                              style={{ background: 'var(--color-surface-3)' }}>
                               {i + 1}
                             </div>
                             {/* Correctness icon */}
@@ -1649,7 +2332,7 @@ export default function ReportPage() {
                               )}
                               {q.topic && (
                                 <span className="text-[9.5px] px-1.5 py-0.5 rounded hidden sm:inline"
-                                  style={{ background: 'rgba(255,255,255,0.05)', color: '#6b7280' }}>
+                                  style={{ background: 'var(--color-surface-3)', color: 'var(--color-muted)' }}>
                                   {q.topic}
                                 </span>
                               )}
@@ -1657,7 +2340,7 @@ export default function ReportPage() {
                           </summary>
 
                           {/* Expanded detail */}
-                          <div className="px-4 pb-4 pt-3 space-y-2.5 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                          <div className="px-4 pb-4 pt-3 space-y-2.5 border-t" style={{ borderColor: 'var(--color-border)' }}>
                             {/* Your answer */}
                             <div className="flex items-start gap-2">
                               <span className="text-[10px] font-semibold uppercase tracking-wide flex-shrink-0 w-20 mt-0.5"
@@ -1737,66 +2420,105 @@ export default function ReportPage() {
             Hidden for DSA — DSA Performance Dashboard renders its own topic-mastery radar and hire signal. */}
         <SectionErrorBoundary>
         {round_type !== 'mcq_practice' && round_type !== 'dsa' && (legacyRadarData.length > 0 || Object.keys(hire_signal || {}).length >= 3) && (
-          <div className={legacyRadarData.length > 0 && round_type !== 'hr' ? 'grid grid-cols-1 lg:grid-cols-2 gap-5' : ''}>
-            {/* Technical Knowledge — hidden for HR rounds (not relevant to behavioral assessment) */}
-            {legacyRadarData.length > 0 && round_type !== 'hr' && (() => {
-              const assessedAxes = legacyRadarData.filter(d => d.A > 0)
-              const notAssessed  = legacyRadarData.filter(d => d.A === 0).map(d => d.subject)
-              return (
-                <SectionCard icon={<Brain size={16}/>} title="Technical Knowledge Breakdown" color="#7c3aed">
+          round_type === 'hr' ? (
+            /* ── HR: Full-width 7-Axis Competency Radar + Hire Signal below ── */
+            <div className="space-y-5">
+              {legacyRadarData.length > 0 && (
+                <SectionCard icon={<Brain size={16}/>} title="7-Axis Competency Radar" color="#ec4899">
                   <p className="text-xs text-muted mb-3">
-                    Scores for CS domains actually covered in this session.
-                    {notAssessed.length > 0 && (
-                      <span className="text-amber-400"> Not assessed: {notAssessed.join(', ')}.</span>
-                    )}
+                    Behavioral competency scores across all 7 assessment dimensions.
                   </p>
-                  {assessedAxes.length >= 2 ? (
-                    <ResponsiveContainer width="100%" height={260}>
-                      <RadarChart data={assessedAxes} margin={{ top: 0, right: 30, bottom: 0, left: 30 }}>
-                        <PolarGrid stroke="rgba(255,255,255,0.08)" />
-                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                        <Radar name="Score" dataKey="A" stroke="#7c3aed" fill="#7c3aed" fillOpacity={0.2}
-                          dot={{ r: 3, fill: '#a78bfa' }} />
-                        <Tooltip formatter={(v) => [`${v}/10`, 'Score']}
-                          contentStyle={{ background: '#1e1e2e', border: '1px solid #7c3aed40', borderRadius: 8 }} />
-                      </RadarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="space-y-2">
-                      {assessedAxes.map(d => (
-                        <div key={d.subject} className="flex items-center gap-3">
-                          <span className="text-sm text-muted w-36 flex-shrink-0">{d.subject}</span>
-                          <div className="flex-1 bg-white/5 rounded-full h-2">
-                            <div className="h-2 rounded-full" style={{
-                              width: `${d.A * 10}%`,
-                              background: d.A >= 7 ? '#4ade80' : d.A >= 5 ? '#facc15' : '#f87171'
-                            }} />
-                          </div>
-                          <span className="text-xs w-10 text-right" style={{
-                            color: d.A >= 7 ? '#4ade80' : d.A >= 5 ? '#facc15' : '#f87171'
-                          }}>{d.A}/10</span>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <RadarChart data={legacyRadarData} margin={{ top: 10, right: 40, bottom: 10, left: 40 }}>
+                      <PolarGrid stroke="var(--color-border)" />
+                      <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 9 }} />
+                      <Radar name="Score" dataKey="A" stroke="#ec4899" fill="#ec4899" fillOpacity={0.18}
+                        dot={{ r: 3, fill: '#f472b6' }} />
+                      <Tooltip formatter={(v) => [`${v}/100`, 'Score']}
+                        contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }} />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                  {/* Bar fallback rows for scores */}
+                  <div className="space-y-2 mt-3">
+                    {legacyRadarData.map(d => (
+                      <div key={d.subject} className="flex items-center gap-3">
+                        <span className="text-xs text-muted w-44 flex-shrink-0 truncate">{d.subject}</span>
+                        <div className="flex-1 rounded-full h-1.5" style={{ background: 'var(--color-surface-3)' }}>
+                          <div className="h-1.5 rounded-full transition-all duration-500"
+                            style={{ width: `${d.A}%`, background: scoreColor(d.A) }} />
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <span className="text-xs font-semibold w-10 text-right flex-shrink-0"
+                          style={{ color: scoreColor(d.A) }}>{d.A}</span>
+                      </div>
+                    ))}
+                  </div>
                 </SectionCard>
-              )
-            })()}
-            {Object.keys(hire_signal || {}).length >= 3 && (
-              <SectionCard
-                icon={<Target size={16}/>}
-                title={round_type === 'hr' ? 'Candidate Signal' : 'Hire Signal'}
-                color={round_type === 'hr' ? '#ec4899' : '#f59e0b'}
-              >
-                <p className="text-xs text-muted mb-3">
-                  {round_type === 'hr'
-                    ? 'How a hiring manager would assess this candidate across 5 behavioral dimensions.'
-                    : 'How a hiring manager would rate your readiness across 5 dimensions.'}
-                </p>
-                <HireSignalRadar hireSignal={hire_signal} roundType={round_type} />
-              </SectionCard>
-            )}
-          </div>
+              )}
+              {Object.keys(hire_signal || {}).length >= 3 && (
+                <SectionCard icon={<Target size={16}/>} title="Candidate Signal" color="#ec4899">
+                  <p className="text-xs text-muted mb-3">
+                    How a hiring manager would assess this candidate across 5 behavioral dimensions.
+                  </p>
+                  <HireSignalRadar hireSignal={hire_signal} roundType={round_type} />
+                </SectionCard>
+              )}
+            </div>
+          ) : (
+            /* ── Technical/non-HR: original two-column grid ── */
+            <div className={legacyRadarData.length > 0 ? 'grid grid-cols-1 lg:grid-cols-2 gap-5' : ''}>
+              {legacyRadarData.length > 0 && (() => {
+                const assessedAxes = legacyRadarData.filter(d => d.A > 0)
+                const notAssessed  = legacyRadarData.filter(d => d.A === 0).map(d => d.subject)
+                return (
+                  <SectionCard icon={<Brain size={16}/>} title="Technical Knowledge Breakdown" color="#7c3aed">
+                    <p className="text-xs text-muted mb-3">
+                      Scores for CS domains actually covered in this session.
+                      {notAssessed.length > 0 && (
+                        <span className="text-amber-400"> Not assessed: {notAssessed.join(', ')}.</span>
+                      )}
+                    </p>
+                    {assessedAxes.length >= 2 ? (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <RadarChart data={assessedAxes} margin={{ top: 0, right: 30, bottom: 0, left: 30 }}>
+                          <PolarGrid stroke="var(--color-border)" />
+                          <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                          <Radar name="Score" dataKey="A" stroke="#7c3aed" fill="#7c3aed" fillOpacity={0.2}
+                            dot={{ r: 3, fill: '#a78bfa' }} />
+                          <Tooltip formatter={(v) => [`${v}/10`, 'Score']}
+                            contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }} />
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="space-y-2">
+                        {assessedAxes.map(d => (
+                          <div key={d.subject} className="flex items-center gap-3">
+                            <span className="text-sm text-muted w-36 flex-shrink-0">{d.subject}</span>
+                            <div className="flex-1 rounded-full h-2" style={{ background: 'var(--color-surface-3)' }}>
+                              <div className="h-2 rounded-full" style={{
+                                width: `${d.A * 10}%`,
+                                background: d.A >= 7 ? '#4ade80' : d.A >= 5 ? '#facc15' : '#f87171'
+                              }} />
+                            </div>
+                            <span className="text-xs w-10 text-right" style={{
+                              color: d.A >= 7 ? '#4ade80' : d.A >= 5 ? '#facc15' : '#f87171'
+                            }}>{d.A}/10</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </SectionCard>
+                )
+              })()}
+              {Object.keys(hire_signal || {}).length >= 3 && (
+                <SectionCard icon={<Target size={16}/>} title="Hire Signal" color="#f59e0b">
+                  <p className="text-xs text-muted mb-3">
+                    How a hiring manager would rate your readiness across 5 dimensions.
+                  </p>
+                  <HireSignalRadar hireSignal={hire_signal} roundType={round_type} />
+                </SectionCard>
+              )}
+            </div>
+          )
         )}
         </SectionErrorBoundary>
 
@@ -1822,7 +2544,7 @@ export default function ReportPage() {
               <SectionCard icon={<MessageSquare size={16}/>} title={axTitle} color={axColor}>
                 <ResponsiveContainer width="100%" height={260}>
                   <RadarChart data={radarData} margin={{ top: 0, right: 30, bottom: 0, left: 30 }}>
-                    <PolarGrid stroke="rgba(255,255,255,0.08)" />
+                    <PolarGrid stroke="var(--color-border)" />
                     <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
                     <Radar name="Score" dataKey="A" stroke={axColor} fill={axColor} fillOpacity={0.2}
                       dot={{ r: 3, fill: axDot }} />
@@ -1846,7 +2568,7 @@ export default function ReportPage() {
               <SectionCard icon={<TrendingUp size={16}/>} title="Delivery Consistency" color="#a78bfa">
                 {delivery_consistency?.verdict && (
                   <p className="text-sm text-muted mb-3">
-                    <span className="font-semibold text-white">{delivery_consistency.verdict}</span>
+                    <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{delivery_consistency.verdict}</span>
                     {delivery_consistency.drop != null && (
                       <> — {delivery_consistency.drop > 0 ? `dropped ${delivery_consistency.drop} pts` : `improved ${Math.abs(delivery_consistency.drop)} pts`} by end</>
                     )}
@@ -2001,7 +2723,7 @@ export default function ReportPage() {
                 return (
                   <div key={i} className="flex items-center gap-3">
                     <span className="text-sm text-muted w-24 truncate flex-shrink-0">{cat.category}</span>
-                    <div className="flex-1 bg-white/5 rounded-full h-2">
+                    <div className="flex-1 rounded-full h-2" style={{ background: 'var(--color-surface-3)' }}>
                       <div className="h-2 rounded-full transition-all"
                         style={{ width: `${pct}%`, background: scoreColor(pct) }} />
                     </div>
@@ -2025,13 +2747,33 @@ export default function ReportPage() {
             {strong_areas.length === 0 ? <p className="text-muted text-sm">—</p>
               : strong_areas.map((a, i) => {
                 const { area, evidence, score } = normArea(a)
+                const isHREnriched = round_type === 'hr' && (a.evidence_quote || a.why_it_landed)
                 return (
-                  <div key={i} className="flex items-start gap-2 mb-3">
+                  <div key={i} className={`flex items-start gap-2 ${isHREnriched ? 'mb-4' : 'mb-3'}`}>
                     <CheckCircle size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-medium">{area || a}</p>
-                      {evidence && <p className="text-xs text-muted mt-0.5">"{evidence}"</p>}
-                      {score && <Chip label={`${score}/100`} color="#4ade80" size="xs" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium">{area || a}</p>
+                        {a.exact_moment && <Chip label={a.exact_moment} color="#4ade80" size="xs" />}
+                        {score && <Chip label={`${score}/100`} color="#4ade80" size="xs" />}
+                      </div>
+                      {isHREnriched ? (
+                        <>
+                          {a.evidence_quote && (
+                            <p className="text-xs italic mt-1.5 leading-relaxed px-2 py-1.5 rounded"
+                              style={{ color: 'var(--color-muted)', background: 'rgba(74,222,128,0.06)', borderLeft: '2px solid rgba(74,222,128,0.35)' }}>
+                              "{a.evidence_quote}"
+                            </p>
+                          )}
+                          {a.why_it_landed && (
+                            <p className="text-[11px] mt-1" style={{ color: 'rgba(74,222,128,0.75)' }}>
+                              <span className="font-semibold">Why it landed: </span>{a.why_it_landed}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        evidence && <p className="text-xs text-muted mt-0.5">"{evidence}"</p>
+                      )}
                     </div>
                   </div>
                 )
@@ -2059,6 +2801,66 @@ export default function ReportPage() {
         </div>
 
 
+        {/* ── HR Phase 1: Competency Scorecard ────────────────────────────── */}
+        {round_type === 'hr' && (
+          <SectionErrorBoundary>
+            <HRCompetencyScorecard
+              competencyScorecard={competency_scorecard}
+              axisPercentiles={peer_benchmarking?.axis_percentiles || {}}
+              onRetry={null}
+              isRetrying={false}
+            />
+          </SectionErrorBoundary>
+        )}
+
+        {/* ── HR Enhancement: Seniority Calibration ────────────────────────── */}
+        {round_type === 'hr' && seniority_calibration?.level && (() => {
+          const levelColors = {
+            'Junior':          { color: '#60a5fa', bg: 'rgba(96,165,250,0.1)',  border: 'rgba(96,165,250,0.25)' },
+            'Mid-Level':       { color: '#34d399', bg: 'rgba(52,211,153,0.1)',  border: 'rgba(52,211,153,0.25)' },
+            'Senior':          { color: '#a78bfa', bg: 'rgba(167,139,250,0.1)', border: 'rgba(167,139,250,0.25)' },
+            'Staff/Principal': { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  border: 'rgba(245,158,11,0.25)' },
+          }
+          const confColors = { High: '#4ade80', Medium: '#facc15', Low: '#f87171' }
+          const lc  = levelColors[seniority_calibration.level] || levelColors['Mid-Level']
+          const cc  = confColors[seniority_calibration.confidence] || '#facc15'
+          return (
+            <SectionCard icon={<Award size={16}/>} title="Seniority Calibration" color="#a78bfa">
+              <div className="flex items-start gap-4 flex-wrap">
+                {/* Level badge */}
+                <div className="flex-shrink-0 rounded-xl px-5 py-3 text-center"
+                  style={{ background: lc.bg, border: `1px solid ${lc.border}` }}>
+                  <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Behavioral Level</p>
+                  <p className="text-xl font-black" style={{ color: lc.color }}>{seniority_calibration.level}</p>
+                  {seniority_calibration.confidence && (
+                    <p className="text-[10px] mt-1 font-semibold" style={{ color: cc }}>
+                      {seniority_calibration.confidence} Confidence
+                    </p>
+                  )}
+                </div>
+                {/* Rationale + signals */}
+                <div className="flex-1 min-w-[180px]">
+                  {seniority_calibration.rationale && (
+                    <p className="text-xs leading-relaxed mb-2.5" style={{ color: 'var(--color-muted)' }}>
+                      {seniority_calibration.rationale}
+                    </p>
+                  )}
+                  {seniority_calibration.evidence_signals?.length > 0 && (
+                    <div className="space-y-1">
+                      {seniority_calibration.evidence_signals.map((sig, i) => (
+                        <div key={i} className="flex items-start gap-1.5">
+                          <span className="text-purple-400 flex-shrink-0 mt-0.5">•</span>
+                          <p className="text-[11px]" style={{ color: 'var(--color-muted)' }}>{sig}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </SectionCard>
+          )
+        })()}
+
         {/* ── HR: Story Completeness Analysis ─────────────────────────────── */}
         {round_type === 'hr' && star_story_matrix?.length > 0 && (() => {
           const total       = star_story_matrix.length
@@ -2078,6 +2880,9 @@ export default function ReportPage() {
           const topMissing   = Object.entries(missingMap).sort(([,a],[,b]) => b - a)[0]?.[0] || 'None'
           const highSpecCount = star_story_matrix.filter(q => q.specificity_level?.startsWith('High')).length
           const compColor    = avgCompletion >= 75 ? '#4ade80' : avgCompletion >= 50 ? '#facc15' : '#f87171'
+          const origMap      = Object.fromEntries(
+            (story_uniqueness?.per_question_originality || []).map(o => [o.question_id, o])
+          )
 
           const ELEMS = [
             { key: 'S', label: 'Situation', field: 'situation_present', hint: 'Set the scene with context' },
@@ -2116,7 +2921,7 @@ export default function ReportPage() {
                       <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0"
                         style={{ background: `${c}22`, color: c }}>{key}</span>
                       <span className="text-xs text-muted w-16 flex-shrink-0">{label}</span>
-                      <div className="flex-1 bg-white/5 rounded-full h-2">
+                      <div className="flex-1 rounded-full h-2" style={{ background: 'var(--color-surface-3)' }}>
                         <div className="h-2 rounded-full transition-all duration-500"
                           style={{ width: `${pct}%`, background: c }} />
                       </div>
@@ -2128,41 +2933,149 @@ export default function ReportPage() {
                 })}
               </div>
 
-              {/* Per-answer compact breakdown */}
-              <p className="text-xs text-muted uppercase tracking-wider mb-2">Per-Answer Breakdown</p>
-              <div className="space-y-1.5">
+              {/* Per-answer full cards */}
+              <p className="text-xs text-muted uppercase tracking-wider mb-3">Per-Answer Breakdown</p>
+              <div className="space-y-4">
                 {star_story_matrix.map((q, i) => {
-                  const sc = q.star_score ?? 0
-                  const c  = sc >= 8 ? '#4ade80' : sc >= 5 ? '#facc15' : '#f87171'
+                  const sc  = q.star_score ?? 0
+                  const pct = q.star_completeness_pct ?? Math.round(([q.situation_present, q.task_present, q.action_present, q.result_present].filter(Boolean).length / 4) * 100)
+                  const c   = sc >= 8 ? '#4ade80' : sc >= 5 ? '#facc15' : '#f87171'
+                  const specColor = q.specificity_level?.startsWith('High') ? '#4ade80'
+                    : q.specificity_level?.startsWith('Medium') ? '#facc15' : '#f87171'
                   return (
-                    <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg"
-                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)' }}>
-                      <span className="text-xs font-bold w-6 flex-shrink-0" style={{ color: c }}>{q.question_id}</span>
-                      <span className="text-xs text-muted truncate flex-1 min-w-0">{q.competency_category}</span>
-                      {/* Element dots */}
-                      <div className="flex gap-1 flex-shrink-0">
-                        {[
-                          { k: 'S', v: q.situation_present },
-                          { k: 'T', v: q.task_present },
-                          { k: 'A', v: q.action_present },
-                          { k: 'R', v: q.result_present },
-                        ].map(({ k, v }) => (
-                          <span key={k} className="w-4 h-4 rounded text-[9px] font-bold flex items-center justify-center"
-                            style={{
-                              background: v ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.04)',
-                              color: v ? '#4ade80' : '#475569',
-                            }}>{k}</span>
-                        ))}
+                    <div key={i} className="rounded-xl overflow-hidden"
+                      style={{ border: '1px solid rgba(236,72,153,0.18)', background: 'var(--color-surface-2)' }}>
+                      {/* Story header */}
+                      <div className="flex items-center gap-3 px-4 py-3"
+                        style={{ background: 'rgba(236,72,153,0.06)', borderBottom: '1px solid rgba(236,72,153,0.12)' }}>
+                        <span className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black flex-shrink-0"
+                          style={{ background: `${c}20`, color: c }}>{q.question_id || `Q${i+1}`}</span>
+                        <span className="flex-1 text-sm font-semibold truncate">{q.competency_category}</span>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-xs font-bold" style={{ color: c }}>{sc}/10</span>
+                          <Chip label={q.specificity_level?.split(' ')[0] || '—'} color={specColor} size="xs" />
+                          {(() => {
+                            const orig = origMap[q.question_id || `Q${i+1}`]
+                            if (!orig) return null
+                            const isRehearsed = orig.rehearsal_flag || orig.originality_score < 50
+                            const chipLabel   = isRehearsed ? 'Scripted' : orig.originality_score >= 70 ? 'Authentic' : 'Mixed'
+                            const chipColor   = isRehearsed ? '#f59e0b' : orig.originality_score >= 70 ? '#4ade80' : '#94a3b8'
+                            return <Chip label={chipLabel} color={chipColor} size="xs" />
+                          })()}
+                        </div>
                       </div>
-                      <span className="text-xs font-semibold flex-shrink-0 w-9 text-right" style={{ color: c }}>{sc}/10</span>
-                      {q.missing_element && q.missing_element !== 'None' && (
-                        <span className="text-[10px] text-amber-400 flex-shrink-0 hidden sm:block w-24 text-right truncate">
-                          ✗ {q.missing_element}
-                        </span>
-                      )}
+                      {/* STAR element badges + completeness bar */}
+                      <div className="px-4 py-3">
+                        <div className="flex items-center gap-3 mb-2.5">
+                          <div className="flex gap-1.5">
+                            {[
+                              { k: 'S', v: q.situation_present },
+                              { k: 'T', v: q.task_present },
+                              { k: 'A', v: q.action_present },
+                              { k: 'R', v: q.result_present },
+                            ].map(({ k, v }) => (
+                              <span key={k} className="w-6 h-6 rounded-md text-[10px] font-bold flex items-center justify-center"
+                                style={{
+                                  background: v ? 'rgba(74,222,128,0.18)' : 'var(--color-surface-3)',
+                                  color: v ? '#4ade80' : 'var(--color-muted)',
+                                  border: `1px solid ${v ? 'rgba(74,222,128,0.35)' : 'var(--color-border)'}`,
+                                }}>{k}</span>
+                            ))}
+                          </div>
+                          {q.missing_element && q.missing_element !== 'None' && (
+                            <span className="text-[10px] text-amber-400">✗ Missing: {q.missing_element}</span>
+                          )}
+                          <span className="ml-auto text-[11px] font-semibold" style={{ color: c }}>{pct}%</span>
+                        </div>
+                        {/* Completeness bar */}
+                        <div className="rounded-full h-1.5 mb-3" style={{ background: 'var(--color-surface-3)' }}>
+                          <div className="h-1.5 rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: c }} />
+                        </div>
+                        {/* Question text */}
+                        {q.question_text && (
+                          <div className="mb-2 rounded-lg px-3 py-2"
+                            style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                            <p className="text-[10px] text-muted uppercase tracking-wider mb-0.5">Question Asked</p>
+                            <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-2)' }}>{q.question_text}</p>
+                          </div>
+                        )}
+                        {/* Answer summary */}
+                        {q.answer_summary && (
+                          <div className="mb-2 rounded-lg px-3 py-2"
+                            style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                            <p className="text-[10px] text-muted uppercase tracking-wider mb-0.5">Answer Summary</p>
+                            <p className="text-xs leading-relaxed" style={{ color: 'var(--color-muted)' }}>{q.answer_summary}</p>
+                          </div>
+                        )}
+                        {/* Verbatim quote */}
+                        {q.best_verbatim_quote && q.best_verbatim_quote !== 'No notable quote.' && (
+                          <div className="rounded-lg px-3 py-2.5"
+                            style={{ borderLeft: '3px solid rgba(236,72,153,0.5)', background: 'rgba(236,72,153,0.04)' }}>
+                            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">In their words</p>
+                            <p className="text-xs leading-relaxed italic" style={{ color: 'var(--color-text-2)' }}>
+                              "{q.best_verbatim_quote}"
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )
                 })}
+              </div>
+            </SectionCard>
+          )
+        })()}
+
+        {/* ── HR Enhancement: Answer Depth Progression ─────────────────────── */}
+        {round_type === 'hr' && answer_depth_progression?.arc?.length >= 2 && (() => {
+          const { arc, trend, peak_question, lowest_question, trend_rationale } = answer_depth_progression
+          const trendColors = {
+            Improving:    { color: '#4ade80', bg: 'rgba(74,222,128,0.1)',  border: 'rgba(74,222,128,0.25)' },
+            Declining:    { color: '#f87171', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.25)' },
+            Consistent:   { color: '#60a5fa', bg: 'rgba(96,165,250,0.1)',  border: 'rgba(96,165,250,0.25)' },
+            Inconsistent: { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  border: 'rgba(245,158,11,0.25)' },
+          }
+          const tc = trendColors[trend] || trendColors.Consistent
+          const chartData = arc.map(pt => ({ name: pt.q, score: pt.score }))
+          const minScore  = Math.max(0,  Math.min(...arc.map(p => p.score)) - 10)
+          const maxScore  = Math.min(100, Math.max(...arc.map(p => p.score)) + 10)
+          return (
+            <SectionCard icon={<Activity size={16}/>} title="Answer Depth Progression" color="#60a5fa">
+              <div className="flex items-center gap-3 mb-4 flex-wrap">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg flex-shrink-0"
+                  style={{ background: tc.bg, border: `1px solid ${tc.border}` }}>
+                  {trend === 'Improving' && <TrendingUp size={14} style={{ color: tc.color }} />}
+                  {trend === 'Declining' && <TrendingDown size={14} style={{ color: tc.color }} />}
+                  {(trend === 'Consistent' || trend === 'Inconsistent') && <Minus size={14} style={{ color: tc.color }} />}
+                  <span className="text-xs font-bold" style={{ color: tc.color }}>{trend}</span>
+                </div>
+                <div className="flex gap-3 text-[11px]" style={{ color: 'var(--color-muted)' }}>
+                  {peak_question && <span>Peak: <span className="font-semibold text-green-400">{peak_question}</span></span>}
+                  {lowest_question && <span>Lowest: <span className="font-semibold text-red-400">{lowest_question}</span></span>}
+                </div>
+              </div>
+              {trend_rationale && (
+                <p className="text-xs mb-4" style={{ color: 'var(--color-muted)' }}>{trend_rationale}</p>
+              )}
+              <div style={{ height: 140 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,0.15)" />
+                    <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[minScore, maxScore]} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 12, color: 'var(--color-text)' }}
+                      labelStyle={{ color: 'var(--color-text-2)' }}
+                      formatter={(v) => [`${v}/100`, 'Score']}
+                    />
+                    <ReferenceLine y={arc.reduce((s, p) => s + p.score, 0) / arc.length} stroke="var(--color-border-strong)" strokeDasharray="4 4" />
+                    <Line
+                      type="monotone" dataKey="score" stroke={tc.color} strokeWidth={2.5}
+                      dot={{ fill: tc.color, r: 4, strokeWidth: 0 }}
+                      activeDot={{ r: 6, fill: tc.color }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
             </SectionCard>
           )
@@ -2182,7 +3095,7 @@ export default function ReportPage() {
                   : '#475569'
                 const bgColor = cat.covered
                   ? `${perfColor}0d`
-                  : 'rgba(255,255,255,0.02)'
+                  : 'var(--color-surface-2)'
                 return (
                   <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-lg"
                     style={{ background: bgColor, border: `1px solid ${cat.covered ? `${perfColor}28` : 'var(--color-border)'}` }}>
@@ -2202,48 +3115,719 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
-        {/* ── HR: Culture Fit + Communication Pattern + Observations ─────── */}
-        {round_type === 'hr' && (culture_fit_narrative || communication_pattern || behavioral_red_flags?.length > 0) && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {(culture_fit_narrative || communication_pattern) && (
-              <SectionCard icon={<Users size={16}/>} title="Culture Fit & Communication Style" color="#ec4899">
-                {communication_pattern && (() => {
-                  const isStrong = communication_pattern.includes('Anecdote')
-                  const isWeak   = communication_pattern.includes('Too-brief') || communication_pattern.includes('Rambling')
-                  const patColor = isStrong ? '#4ade80' : isWeak ? '#f87171' : '#facc15'
-                  return (
-                    <div className="mb-4 p-3 rounded-lg" style={{ background: `${patColor}0d`, border: `1px solid ${patColor}28` }}>
-                      <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Communication Pattern</p>
-                      <p className="text-sm font-semibold" style={{ color: patColor }}>{communication_pattern}</p>
-                    </div>
-                  )
-                })()}
-                {culture_fit_narrative && (
-                  <div>
-                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1.5">Environment Fit</p>
-                    <p className="text-sm text-muted leading-relaxed">{culture_fit_narrative}</p>
-                  </div>
-                )}
-              </SectionCard>
-            )}
-            {behavioral_red_flags?.length > 0 && (
-              <SectionCard icon={<AlertTriangle size={16}/>} title="Behavioral Observations" color="#f59e0b">
-                <p className="text-xs text-muted mb-3">
-                  Patterns worth discussing in a debrief.
-                </p>
-                <div className="space-y-2">
-                  {behavioral_red_flags.map((flag, i) => (
-                    <div key={i} className="flex gap-2.5 p-2.5 rounded-lg"
-                      style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                      <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
-                      <p className="text-xs text-muted leading-relaxed">{flag}</p>
-                    </div>
-                  ))}
+        {/* ── HR: Culture Fit + Communication Pattern ──────────────────────── */}
+        {round_type === 'hr' && (culture_fit_narrative || communication_pattern) && (
+          <SectionCard icon={<Users size={16}/>} title="Culture Fit & Communication Style" color="#ec4899">
+            {communication_pattern && (() => {
+              const isStrong = communication_pattern.includes('Anecdote')
+              const isWeak   = communication_pattern.includes('Too-brief') || communication_pattern.includes('Rambling')
+              const patColor = isStrong ? '#4ade80' : isWeak ? '#f87171' : '#facc15'
+              return (
+                <div className="mb-4 p-3 rounded-lg" style={{ background: `${patColor}0d`, border: `1px solid ${patColor}28` }}>
+                  <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Communication Pattern</p>
+                  <p className="text-sm font-semibold" style={{ color: patColor }}>{communication_pattern}</p>
                 </div>
-              </SectionCard>
+              )
+            })()}
+            {culture_fit_narrative && (
+              <div>
+                <p className="text-[10px] text-muted uppercase tracking-wider mb-1.5">Environment Fit Narrative</p>
+                <p className="text-sm text-muted leading-relaxed">{culture_fit_narrative}</p>
+              </div>
             )}
+          </SectionCard>
+        )}
+
+        {/* ── HR Phase 2: Culture Fit Spectrum Map ─────────────────────────── */}
+        {round_type === 'hr' && culture_fit_dimensions?.length > 0 && (
+          <SectionErrorBoundary>
+            <CultureFitMap dimensions={culture_fit_dimensions} />
+          </SectionErrorBoundary>
+        )}
+
+        {/* ── HR Phase 2: EQ Profile ────────────────────────────────────────── */}
+        {round_type === 'hr' && eq_profile && Object.keys(eq_profile).length > 0 && (
+          <SectionErrorBoundary>
+            <EQProfileCard eqProfile={eq_profile} />
+          </SectionErrorBoundary>
+        )}
+
+        {/* ── HR Phase 3: Coachability + Leadership IC (2-column) ──────────── */}
+        {round_type === 'hr' && (coachability_index?.score != null || leadership_ic_fit?.spectrum_position != null) && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px' }}>
+            <SectionErrorBoundary>
+              <CoachabilityCard data={coachability_index} />
+            </SectionErrorBoundary>
+            <SectionErrorBoundary>
+              <LeadershipICFitBar data={leadership_ic_fit} />
+            </SectionErrorBoundary>
           </div>
         )}
+
+        {/* ── HR Phase 3: Reference Check Triggers ─────────────────────────── */}
+        {round_type === 'hr' && reference_check_triggers?.length > 0 && (
+          <SectionErrorBoundary>
+            <ReferenceCheckPanel triggers={reference_check_triggers} />
+          </SectionErrorBoundary>
+        )}
+
+        {/* ── HR Phase 3: Assessment Confidence ────────────────────────────── */}
+        {round_type === 'hr' && assessment_confidence?.score != null && (
+          <SectionErrorBoundary>
+            <AssessmentConfidenceCard data={assessment_confidence} />
+          </SectionErrorBoundary>
+        )}
+
+        {/* ── HR Enhancement: Explicit Red Flags (consolidated, severity-ranked) ── */}
+        {round_type === 'hr' && explicit_red_flags?.length > 0 && (() => {
+          const SEV_RF = {
+            High:   { color: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.3)',   icon: <ShieldAlert size={13} style={{ color: '#ef4444' }} /> },
+            Medium: { color: '#f59e0b', bg: 'rgba(245,158,11,0.07)',  border: 'rgba(245,158,11,0.25)', icon: <AlertTriangle size={13} style={{ color: '#f59e0b' }} /> },
+            Low:    { color: '#facc15', bg: 'rgba(250,204,21,0.06)',  border: 'rgba(250,204,21,0.22)', icon: <Info size={13} style={{ color: '#facc15' }} /> },
+          }
+          const sortedFlags = [...explicit_red_flags].sort((a, b) => {
+            const order = { High: 0, Medium: 1, Low: 2 }
+            return (order[a.severity] ?? 1) - (order[b.severity] ?? 1)
+          })
+          const highCount = explicit_red_flags.filter(f => f.severity === 'High').length
+          return (
+            <SectionCard icon={<ShieldAlert size={16}/>} title={`Red Flags${highCount > 0 ? ` · ${highCount} High` : ''}`} color="#ef4444">
+              <p className="text-xs mb-3" style={{ color: 'var(--color-muted)' }}>
+                Consolidated signals that warrant discussion before an offer decision. Sorted by severity.
+              </p>
+              <div className="space-y-2.5">
+                {sortedFlags.map((flag, i) => {
+                  const sev   = flag.severity || 'Medium'
+                  const style = SEV_RF[sev] || SEV_RF.Medium
+                  return (
+                    <div key={i} className="rounded-xl overflow-hidden"
+                      style={{ background: style.bg, border: `1px solid ${style.border}` }}>
+                      <div className="flex items-start gap-2.5 px-3 py-2.5">
+                        <span className="flex-shrink-0 mt-0.5">{style.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0"
+                              style={{ background: `${style.color}20`, color: style.color }}>{sev}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0"
+                              style={{ background: 'var(--color-surface-2)', color: 'var(--color-muted)' }}>{flag.type}</span>
+                            {flag.question_id && (
+                              <span className="text-[10px]" style={{ color: 'var(--color-muted)' }}>{flag.question_id}</span>
+                            )}
+                          </div>
+                          {flag.signal_meaning && (
+                            <p className="text-xs font-medium leading-snug mb-1" style={{ color: style.color }}>
+                              {flag.signal_meaning}
+                            </p>
+                          )}
+                          {flag.evidence_quote && flag.evidence_quote !== 'No direct quote available.' && (
+                            <p className="text-[11px] italic leading-relaxed" style={{ color: 'var(--color-muted)' }}>
+                              "{flag.evidence_quote}"
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </SectionCard>
+          )
+        })()}
+
+        {/* ── HR: Behavioral Observations (severity-tiered) ────────────────── */}
+        {round_type === 'hr' && behavioral_red_flags?.length > 0 && (() => {
+          const SEV = {
+            Critical: { color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.25)', icon: <ShieldAlert size={13} style={{ color: '#ef4444' }} /> },
+            Moderate: { color: '#f59e0b', bg: 'rgba(245,158,11,0.07)', border: 'rgba(245,158,11,0.22)', icon: <AlertTriangle size={13} style={{ color: '#f59e0b' }} /> },
+            Minor:    { color: '#facc15', bg: 'rgba(250,204,21,0.06)', border: 'rgba(250,204,21,0.2)', icon: <Info size={13} style={{ color: '#facc15' }} /> },
+          }
+          const sorted = [...behavioral_red_flags].sort((a, b) => {
+            const order = { Critical: 0, Moderate: 1, Minor: 2 }
+            return (order[a.severity] ?? 1) - (order[b.severity] ?? 1)
+          })
+          return (
+            <SectionCard icon={<AlertTriangle size={16}/>} title="Behavioral Observations" color="#f59e0b">
+              <p className="text-xs text-muted mb-3">Patterns worth discussing in a debrief. Sorted by severity.</p>
+              <div className="space-y-2.5">
+                {sorted.map((item, i) => {
+                  const flag    = typeof item === 'string' ? item : item.flag
+                  const sev     = typeof item === 'string' ? 'Moderate' : (item.severity || 'Moderate')
+                  const evidence = typeof item === 'string' ? '' : (item.evidence || '')
+                  const style    = SEV[sev] || SEV.Moderate
+                  return (
+                    <div key={i} className="rounded-lg overflow-hidden"
+                      style={{ background: style.bg, border: `1px solid ${style.border}` }}>
+                      <div className="flex items-start gap-2.5 px-3 py-2.5">
+                        <span className="flex-shrink-0 mt-0.5">{style.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <p className="text-xs font-semibold leading-snug" style={{ color: style.color }}>{flag}</p>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0"
+                              style={{ background: `${style.color}18`, color: style.color }}>{sev}</span>
+                          </div>
+                          {evidence && (
+                            <p className="text-[11px] italic leading-relaxed" style={{ color: 'var(--color-muted)' }}>
+                              "{evidence}"
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </SectionCard>
+          )
+        })()}
+
+        {/* ── HR Dual-Audience Toggle ──────────────────────────────────────────── */}
+        {round_type === 'hr' && (
+          peer_benchmarking?.overall_percentile != null ||
+          role_gap_analysis?.expected_competencies?.length > 0 ||
+          story_uniqueness?.uniqueness_score != null ||
+          model_answer_comparison?.length > 0 ||
+          pipeline_followup_questions?.length > 0 ||
+          hr_improvement_plan?.weekly_sprints?.length > 0 ||
+          executive_brief?.hire_verdict
+        ) && (
+          <div className="flex items-center gap-3 px-1">
+            <p className="text-xs font-semibold flex-shrink-0" style={{ color: 'var(--color-muted)' }}>View for:</p>
+            <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+              {[
+                { key: 'candidate',  label: '🎯 Candidate',         title: 'Self-improvement insights' },
+                { key: 'committee',  label: '📋 Hiring Committee',  title: 'Decision-making summary' },
+              ].map(({ key, label, title }) => (
+                <button key={key} title={title}
+                  onClick={() => setHrAudience(key)}
+                  className="px-3 py-1.5 text-xs font-semibold transition-colors"
+                  style={{
+                    background: hrAudience === key ? 'rgba(236,72,153,0.18)' : 'transparent',
+                    color: hrAudience === key ? '#ec4899' : 'var(--color-muted)',
+                    borderRight: key === 'candidate' ? '1px solid var(--color-border)' : 'none',
+                  }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── HR Group B: Peer Benchmarking (Phase 2) — Committee view ────────── */}
+        {round_type === 'hr' && hrAudience === 'committee' && peer_benchmarking?.overall_percentile != null && (() => {
+          const { overall_percentile, percentile_label, score_vs_avg, axis_percentiles, cohort_context } = peer_benchmarking
+          const pctColor = overall_percentile >= 75 ? '#4ade80' : overall_percentile >= 50 ? '#facc15' : '#f87171'
+          const axisEntries = Object.entries(axis_percentiles || {})
+          return (
+            <SectionCard icon={<Users size={16}/>} title="Peer Benchmarking" color="#6366f1">
+              <p className="text-xs mb-4" style={{ color: 'var(--color-muted)' }}>
+                {cohort_context || 'Compared to candidates at similar difficulty level.'}
+              </p>
+              <div className="flex items-center gap-4 mb-5 flex-wrap">
+                <div className="flex flex-col items-center justify-center rounded-2xl px-6 py-4"
+                  style={{ background: `${pctColor}12`, border: `1.5px solid ${pctColor}35` }}>
+                  <span className="text-4xl font-black" style={{ color: pctColor }}>{overall_percentile}th</span>
+                  <span className="text-xs font-semibold mt-0.5" style={{ color: pctColor }}>Percentile</span>
+                  <span className="text-[10px] mt-1 px-2 py-0.5 rounded-full font-bold"
+                    style={{ background: `${pctColor}20`, color: pctColor }}>{percentile_label}</span>
+                </div>
+                <div className="flex-1 min-w-[160px]">
+                  <p className="text-xs mb-1" style={{ color: 'var(--color-muted)' }}>vs. Avg Candidate</p>
+                  <div className="flex items-center gap-2">
+                    {score_vs_avg > 0
+                      ? <><ArrowUp size={14} color="#4ade80"/><span className="text-sm font-bold" style={{ color: '#4ade80' }}>+{score_vs_avg} points above average</span></>
+                      : score_vs_avg < 0
+                      ? <><ArrowDown size={14} color="#f87171"/><span className="text-sm font-bold" style={{ color: '#f87171' }}>{score_vs_avg} points below average</span></>
+                      : <><Minus size={14} color="#94a3b8"/><span className="text-sm font-bold" style={{ color: 'var(--color-muted)' }}>At the average</span></>
+                    }
+                  </div>
+                </div>
+              </div>
+              {axisEntries.length > 0 && (
+                <div className="space-y-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-muted)' }}>Percentile by Competency</p>
+                  {axisEntries.map(([axis, pct]) => {
+                    const c = pct >= 75 ? '#4ade80' : pct >= 50 ? '#facc15' : '#f87171'
+                    return (
+                      <div key={axis}>
+                        <div className="flex justify-between items-center mb-0.5">
+                          <span className="text-[11px]" style={{ color: 'var(--color-text-2)' }}>{axis}</span>
+                          <span className="text-[11px] font-bold" style={{ color: c }}>{pct}th</span>
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-2)' }}>
+                          <div className="h-full rounded-full transition-all duration-700"
+                            style={{ width: `${pct}%`, background: c }} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </SectionCard>
+          )
+        })()}
+
+        {/* ── HR Group B: Role-Level Gap Analysis (Phase 3) — Candidate view ─── */}
+        {round_type === 'hr' && hrAudience === 'candidate' && role_gap_analysis?.expected_competencies?.length > 0 && (() => {
+          const { target_role, target_level, expected_competencies, readiness_score, readiness_label, summary } = role_gap_analysis
+          const readinessColor = readiness_score >= 75 ? '#4ade80' : readiness_score >= 60 ? '#facc15' : '#f87171'
+          const SEV_COLORS = { High: '#ef4444', Medium: '#f59e0b', Low: '#4ade80' }
+          return (
+            <SectionCard icon={<Target size={16}/>} title={`Role Fit: ${target_role || 'Target Role'}`} color="#8b5cf6">
+              <div className="flex items-center gap-3 mb-4 flex-wrap">
+                <div className="flex flex-col items-center justify-center rounded-2xl px-5 py-3"
+                  style={{ background: `${readinessColor}12`, border: `1.5px solid ${readinessColor}35` }}>
+                  <span className="text-3xl font-black" style={{ color: readinessColor }}>{readiness_score}</span>
+                  <span className="text-[10px] font-semibold mt-0.5" style={{ color: readinessColor }}>Readiness</span>
+                </div>
+                <div className="flex-1 min-w-[140px]">
+                  {readiness_label && (
+                    <span className="inline-block text-[11px] px-2.5 py-1 rounded-full font-bold mb-1"
+                      style={{ background: `${readinessColor}20`, color: readinessColor }}>{readiness_label}</span>
+                  )}
+                  {target_level && (
+                    <p className="text-[11px]" style={{ color: 'var(--color-muted)' }}>Target level: {target_level}</p>
+                  )}
+                </div>
+              </div>
+              {summary && (
+                <p className="text-xs leading-relaxed mb-4 px-3 py-2.5 rounded-lg"
+                  style={{ color: 'var(--color-text-2)', background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                  {summary}
+                </p>
+              )}
+              <div className="space-y-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-muted)' }}>Competency Gap by Axis</p>
+                {expected_competencies.map((item, i) => {
+                  const { competency, expected_score, actual_score, gap, gap_severity, gap_narrative } = item
+                  const sevColor = SEV_COLORS[gap_severity] || '#94a3b8'
+                  const barPct = Math.max(0, Math.min(100, actual_score || 0))
+                  const expPct = Math.max(0, Math.min(100, expected_score || 0))
+                  return (
+                    <div key={i} className="rounded-xl p-3"
+                      style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                      <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                        <span className="text-[11px] font-semibold" style={{ color: 'var(--color-text)' }}>{competency}</span>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+                            style={{ background: `${sevColor}20`, color: sevColor }}>{gap_severity}</span>
+                          <span className="text-[10px]" style={{ color: 'var(--color-muted)' }}>
+                            {actual_score} vs {expected_score} expected
+                          </span>
+                        </div>
+                      </div>
+                      <div className="h-2 rounded-full overflow-hidden relative mb-1.5" style={{ background: 'var(--color-border)' }}>
+                        <div className="h-full rounded-full" style={{ width: `${barPct}%`, background: gap <= 0 ? '#4ade80' : gap < 20 ? '#facc15' : '#f87171' }} />
+                        <div className="absolute top-0 h-full w-0.5 rounded-full" style={{ left: `${expPct}%`, background: '#94a3b8', opacity: 0.7 }} />
+                      </div>
+                      {gap_narrative && (
+                        <p className="text-[10px] leading-relaxed" style={{ color: 'var(--color-muted)' }}>{gap_narrative}</p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </SectionCard>
+          )
+        })()}
+
+        {/* ── HR Group B: Story Uniqueness & Rehearsal Signal (Phase 6) — Candidate view ─ */}
+        {round_type === 'hr' && hrAudience === 'candidate' && story_uniqueness?.uniqueness_score != null && (() => {
+          const { uniqueness_score, uniqueness_label, rehearsal_signals, repeated_scenarios, scenario_diversity_score, diversity_feedback, per_question_originality } = story_uniqueness
+          const uColor = uniqueness_score >= 80 ? '#4ade80' : uniqueness_score >= 60 ? '#facc15' : '#f87171'
+          const dColor = (scenario_diversity_score || 0) >= 70 ? '#4ade80' : (scenario_diversity_score || 0) >= 50 ? '#facc15' : '#f87171'
+          return (
+            <SectionCard icon={<Layers size={16}/>} title="Story Uniqueness & Rehearsal Signal" color="#f59e0b">
+              <div className="flex items-start gap-4 mb-4 flex-wrap">
+                <div className="flex flex-col items-center justify-center rounded-2xl px-5 py-3 flex-shrink-0"
+                  style={{ background: `${uColor}12`, border: `1.5px solid ${uColor}35` }}>
+                  <span className="text-3xl font-black" style={{ color: uColor }}>{uniqueness_score}</span>
+                  <span className="text-[10px] font-semibold mt-0.5" style={{ color: uColor }}>Uniqueness</span>
+                </div>
+                <div className="flex-1 min-w-[140px]">
+                  {uniqueness_label && (
+                    <span className="inline-block text-[11px] px-2.5 py-1 rounded-full font-bold mb-1"
+                      style={{ background: `${uColor}20`, color: uColor }}>{uniqueness_label}</span>
+                  )}
+                  <div className="mt-1">
+                    <div className="flex justify-between mb-0.5">
+                      <span className="text-[10px]" style={{ color: 'var(--color-muted)' }}>Scenario Diversity</span>
+                      <span className="text-[10px] font-bold" style={{ color: dColor }}>{scenario_diversity_score}/100</span>
+                    </div>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-2)' }}>
+                      <div className="h-full rounded-full" style={{ width: `${scenario_diversity_score || 0}%`, background: dColor }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {diversity_feedback && (
+                <p className="text-xs leading-relaxed mb-3 px-3 py-2 rounded-lg"
+                  style={{ color: 'var(--color-text-2)', background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                  {diversity_feedback}
+                </p>
+              )}
+              {rehearsal_signals?.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#f59e0b' }}>Rehearsal Signals</p>
+                  <div className="space-y-1.5">
+                    {rehearsal_signals.map((sig, i) => (
+                      <div key={i} className="flex items-start gap-2 text-[11px] rounded px-2.5 py-1.5"
+                        style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                        <AlertTriangle size={11} className="flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+                        <span style={{ color: 'var(--color-text-2)' }}>{sig}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {repeated_scenarios?.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-muted)' }}>Repeated Scenarios</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {repeated_scenarios.map((sc, i) => (
+                      <span key={i} className="text-[10px] px-2 py-0.5 rounded-full"
+                        style={{ background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
+                        {sc}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {per_question_originality?.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-muted)' }}>Per-Answer Originality</p>
+                  <div className="grid grid-cols-1 gap-2">
+                    {per_question_originality.map((q, i) => {
+                      const oc = (q.originality_score || 0) >= 70 ? '#4ade80' : (q.originality_score || 0) >= 50 ? '#facc15' : '#f87171'
+                      return (
+                        <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2"
+                          style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                          <span className="text-[11px] font-bold w-8 flex-shrink-0" style={{ color: 'var(--color-text)' }}>{q.question_id}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-border)' }}>
+                              <div className="h-full rounded-full" style={{ width: `${q.originality_score || 0}%`, background: oc }} />
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-bold w-6 text-right flex-shrink-0" style={{ color: oc }}>{q.originality_score}</span>
+                          {q.rehearsal_flag && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded flex-shrink-0"
+                              style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>rehearsed</span>
+                          )}
+                          {q.signal && (
+                            <span className="text-[10px] leading-snug hidden sm:block" style={{ color: 'var(--color-muted)', maxWidth: '200px' }}>
+                              {q.signal}
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </SectionCard>
+          )
+        })()}
+
+        {/* ── HR Group B: Model Answer Comparison (Phase 7) — Candidate view ─── */}
+        {round_type === 'hr' && hrAudience === 'candidate' && model_answer_comparison?.length > 0 && (() => {
+          return (
+            <SectionCard icon={<BookOpen size={16}/>} title="Model Answer Comparison" color="#06b6d4">
+              <p className="text-xs mb-4" style={{ color: 'var(--color-muted)' }}>
+                Per-question breakdown of what was missing and what a strong answer would have contained.
+              </p>
+              <div className="space-y-4">
+                {model_answer_comparison.map((item, i) => {
+                  const scoreColor10v = item.candidate_score >= 8 ? '#4ade80' : item.candidate_score >= 6 ? '#facc15' : '#f87171'
+                  const outlineLines = (item.model_answer_outline || '').split('\n').filter(l => l.trim())
+                  return (
+                    <div key={i} className="rounded-xl overflow-hidden"
+                      style={{ border: '1px solid var(--color-border)' }}>
+                      <div className="flex items-center gap-3 px-3 py-2.5"
+                        style={{ background: 'var(--color-surface-2)', borderBottom: '1px solid var(--color-border)' }}>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded"
+                          style={{ background: 'rgba(6,182,212,0.12)', color: '#06b6d4' }}>{item.question_id}</span>
+                        <span className="text-xs font-semibold flex-1" style={{ color: 'var(--color-text)' }}>
+                          Score: <span style={{ color: scoreColor10v }}>{item.candidate_score}/10</span>
+                        </span>
+                      </div>
+                      <div className="p-3 space-y-3">
+                        {item.what_was_missing?.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#f87171' }}>Missing Elements</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {item.what_was_missing.map((m, j) => (
+                                <span key={j} className="text-[10px] px-2 py-0.5 rounded-full"
+                                  style={{ background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
+                                  {m}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {outlineLines.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#06b6d4' }}>Model Answer Structure</p>
+                            <ul className="space-y-1">
+                              {outlineLines.map((line, j) => (
+                                <li key={j} className="flex items-start gap-2 text-[11px] leading-relaxed">
+                                  <span className="flex-shrink-0 mt-1 w-1 h-1 rounded-full" style={{ background: '#06b6d4' }} />
+                                  <span style={{ color: 'var(--color-text-2)' }}>{line.replace(/^[-•]\s*/, '')}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {item.improvement_instruction && (
+                          <div className="rounded-lg px-3 py-2"
+                            style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.18)' }}>
+                            <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#06b6d4' }}>Practice Tip</p>
+                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
+                              {item.improvement_instruction}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </SectionCard>
+          )
+        })()}
+
+        {/* ── HR Group C: Pipeline Follow-Up Questions (Phase 4) — Candidate view */}
+        {round_type === 'hr' && hrAudience === 'candidate' && pipeline_followup_questions?.length > 0 && (() => {
+          const DIFF = {
+            High:   { color: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.25)' },
+            Medium: { color: '#f59e0b', bg: 'rgba(245,158,11,0.07)',  border: 'rgba(245,158,11,0.22)' },
+            Low:    { color: '#4ade80', bg: 'rgba(74,222,128,0.07)',  border: 'rgba(74,222,128,0.22)' },
+          }
+          return (
+            <SectionCard icon={<MessageSquare size={16}/>} title="Pipeline Follow-Up Questions" color="#8b5cf6">
+              <p className="text-xs mb-4" style={{ color: 'var(--color-muted)' }}>
+                Questions a hiring committee would probe based on gaps and ambiguities in this interview. Prepare answers for these before your next round.
+              </p>
+              <div className="space-y-3">
+                {pipeline_followup_questions.map((q, i) => {
+                  const diff = q.difficulty || 'Medium'
+                  const style = DIFF[diff] || DIFF.Medium
+                  return (
+                    <div key={i} className="rounded-xl overflow-hidden"
+                      style={{ border: `1px solid ${style.border}`, background: style.bg }}>
+                      <div className="px-3 py-2.5">
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                            style={{ background: `${style.color}20`, color: style.color }}>{diff}</span>
+                          {q.target_competency && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded"
+                              style={{ background: 'var(--color-surface-2)', color: 'var(--color-muted)' }}>
+                              {q.target_competency}
+                            </span>
+                          )}
+                          {q.question_id_source && q.question_id_source !== 'General' && (
+                            <span className="text-[10px]" style={{ color: 'var(--color-muted)' }}>{q.question_id_source}</span>
+                          )}
+                        </div>
+                        <p className="text-sm font-semibold leading-snug mb-1.5" style={{ color: 'var(--color-text)' }}>
+                          "{q.question}"
+                        </p>
+                        {q.purpose && (
+                          <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-muted)' }}>
+                            Why they'll ask this: {q.purpose}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </SectionCard>
+          )
+        })()}
+
+        {/* ── HR Group C: HR Improvement Plan (Phase 8) — Candidate view ───────── */}
+        {round_type === 'hr' && hrAudience === 'candidate' && hr_improvement_plan?.weekly_sprints?.length > 0 && (() => {
+          const { priority_focus, overall_plan_label, weekly_sprints, quick_wins, curated_resources } = hr_improvement_plan
+          const RESOURCE_ICONS = { Book: '📖', Course: '🎓', Article: '📄', Video: '▶', Framework: '🔧' }
+          return (
+            <SectionCard icon={<TrendingUp size={16}/>} title="HR Improvement Plan" color="#10b981">
+              <div className="flex items-center gap-3 mb-4 flex-wrap">
+                {overall_plan_label && (
+                  <span className="text-[11px] px-2.5 py-1 rounded-full font-bold"
+                    style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}>
+                    {overall_plan_label}
+                  </span>
+                )}
+                {priority_focus && (
+                  <span className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                    Priority focus: <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{priority_focus}</span>
+                  </span>
+                )}
+              </div>
+
+              {/* Weekly Sprints */}
+              <div className="space-y-4 mb-5">
+                {weekly_sprints.map((sprint, si) => (
+                  <div key={si}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ background: 'rgba(16,185,129,0.12)', color: '#10b981' }}>Week {sprint.week}</span>
+                      <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{sprint.theme}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {(sprint.exercises || []).map((ex, ei) => (
+                        <div key={ei} className="rounded-xl p-3"
+                          style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                          <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                            <span className="text-[11px] font-semibold" style={{ color: 'var(--color-text)' }}>{ex.exercise}</span>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className="text-[10px]" style={{ color: 'var(--color-muted)' }}>{ex.duration_mins} min</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded"
+                                style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>{ex.frequency}</span>
+                            </div>
+                          </div>
+                          {ex.how_to_practice && (
+                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
+                              {ex.how_to_practice}
+                            </p>
+                          )}
+                          {ex.target_competency && (
+                            <p className="text-[10px] mt-1.5" style={{ color: 'var(--color-muted)' }}>
+                              Targets: {ex.target_competency}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Quick Wins */}
+              {quick_wins?.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: '#10b981' }}>Quick Wins (apply now)</p>
+                  <div className="space-y-1.5">
+                    {quick_wins.map((tip, i) => (
+                      <div key={i} className="flex items-start gap-2 text-[11px] leading-relaxed">
+                        <CheckCircle size={12} className="flex-shrink-0 mt-0.5" style={{ color: '#10b981' }} />
+                        <span style={{ color: 'var(--color-text-2)' }}>{tip}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Curated Resources */}
+              {curated_resources?.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-muted)' }}>Curated Resources</p>
+                  <div className="space-y-2">
+                    {curated_resources.map((r, i) => (
+                      <div key={i} className="flex items-start gap-2.5 rounded-lg px-3 py-2"
+                        style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                        <span className="text-sm flex-shrink-0">{RESOURCE_ICONS[r.type] || '📌'}</span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text)' }}>{r.title}</p>
+                          {r.type && <span className="text-[10px]" style={{ color: 'var(--color-muted)' }}>{r.type}</span>}
+                          {r.why && <p className="text-[10px] leading-relaxed mt-0.5" style={{ color: 'var(--color-muted)' }}>{r.why}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </SectionCard>
+          )
+        })()}
+
+        {/* ── HR Group C: Executive Brief (Phase 11) — Committee view ─────────── */}
+        {round_type === 'hr' && hrAudience === 'committee' && executive_brief?.hire_verdict && (() => {
+          const { hire_verdict, verdict_color, one_liner, evidence_for, evidence_against, key_risk, recommended_action, committee_question } = executive_brief
+          const COLOR_MAP = {
+            green: { accent: '#4ade80', bg: 'rgba(74,222,128,0.08)',  border: 'rgba(74,222,128,0.3)' },
+            amber: { accent: '#f59e0b', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.3)' },
+            red:   { accent: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.3)' },
+          }
+          const vc = COLOR_MAP[verdict_color] || COLOR_MAP.amber
+          return (
+            <SectionCard icon={<Briefcase size={16}/>} title="Executive Brief" color={vc.accent}>
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-3" style={{ color: 'var(--color-muted)' }}>
+                Hiring Committee Summary · 30-Second Read
+              </p>
+              {/* Verdict banner */}
+              <div className="flex items-center gap-3 rounded-2xl px-4 py-3 mb-4"
+                style={{ background: vc.bg, border: `1.5px solid ${vc.border}` }}>
+                <span className="text-2xl font-black" style={{ color: vc.accent }}>{hire_verdict}</span>
+                {one_liner && (
+                  <p className="text-xs leading-relaxed flex-1" style={{ color: 'var(--color-text-2)' }}>
+                    {one_liner}
+                  </p>
+                )}
+              </div>
+
+              {/* Evidence for / against */}
+              {(evidence_for?.length > 0 || evidence_against?.length > 0) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  {evidence_for?.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#4ade80' }}>Evidence For</p>
+                      <div className="space-y-1.5">
+                        {evidence_for.map((s, i) => (
+                          <div key={i} className="text-[11px] leading-snug flex items-start gap-1.5 rounded-lg px-2.5 py-1.5"
+                            style={{ background: 'rgba(74,222,128,0.07)', border: '1px solid rgba(74,222,128,0.2)' }}>
+                            <ArrowUp size={10} className="flex-shrink-0 mt-0.5" style={{ color: '#4ade80' }} />
+                            <span style={{ color: 'var(--color-text-2)' }}>{s.signal}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {evidence_against?.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#f87171' }}>Evidence Against</p>
+                      <div className="space-y-1.5">
+                        {evidence_against.map((s, i) => (
+                          <div key={i} className="text-[11px] leading-snug flex items-start gap-1.5 rounded-lg px-2.5 py-1.5"
+                            style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                            <ArrowDown size={10} className="flex-shrink-0 mt-0.5" style={{ color: '#f87171' }} />
+                            <span style={{ color: 'var(--color-text-2)' }}>{s.signal}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Key risk */}
+              {key_risk && (
+                <div className="rounded-xl px-3 py-2.5 mb-3"
+                  style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#f87171' }}>Key Risk</p>
+                  <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-2)' }}>{key_risk}</p>
+                </div>
+              )}
+
+              {/* Recommended action */}
+              {recommended_action && (
+                <div className="rounded-xl px-3 py-2.5 mb-3"
+                  style={{ background: `${vc.accent}10`, border: `1px solid ${vc.border}` }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: vc.accent }}>Recommended Action</p>
+                  <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-2)' }}>{recommended_action}</p>
+                </div>
+              )}
+
+              {/* Committee question */}
+              {committee_question && (
+                <div className="rounded-xl px-3 py-2.5"
+                  style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-muted)' }}>Committee Question to Ask</p>
+                  <p className="text-[11px] italic leading-relaxed" style={{ color: 'var(--color-text-2)' }}>"{committee_question}"</p>
+                </div>
+              )}
+            </SectionCard>
+          )
+        })()}
 
         {/* ── DSA Performance Dashboard ─────────────────────────────────────────
             Comprehensive multi-section block: KPIs, charts, complexity, topic
@@ -2391,11 +3975,11 @@ export default function ReportPage() {
                   <p className="text-sm font-semibold mb-3 flex items-center gap-2"><BarChart2 size={14}/> Per-Problem Score</p>
                   <ResponsiveContainer width="100%" height={220}>
                     <BarChart data={perProblemBars}>
-                      <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                      <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                       <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                       <YAxis domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                       <Tooltip
-                        contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                        contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                         labelFormatter={(_, p) => p[0]?.payload?.label}
                         formatter={(v, name) => [`${v}${name === 'score' ? '/10' : '%'}`, name === 'score' ? 'Score' : 'Tests Passed']}
                       />
@@ -2413,7 +3997,7 @@ export default function ReportPage() {
                   <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Target size={14}/> Verdict Distribution</p>
                   <ResponsiveContainer width="100%" height={220}>
                     <BarChart data={verdictData} layout="vertical">
-                      <CartesianGrid stroke="rgba(255,255,255,0.05)" horizontal={false}/>
+                      <CartesianGrid stroke="var(--color-border)" horizontal={false}/>
                       <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                       <YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} width={90}/>
                       <Tooltip contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}/>
@@ -2430,13 +4014,13 @@ export default function ReportPage() {
                     <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Zap size={14}/> Efficiency Map (Runtime vs Code Length)</p>
                     <ResponsiveContainer width="100%" height={220}>
                       <ScatterChart>
-                        <CartesianGrid stroke="rgba(255,255,255,0.05)"/>
+                        <CartesianGrid stroke="var(--color-border)"/>
                         <XAxis type="number" dataKey="x" name="Runtime" unit="ms" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                         <YAxis type="number" dataKey="y" name="Lines"        tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                         <ZAxis type="number" dataKey="z" range={[60, 240]} name="Pass %"/>
                         <Tooltip
                           cursor={{ strokeDasharray: '3 3' }}
-                          contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                          contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                           formatter={(v, name) => [`${v}${name === 'Runtime' ? ' ms' : name === 'Pass %' ? '%' : ''}`, name]}
                           labelFormatter={(_, p) => p[0]?.payload?.name}
                         />
@@ -2452,7 +4036,7 @@ export default function ReportPage() {
                     <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Layers size={14}/> Topic Mastery</p>
                     <ResponsiveContainer width="100%" height={220}>
                       <RadarChart data={topicRadar}>
-                        <PolarGrid stroke="rgba(255,255,255,0.1)"/>
+                        <PolarGrid stroke="var(--color-border)"/>
                         <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }}/>
                         <Radar dataKey="A" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.3}/>
                         <Tooltip formatter={v => [`${v}/100`]} contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40' }}/>
@@ -2550,11 +4134,11 @@ export default function ReportPage() {
                         <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Layers size={14}/> Difficulty-Tier Solve Rate</p>
                         <ResponsiveContainer width="100%" height={220}>
                           <BarChart data={diffStats} margin={{ top: 5, right: 10, bottom: 5, left: -15 }}>
-                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                             <XAxis dataKey="tier" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                             <YAxis domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => `${v}%`}/>
                             <Tooltip
-                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                               formatter={(v, _n, p) => [`${v}% (${p.payload.solved}/${p.payload.total})`, 'Solved']}
                             />
                             <Bar dataKey="pass" radius={[6, 6, 0, 0]}>
@@ -2578,12 +4162,12 @@ export default function ReportPage() {
                       </div>
                       <ResponsiveContainer width="100%" height={205}>
                         <LineChart data={progression} margin={{ top: 5, right: 16, bottom: 5, left: -20 }}>
-                          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                          <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                           <XAxis dataKey="step" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                           <YAxis yAxisId="score" domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={v => `${v}`}/>
                           <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={v => `${v}%`}/>
                           <Tooltip
-                            contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                            contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                             labelFormatter={(_, p) => p[0]?.payload?.label}
                             formatter={(v, name) => [name === 'score' ? `${v}/10` : `${v}%`, name === 'score' ? 'Score' : 'Tests passed']}
                           />
@@ -2609,11 +4193,11 @@ export default function ReportPage() {
                         </div>
                         <ResponsiveContainer width="100%" height={205}>
                           <LineChart data={complexityLine} margin={{ top: 5, right: 10, bottom: 5, left: -10 }}>
-                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                             <XAxis dataKey="step" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                             <YAxis domain={[0, 8]} ticks={[1,2,3,4,5,6,7,8]} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={rankLabel} width={56}/>
                             <Tooltip
-                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                               labelFormatter={(_, p) => p[0]?.payload?.label}
                               formatter={(v, name, props) => {
                                 const raw = name === 'tc' ? props.payload.tcLabel : props.payload.scLabel
@@ -2644,11 +4228,11 @@ export default function ReportPage() {
                         </div>
                         <ResponsiveContainer width="100%" height={205}>
                           <LineChart data={runtimeLine} margin={{ top: 5, right: 10, bottom: 5, left: -10 }}>
-                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                             <XAxis dataKey="step" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                             <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={v => `${v}ms`}/>
                             <Tooltip
-                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                               labelFormatter={(_, p) => p[0]?.payload?.label}
                               formatter={v => [`${v} ms`, 'Runtime']}
                             />
@@ -2673,11 +4257,11 @@ export default function ReportPage() {
                         <p className="text-sm font-semibold mb-3 flex items-center gap-2"><BarChart2 size={14}/> Test Coverage Per Problem</p>
                         <ResponsiveContainer width="100%" height={220}>
                           <BarChart data={coverage} margin={{ top: 5, right: 10, bottom: 5, left: -15 }}>
-                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                             <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                             <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                             <Tooltip
-                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                               labelFormatter={(_, p) => p[0]?.payload?.label}
                             />
                             <Bar dataKey="passed" stackId="a" fill="#22c55e" name="Passed"/>
@@ -2847,7 +4431,7 @@ export default function ReportPage() {
                   <p className="text-sm text-muted mb-3">Averaged across {perQ.length} question(s)</p>
                   <ResponsiveContainer width="100%" height={240}>
                     <RadarChart data={avgRadar}>
-                      <PolarGrid stroke="rgba(255,255,255,0.1)"/>
+                      <PolarGrid stroke="var(--color-border)"/>
                       <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                       <Radar dataKey="A" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.25}/>
                       <Tooltip formatter={v => [`${v}/100`]} contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40' }}/>
@@ -2938,7 +4522,7 @@ export default function ReportPage() {
                         data={peer_comparison.radar_comparison}
                         margin={{ top: 5, right: 10, bottom: 5, left: -20 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                         <XAxis dataKey="axis" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
                         <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
                         <Tooltip
@@ -2967,8 +4551,8 @@ export default function ReportPage() {
                           <div key={g}
                             className="flex flex-col items-center px-3 py-2 rounded-xl text-xs"
                             style={{
-                              background: isUser ? 'rgba(6,182,212,0.15)' : 'rgba(255,255,255,0.04)',
-                              border: isUser ? '1px solid rgba(6,182,212,0.5)' : '1px solid rgba(255,255,255,0.08)',
+                              background: isUser ? 'rgba(6,182,212,0.15)' : 'var(--color-surface-2)',
+                              border: isUser ? '1px solid rgba(6,182,212,0.5)' : '1px solid var(--color-border)',
                             }}>
                             <span className="font-bold text-base" style={{ color: isUser ? '#06b6d4' : '#94a3b8' }}>{g}</span>
                             <span style={{ color: isUser ? '#06b6d4' : '#64748b' }}>{pct}%</span>
@@ -3007,7 +4591,7 @@ export default function ReportPage() {
                 { label: 'Pass Probability', val: company_fit?.pass_probability != null ? `${company_fit.pass_probability}%` : '—', color: scoreColor(company_fit?.pass_probability ?? 0) },
               ].map(({ label, val, color }) => (
                 <div key={label} className="text-center p-4 rounded-xl"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
+                  style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                   <p className="text-2xl font-bold" style={{ color }}>{val}</p>
                   <p className="text-xs text-muted mt-1">{label}</p>
                 </div>
@@ -3157,7 +4741,7 @@ export default function ReportPage() {
                     <div className="mt-2 space-y-2 pl-3">
                       {items.map((item, ii) => (
                         <div key={ii} className="p-3 rounded-xl text-sm"
-                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)' }}>
+                          style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                           <p className="font-medium">{item.topic}</p>
                           {item.goal && <p className="text-xs text-muted mt-0.5">{item.goal}</p>}
                           {item.task && <p className="text-xs text-cyan-400 mt-0.5">→ {item.task}</p>}
@@ -3382,8 +4966,8 @@ export default function ReportPage() {
                       {t.reviews.map((r, i) => (
                         <div key={i}
                           className="text-xs px-2.5 py-1 rounded-lg text-center"
-                          style={{ background: 'rgba(255,255,255,0.05)', minWidth: 80 }}>
-                          <p className="font-medium text-white">{r.session_type}</p>
+                          style={{ background: 'var(--color-surface-2)', minWidth: 80 }}>
+                          <p className="font-medium" style={{ color: 'var(--color-text)' }}>{r.session_type}</p>
                           <p className="text-muted">{r.date}</p>
                         </div>
                       ))}
@@ -3458,13 +5042,13 @@ export default function ReportPage() {
                     <button key={item.id}
                       onClick={() => handleToggle(item)}
                       className="w-full flex items-start gap-3 p-3 rounded-xl text-left transition-opacity hover:opacity-80"
-                      style={{ background: 'rgba(255,255,255,0.03)', opacity: item.checked ? 0.5 : 1 }}>
+                      style={{ background: 'var(--color-surface-2)', opacity: item.checked ? 0.5 : 1 }}>
                       <div className="w-4 h-4 rounded mt-0.5 flex-shrink-0 flex items-center justify-center"
-                        style={{ background: item.checked ? '#4ade80' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+                        style={{ background: item.checked ? '#4ade80' : 'var(--color-surface-3)', border: '1px solid var(--color-border)' }}>
                         {item.checked && <Check size={12} style={{ color: '#0f172a' }} />}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-white" style={{ textDecoration: item.checked ? 'line-through' : 'none' }}>{item.title}</p>
+                        <p className="text-sm" style={{ color: 'var(--color-text)', textDecoration: item.checked ? 'line-through' : 'none' }}>{item.title}</p>
                         {item.details && <p className="text-xs text-muted mt-0.5 truncate">{item.details}</p>}
                       </div>
                       <div className="flex-shrink-0 flex flex-col items-end gap-1">
@@ -3494,7 +5078,7 @@ export default function ReportPage() {
                 { label: 'Camera Uptime', value: `${Math.round((proctoring_summary?.camera_uptime_ratio || 0) * 100)}%`, color: '#22d3ee' },
               ].map(card => (
                 <div key={card.label} className="rounded-xl p-4"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
+                  style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                   <p className="text-xs text-muted uppercase tracking-wider mb-1">{card.label}</p>
                   <p className="text-lg font-bold" style={{ color: card.color }}>{card.value}</p>
                 </div>

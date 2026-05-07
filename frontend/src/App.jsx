@@ -68,6 +68,7 @@ export default function App() {
         <Route path="/coding/practice/:slug" element={
           <ProtectedRoute><CodingPage /></ProtectedRoute>
         } />
+        <Route path="/report/mock-:roundType" element={<Report />} />
         <Route path="/report/:sessionId" element={
           <ProtectedRoute><Report /></ProtectedRoute>
         } />

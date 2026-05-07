@@ -211,3 +211,40 @@ class ReportResponse(BaseModel):
     # Meta
     confidence_score: Optional[int] = None                      # LLM self-rating of report quality
     interview_agent: Optional[str] = None                       # human-readable round type label
+
+    # HR Phase 1 — Professional Report Fields
+    # radar_scores: 7-axis for HR (Communication Clarity, STAR Story Craft,
+    #   Self-Awareness & Accountability, Growth Mindset & Adaptability,
+    #   Leadership & Ownership, Collaboration & Stakeholder Fit, Resilience Under Pressure)
+    #   6-axis for technical/DSA/MCQ. Keys vary by round_type.
+    star_story_matrix: Optional[List[Dict[str, Any]]] = None    # per-answer STAR element analysis
+    behavioral_category_coverage: Optional[List[Dict[str, Any]]] = None  # competency coverage map
+    communication_pattern: Optional[str] = None                 # e.g. "Anecdote-first (strong)"
+    culture_fit_narrative: Optional[str] = None                 # qualitative environment fit
+    behavioral_red_flags: Optional[List[Dict[str, Any]]] = None # [{flag, severity, evidence}] — Phase 2 structured
+    key_signals: Optional[List[Dict[str, Any]]] = None          # 3 decisive hiring-committee evidence points
+    competency_scorecard: Optional[List[Dict[str, Any]]] = None # 7-entry 1-7 scale scorecard with verbatim quotes
+    hire_confidence: Optional[str] = None                       # High | Medium | Low (deterministic)
+    interview_datetime: Optional[str] = None                    # ISO 8601 session creation timestamp
+    job_role: Optional[str] = None                              # role being practiced for
+    # Phase 2 new fields
+    culture_fit_dimensions: Optional[List[Dict[str, Any]]] = None  # 5 bipolar spectrum dimensions [{dimension, candidate_position, pole_left, pole_right, rationale}]
+    eq_profile: Optional[Dict[str, Any]] = None                    # EQ scores: self_awareness, self_regulation, empathy, social_skills, intrinsic_motivation + summary
+    # Phase 3 new fields
+    coachability_index: Optional[Dict[str, Any]] = None            # score 0-100, label, positive_signals, negative_signals, summary
+    leadership_ic_fit: Optional[Dict[str, Any]] = None             # spectrum_position 1-10, label, recommended_track, evidence, reasoning
+    reference_check_triggers: Optional[List[Dict[str, Any]]] = None  # [{topic, priority, suggested_question, reason}]
+    assessment_confidence: Optional[Dict[str, Any]] = None         # score 0-100, label, limiting_factors, what_would_change_it
+    # HR Report Enhancement — Group A
+    explicit_red_flags: Optional[List[Dict[str, Any]]] = None      # [{type, severity, evidence_quote, signal_meaning, question_id}]
+    seniority_calibration: Optional[Dict[str, Any]] = None         # {level, rationale, evidence_signals[], confidence}
+    answer_depth_progression: Optional[Dict[str, Any]] = None      # {arc[], trend, peak_question, lowest_question, trend_rationale}
+    # HR Report Enhancement — Group B
+    peer_benchmarking: Optional[Dict[str, Any]] = None             # {overall_percentile, percentile_label, score_vs_avg, axis_percentiles{}, cohort_context}
+    role_gap_analysis: Optional[Dict[str, Any]] = None             # {target_role, target_level, expected_competencies[], readiness_score, readiness_label, summary}
+    story_uniqueness: Optional[Dict[str, Any]] = None              # {uniqueness_score, uniqueness_label, rehearsal_signals[], repeated_scenarios[], scenario_diversity_score, diversity_feedback, per_question_originality[]}
+    model_answer_comparison: Optional[List[Dict[str, Any]]] = None # [{question_id, what_was_missing[], model_answer_outline, improvement_instruction}]
+    # HR Report Enhancement — Group C
+    pipeline_followup_questions: Optional[List[Dict[str, Any]]] = None  # [{question, target_competency, purpose, difficulty, question_id_source}]
+    hr_improvement_plan: Optional[Dict[str, Any]] = None                # {priority_focus, overall_plan_label, weekly_sprints[], quick_wins[], curated_resources[]}
+    executive_brief: Optional[Dict[str, Any]] = None                    # {hire_verdict, verdict_color, one_liner, evidence_for[], evidence_against[], key_risk, recommended_action, committee_question}

@@ -15,9 +15,13 @@ _RADAR_AXES = {
         "DBMS & SQL", "OS & CN Concepts", "Project Knowledge", "Communication"
     ],
     "hr": [
-        "STAR Story Quality", "Communication Clarity",
-        "Self-Awareness", "Growth Mindset",
-        "Behavioral Consistency", "Collaboration Quality"
+        "Communication Clarity",
+        "STAR Story Craft",
+        "Self-Awareness & Accountability",
+        "Growth Mindset & Adaptability",
+        "Leadership & Ownership",
+        "Collaboration & Stakeholder Fit",
+        "Resilience Under Pressure",
     ],
     "dsa": [
         "Algorithm Design", "Code Readability",
@@ -98,6 +102,29 @@ def build_core_analysis_prompt(
 
     qa_block = _format_qa(question_scores)
 
+    # HR rounds get an enriched strong_areas schema with exact moment + why it landed
+    if round_type == "hr":
+        strong_areas_schema = """\
+  "strong_areas": [
+    {
+      "area": "<name>",
+      "evidence": "<brief description of the moment in their answer>",
+      "score": <integer 0-100>,
+      "exact_moment": "<Q1|Q2|... — which question this strength appeared in>",
+      "evidence_quote": "<verbatim quote from the transcript, max 40 words — not paraphrased>",
+      "why_it_landed": "<1 sentence: specifically what this communicates to a hiring committee>"
+    }
+  ],"""
+    else:
+        strong_areas_schema = """\
+  "strong_areas": [
+    {
+      "area": "<name>",
+      "evidence": "<quote or specific moment from their answer>",
+      "score": <integer 0-100>
+    }
+  ],"""
+
     market_block = ""
     if market_context and market_context.strip():
         market_block = f"\nLIVE MARKET CONTEXT (use this to colour your recommendations):\n{market_context[:600]}\n"
@@ -142,14 +169,18 @@ def build_core_analysis_prompt(
   "star_story_matrix": [
     {
       "question_id": "<Q1|Q2|...>",
+      "question_text": "<full question text verbatim from the transcript>",
+      "answer_summary": "<3-4 sentence factual summary of what the candidate said — describe the narrative arc, do not evaluate or score>",
       "competency_category": "<Conflict Resolution|Leadership|Failure & Learning|Teamwork|Problem-Solving|Communication|Customer Focus|Execution>",
       "situation_present": <true|false>,
       "task_present": <true|false>,
       "action_present": <true|false>,
       "result_present": <true|false>,
       "star_score": <integer 0-10, 10=all STAR elements with concrete specifics>,
+      "star_completeness_pct": <integer 0-100, formula: (elements_present / 4) * 100, then +0-25 bonus for specificity>,
       "missing_element": "<the most important missing STAR element, or 'None'>",
-      "specificity_level": "<High (specific names/numbers/dates) | Medium (some specifics) | Low (generic/vague)>"
+      "specificity_level": "<High (specific names/numbers/dates) | Medium (some specifics) | Low (generic/vague)>",
+      "best_verbatim_quote": "<literal transcription from the answer, max 40 words. NEVER paraphrase. If no notable quote, write 'No notable quote.'>"
     }
   ],
 
@@ -167,15 +198,352 @@ def build_core_analysis_prompt(
   "culture_fit_narrative": "<2-3 sentence qualitative assessment. What work environment suits this candidate? (startup vs enterprise, high-autonomy vs structured, IC vs manager-track). Base this ONLY on evidence from their stories, not on speculation.>",
 
   "behavioral_red_flags": [
-    "<specific red flag observed, e.g. 'Consistently uses we instead of I — individual contribution unclear' or empty array []>"
-  ],"""
+    {
+      "flag": "<short label, max 10 words, e.g. 'Individual contribution unclear across all answers'>",
+      "severity": "<Critical|Moderate|Minor>",
+      "evidence": "<verbatim quote or specific observation from the transcript, max 40 words. Never generic.>"
+    }
+  ],
+
+  "key_signals": [
+    {
+      "signal": "<short decisive hiring-committee statement — e.g. 'Demonstrated clear ownership by...' — max 15 words>",
+      "evidence": "<verbatim quote or specific reference: question number + what they said, max 40 words>",
+      "valence": "<positive|negative|mixed>"
+    }
+  ],
+
+  "competency_scorecard": [
+    {
+      "axis": "<exact axis name from radar_scores — one of the 7 listed>",
+      "rating_1_7": <integer 1-7>,
+      "anchor_label": "<Exceptional|Exceeds Bar|Meets Bar|Below Bar|Significantly Below Bar|Poor|No Evidence>",
+      "verbatim_quote": "<copy exact words from transcript, max 60 words. Write 'No response provided.' if no answer.>",
+      "rationale": "<1 sentence explaining this rating based on the evidence>"
+    }
+  ],
+
+  "culture_fit_dimensions": [
+    {
+      "dimension": "<exact label from the 5 fixed dimensions>",
+      "candidate_position": <integer 1-5, 1=strongly left pole, 3=center/neutral, 5=strongly right pole>,
+      "pole_left": "<left pole label>",
+      "pole_right": "<right pole label>",
+      "rationale": "<1 sentence — cite a specific story or behavior that places them at this position>"
+    }
+  ],
+
+  "eq_profile": {
+    "self_awareness": <integer 0-100>,
+    "self_regulation": <integer 0-100>,
+    "empathy": <integer 0-100>,
+    "social_skills": <integer 0-100>,
+    "intrinsic_motivation": <integer 0-100>,
+    "eq_summary": "<2 sentences max — what stands out most about their emotional intelligence from the interview>",
+    "eq_overall_label": "<High EQ|Moderate EQ|Developing EQ>"
+  },
+
+  "coachability_index": {
+    "score": <integer 0-100>,
+    "label": "<Highly Coachable|Coachable|Moderately Coachable|Resistant to Feedback>",
+    "positive_signals": ["<observed behavior showing openness to feedback — verbatim or brief paraphrase, max 20 words each>"],
+    "negative_signals": ["<observed behavior showing defensiveness or resistance — verbatim or brief paraphrase, max 20 words each>"],
+    "summary": "<2 sentences — what their interview behavior reveals about receptiveness to growth and correction>"
+  },
+
+  "leadership_ic_fit": {
+    "spectrum_position": <integer 1-10, 1=pure IC, 5=balanced hybrid, 10=pure leader>,
+    "label": "<Strong IC|IC-Leaning|Hybrid|Leader-Leaning|Strong Leader>",
+    "recommended_track": "<Individual Contributor|Tech Lead|People Manager|Hybrid IC-Lead>",
+    "evidence": "<1-2 sentences citing specific stories or answers that place them on this spectrum>",
+    "reasoning": "<1-2 sentences on what this spectrum position means for team and role fit>"
+  },
+
+  "reference_check_triggers": [
+    {
+      "topic": "<short topic label, max 8 words, e.g. 'Conflict with direct manager'>",
+      "priority": "<High|Medium|Low>",
+      "suggested_question": "<specific behavioral question for a reference, max 25 words, start with 'Can you describe...' or 'How did...'>",
+      "reason": "<1 sentence — what was ambiguous or concerning in this interview that warrants verification>"
+    }
+  ],
+
+  "assessment_confidence": {
+    "score": <integer 0-100>,
+    "label": "<High Confidence|Moderate Confidence|Low Confidence>",
+    "limiting_factors": ["<specific reason confidence is not higher, e.g. 'Only 3 behavioral answers — small sample size'>"],
+    "what_would_change_it": "<1 sentence — what additional evidence or follow-up would most shift the hire recommendation>"
+  },
+
+  "explicit_red_flags": [
+    {
+      "type": "<Deflection|Vague Ending|Hypothetical-as-Real|Inconsistent Story|Defensive Language|Blame Shifting|Other>",
+      "severity": "<High|Medium|Low>",
+      "evidence_quote": "<verbatim quote from transcript, max 50 words — never paraphrase, never invent>",
+      "signal_meaning": "<1 sentence: what this flag signals about the candidate to a hiring committee>",
+      "question_id": "<Q1|Q2|...>"
+    }
+  ],
+
+  "seniority_calibration": {
+    "level": "<Junior|Mid-Level|Senior|Staff/Principal>",
+    "rationale": "<2 sentences citing specific behavioral evidence that places them at this level — must reference question numbers>",
+    "evidence_signals": [
+      "<specific observable signal mapping to a seniority indicator — cite question number>"
+    ],
+    "confidence": "<High|Medium|Low>"
+  },
+
+  "role_gap_analysis": {
+    "target_role": "<role from session config, e.g. 'Product Manager'>",
+    "target_level": "<seniority level from seniority_calibration above>",
+    "expected_competencies": [
+      {
+        "competency": "<competency name, must be one of the 7 HR radar axes>",
+        "expected_score": <integer 0-100, minimum bar for the target_level in this role>,
+        "actual_score": <integer 0-100, from radar_scores>,
+        "gap": <integer, expected_score minus actual_score — positive means deficit, negative means exceeds>,
+        "gap_severity": "<High (gap ≥20) | Medium (gap 10-19) | Low (gap <10 or exceeds)>",
+        "gap_narrative": "<1 sentence: what this gap means in practice for someone interviewing for this role>"
+      }
+    ],
+    "readiness_score": <integer 0-100, weighted average: deficit axes weighted by importance for the role>,
+    "readiness_label": "<Not Ready (<40) | Developing (40-59) | Approaching Ready (60-74) | Ready (75-89) | Exceeds Bar (≥90)>",
+    "summary": "<2-3 sentences: overall verdict on readiness for this specific role/level. Reference 1-2 most critical gaps AND 1 genuine strength.>"
+  },
+
+  "story_uniqueness": {
+    "uniqueness_score": <integer 0-100, 100=all stories are distinct scenarios from different life/work contexts>,
+    "uniqueness_label": "<Highly Original (≥80) | Mostly Original (60-79) | Some Repetition (40-59) | Heavily Rehearsed (<40)>",
+    "rehearsal_signals": [
+      "<specific observable cue suggesting over-rehearsal — e.g. 'Q1 had no natural hedges or corrections, sounded scripted' — cite question>"
+    ],
+    "repeated_scenarios": [
+      "<scenario or incident used in multiple answers — e.g. 'Production outage referenced in Q1 and Q4'>"
+    ],
+    "scenario_diversity_score": <integer 0-100, how many distinct life contexts were used: work project, team conflict, mentorship, personal growth, cross-functional, etc.>,
+    "diversity_feedback": "<1-2 sentences: specific observation about scenario variety or lack thereof — name the repeated scenarios and what it signals>",
+    "per_question_originality": [
+      {
+        "question_id": "<Q1|Q2|...>",
+        "originality_score": <integer 0-100>,
+        "rehearsal_flag": <true if this answer shows clear rehearsal signals, false otherwise>,
+        "signal": "<1-sentence observation: what in this specific answer suggests it is original or rehearsed>"
+      }
+    ]
+  },
+
+  "model_answer_comparison": [
+    {
+      "question_id": "<Q1|Q2|...>",
+      "candidate_score": <integer 0-10, from per_question_analysis>,
+      "what_was_missing": [
+        "<specific missing element — e.g. 'Quantified result (numbers/impact)', 'Named stakeholders or team context', 'Explicit personal action vs team action'>"
+      ],
+      "model_answer_outline": "<4-6 bullet points describing what an ideal answer to this question would contain. Use action verbs. Start each point with a dash. Never write the answer — describe the structure and content elements a strong answer would have.>",
+      "improvement_instruction": "<1-2 sentences: exactly what this candidate should practice to close the gap — be specific to their answer, not generic advice>"
+    }
+  ],
+
+  "pipeline_followup_questions": [
+    {
+      "question": "<the exact follow-up question a hiring committee member would ask — specific, behavioral, starts with 'Tell me about' or 'Walk me through' or 'You mentioned X — can you...' — max 35 words>",
+      "target_competency": "<one of the 7 HR radar axes — the competency this question probes>",
+      "purpose": "<1 sentence: what gap or ambiguity from the interview this question is designed to surface>",
+      "difficulty": "<High|Medium|Low — relative to what the candidate already showed>",
+      "question_id_source": "<Q1|Q2|... — the question this follow-up is based on, or 'General' if cross-cutting>"
+    }
+  ],
+
+  "hr_improvement_plan": {
+    "priority_focus": "<the single most impactful competency for this candidate to improve — one of the 7 HR radar axes>",
+    "overall_plan_label": "<'1-Week Sprint' | '2-Week Intensive' | '30-Day Rebuild' — based on severity of gaps>",
+    "weekly_sprints": [
+      {
+        "week": <1 or 2>,
+        "theme": "<short theme name, max 6 words, e.g. 'Build Your Story Bank'>",
+        "exercises": [
+          {
+            "exercise": "<specific exercise name, max 10 words>",
+            "duration_mins": <integer, realistic practice time per session>,
+            "frequency": "<Daily|3x/week|Weekly>",
+            "how_to_practice": "<2-3 sentences: exactly how to do this exercise. Be specific — not 'practice STAR' but step-by-step instructions tailored to their gaps.>",
+            "target_competency": "<one of the 7 HR radar axes>"
+          }
+        ]
+      }
+    ],
+    "quick_wins": [
+      "<actionable tip the candidate can apply in their next interview immediately — max 20 words each>"
+    ],
+    "curated_resources": [
+      {
+        "title": "<specific resource name — book title, course name, article title>",
+        "type": "<Book|Course|Article|Video|Framework>",
+        "why": "<1 sentence: why this resource addresses this candidate's specific gap>"
+      }
+    ]
+  },"""
         hr_grading_rules = """
 HR-SPECIFIC GRADING:
 - STAR story quality is the primary signal. Score 9-10 only if they gave concrete, specific stories.
 - Penalise heavily for: generic answers, hypothetical answers ('I would...'), no Result, blame-shifting.
 - Reward: specific Situations with names/dates/context, quantified Results, genuine self-reflection.
 - hire_recommendation: Strong Yes = candidate tells 80%+ complete STAR stories with concrete evidence.
-- radar_scores: STAR Story Quality 80+ = full STAR on most questions; Communication Clarity 80+ = structured, concise; Self-Awareness 80+ = genuine failure/feedback stories with accountability; Growth Mindset 80+ = explicit behavior change post-failure; Behavioral Consistency 80+ = coherent values across all answers; Collaboration Quality 80+ = clear individual contribution, credit to team."""
+
+7-AXIS RADAR CALIBRATION (radar_scores, 0-100):
+- Communication Clarity 80+ = structured, concise, jargon-free delivery; answers directly address the question.
+- STAR Story Craft 80+ = full S/T/A/R present on most answers with concrete specifics (names, dates, numbers).
+- Self-Awareness & Accountability 80+ = genuine failure stories, no blame-shifting, owns outcomes.
+- Growth Mindset & Adaptability 80+ = explicit behavioral change after failure/feedback, adapts to new info.
+- Leadership & Ownership 80+ = proactive initiative evidence, decisions made without being told, drives outcomes.
+- Collaboration & Stakeholder Fit 80+ = clear individual contribution AND credit to team, cross-functional evidence.
+- Resilience Under Pressure 80+ = composed under adversity, describes difficult moments without catastrophizing.
+
+key_signals RULES:
+- Exactly 3 items — the most decisive hiring-committee evidence points from the entire session.
+- Each must be specific: cite the question number OR use a direct quote. NEVER be generic.
+- valence must be one of: positive, negative, mixed.
+
+competency_scorecard RULES:
+- Exactly 7 entries — one per radar axis, in the same order as radar_scores.
+- rating_1_7 scale: 7=Exceptional, 6=Exceeds Bar, 5=Meets Bar, 4=Below Bar, 3=Significantly Below Bar, 2=Poor, 1=No Evidence.
+- anchor_label MUST match the rating: 7→Exceptional, 6→Exceeds Bar, 5→Meets Bar, 4→Below Bar, 3→Significantly Below Bar, 2→Poor, 1→No Evidence.
+- rating_1_7 must be consistent with radar_scores value: 85-100→7, 70-84→6, 55-69→5, 40-54→4, 25-39→3, 10-24→2, 0-9→1.
+- verbatim_quote: copy exact words from the transcript. Do NOT paraphrase. Min 10 words, max 60 words.
+
+star_completeness_pct RULES:
+- Formula: (elements_present_count / 4) * 75 + specificity_bonus (0=Low, 12=Medium, 25=High). Round to integer.
+- Example: S+A+R present (3/4) with Medium specificity = (3/4)*75 + 12 = 56 + 12 = 68.
+- best_verbatim_quote: must be a literal copy from the transcript — never paraphrased, never invented.
+
+culture_fit_dimensions RULES:
+- Exactly 5 entries, one per fixed dimension in this exact order:
+  1. dimension="Collaborative ↔ Independent", pole_left="Collaborative", pole_right="Independent"
+  2. dimension="Process-Driven ↔ Adaptive", pole_left="Process-Driven", pole_right="Adaptive/Agile"
+  3. dimension="Risk-Averse ↔ Risk-Tolerant", pole_left="Risk-Averse", pole_right="Risk-Tolerant"
+  4. dimension="Analytical ↔ Intuitive", pole_left="Analytical", pole_right="Intuitive"
+  5. dimension="Depth-Focused ↔ Breadth-Focused", pole_left="Depth-Focused", pole_right="Breadth-Focused"
+- candidate_position: 1=strongly left pole, 3=center/neutral, 5=strongly right pole. Must be 1-5.
+- rationale: cite a specific answer or story — never speculate.
+
+eq_profile RULES:
+- self_awareness: infer from depth of self-disclosure and accuracy of self-critique in answers.
+- self_regulation: infer from composure language during adversity stories.
+- empathy: infer from how they describe others (team members, stakeholders, customers).
+- social_skills: infer from collaboration and conflict resolution stories.
+- intrinsic_motivation: infer from stated reasons for actions and career choices.
+- All scores 0-100. Do NOT default to 50 for all — spread scores based on actual evidence.
+- eq_overall_label: High EQ if average ≥70, Moderate EQ if average 45-69, Developing EQ if average <45.
+
+behavioral_red_flags RULES:
+- Max 5 items. Return [] if no genuine red flags.
+- severity: Critical = patterns that signal dishonesty, blame-shifting, or entitlement; Moderate = patterns needing follow-up; Minor = style observations.
+- evidence: must cite question number or exact words. Never generic ("seemed evasive").
+
+coachability_index RULES:
+- score 0-100. Highly Coachable ≥75, Coachable 55-74, Moderately Coachable 35-54, Resistant to Feedback <35.
+- positive_signals: candidate mentions acting on feedback they received; uses "I learned", "my manager pointed out", "after that I changed"; pivots approach mid-answer when prompted.
+- negative_signals: deflects or justifies mistakes ("but I was right because..."); never attributes growth to external input; blame-shifts to teammates or circumstances.
+- positive_signals and negative_signals: 0-3 items each. Empty array [] if no evidence found.
+- Do NOT default to a neutral score — differentiate clearly based on actual language used.
+- summary: 2 sentences max. Reference specific answers by question number.
+
+leadership_ic_fit RULES:
+- spectrum_position 1-10. 1 = pure IC (loves deep solo work, avoids people management). 5 = balanced hybrid. 10 = pure leader.
+- Leader signals: mentions managing/mentoring others, driving team decisions, influencing without authority, cross-team coordination.
+- IC signals: "I built this myself", "I was the sole owner", deep technical explanations, preference for individual work, discomfort with management stories.
+- label mapping: 1-2=Strong IC, 3-4=IC-Leaning, 5=Hybrid, 6-7=Leader-Leaning, 8-10=Strong Leader.
+- recommended_track: derive from spectrum_position. Use Hybrid IC-Lead for 4-6 with mixed evidence.
+- evidence: cite question numbers or specific story details. Never speculate beyond what was said.
+- reasoning: explain what this track placement means for how a hiring manager should position this candidate.
+
+reference_check_triggers RULES:
+- 1-4 items. Return [] if no ambiguities or concerns warrant verification.
+- High priority: patterns suggesting potential dishonesty, toxic behavior, or major story inconsistency.
+- Medium priority: ambiguous stories where reference confirmation would meaningfully increase hiring confidence.
+- Low priority: minor gaps that a reference could clarify but wouldn't change the overall recommendation.
+- suggested_question: behavioral format ("Can you describe a time when..." or "How did [candidate] handle..."). Never yes/no questions.
+- NEVER generate triggers for competencies the candidate demonstrated clearly and consistently.
+
+assessment_confidence RULES:
+- score 0-100. High Confidence ≥70, Moderate Confidence 40-69, Low Confidence <40.
+- Start from 100 and subtract for each limiting factor present:
+  - Fewer than 4 behavioral answers given: −20
+  - Two or more answers were hypothetical ("I would..." / "I think I would..."): −15
+  - Major behavioral competency areas not covered: −10 per gap
+  - Significant inconsistencies between answers: −15
+  - Very short answers (under 3 sentences each): −10
+- Floor at 10. Ceiling at 95 (never claim perfect confidence).
+- limiting_factors: 1-3 items. Empty array [] if score ≥85.
+- what_would_change_it: must be actionable and specific — a concrete follow-up action or question type.
+
+strong_areas ENRICHMENT RULES (HR only):
+- exact_moment: must be "Q1", "Q2" etc. — the question where this strength was observed.
+- evidence_quote: verbatim copy from the transcript, max 40 words. Never paraphrase.
+- why_it_landed: 1 sentence explaining what this moment signals to a hiring committee — be specific ("signals proactive ownership without being asked", "demonstrates genuine self-awareness that is rare in candidates").
+- Minimum 2 strong_areas; max 4.
+
+star_story_matrix Q&A ENRICHMENT RULES:
+- question_text: copy the question text verbatim from the transcript. Never paraphrase.
+- answer_summary: 3-4 sentences describing exactly what the candidate said — the story they told, the situation they described, what they did, and what outcome they mentioned (even if incomplete). This is factual narration only — no evaluation language ("they did well", "they failed to"), no scoring. Write as if summarising a story.
+
+explicit_red_flags RULES:
+- Return [] if no genuine red flags exist. Max 6 items.
+- High: patterns that suggest dishonesty, consistent blame-shifting, fabricated stories, or major inconsistency.
+- Medium: deflection, vague endings on 2+ answers, hypothetical answers posed as real past experience.
+- Low: single instance of defensive language, minor story inconsistency, over-reliance on "we" language.
+- evidence_quote: must be a literal copy from the transcript. NEVER write a summary or paraphrase. If you cannot quote verbatim, leave the field as "No direct quote available."
+- type must exactly match one of the 7 allowed values: Deflection, Vague Ending, Hypothetical-as-Real, Inconsistent Story, Defensive Language, Blame Shifting, Other.
+
+seniority_calibration RULES:
+- level is based on behavioral complexity, scope of impact described, and degree of ownership/autonomy shown.
+- Junior: task-level stories, needs direction, limited cross-functional exposure, no mention of mentoring.
+- Mid-Level: project-level stories, independent within a team, some initiative, cross-functional interaction.
+- Senior: org-level stories, drives cross-functional decisions, influences without authority, mentions mentoring.
+- Staff/Principal: company-level impact, strategy-setting, multi-team influence, systems thinking.
+- rationale: MUST cite specific question numbers and quote story details. Never generic ("showed strong leadership").
+- evidence_signals: 2-3 items. Each must cite a question number.
+- confidence: Low if fewer than 3 behavioral answers were given.
+
+role_gap_analysis RULES:
+- expected_competencies: list ALL 7 HR radar axes, not a subset.
+- expected_score: what a competent candidate at target_level should score for this competency in the target_role.
+  - Junior: 50-60 expected. Mid-Level: 60-70. Senior: 70-80. Staff/Principal: 80+.
+- actual_score: copy EXACTLY from radar_scores for that axis. Do not re-estimate.
+- gap = expected_score − actual_score. Positive = candidate is below bar. Negative = candidate exceeds bar.
+- gap_severity: High if gap ≥20; Medium if 10-19; Low if <10 or negative (exceeds).
+- readiness_score formula: start at 100, subtract (gap * 1.5) for each High-severity gap, subtract (gap * 0.8) for each Medium-severity gap. Clamp to 0-100.
+- readiness_label thresholds: <40=Not Ready, 40-59=Developing, 60-74=Approaching Ready, 75-89=Ready, ≥90=Exceeds Bar.
+
+story_uniqueness RULES:
+- uniqueness_score: base 100, subtract 15 per repeated scenario, subtract 10 per rehearsal signal detected. Floor at 10.
+- rehearsal_signals: 0-4 items. Empty array [] if no rehearsal detected. Each must cite a specific question.
+- repeated_scenarios: list only scenarios actually repeated. Empty array [] if all stories are distinct.
+- per_question_originality: one entry per question. originality_score 0-100; rehearsal_flag=true only if strong evidence.
+- signal: must describe something specific in THAT answer — not a general observation.
+
+model_answer_comparison RULES:
+- One entry per question answered (not skipped). Max 6 entries.
+- what_was_missing: 1-4 items. Empty array [] only if answer was near-perfect. Be specific — name the missing element.
+- model_answer_outline: write exactly 4-6 dash-prefixed bullet points. Describe content, not style. Never write the answer itself.
+- improvement_instruction: must reference something specific from their actual answer. Not generic ("practice STAR").
+
+pipeline_followup_questions RULES:
+- 3-6 items. Generate based on actual gaps and ambiguities observed — not generic behavioral questions.
+- question: must reference something specific from their answer — e.g. "You mentioned 'we resolved it' in Q2 — walk me through exactly what you personally did to break the deadlock."
+- purpose: cite the specific gap or vague moment this question probes.
+- difficulty: High = probes a weak area; Medium = clarifies ambiguity; Low = confirms a strength.
+- question_id_source: the question number the follow-up targets; use "General" only if cross-cutting across 3+ answers.
+- Do NOT generate generic questions like "Tell me about a time you showed leadership" — these must be follow-ups to what was actually said.
+
+hr_improvement_plan RULES:
+- priority_focus: must be the axis with the largest gap from role_gap_analysis (or lowest radar score if no gap data).
+- overall_plan_label: '1-Week Sprint' if only 1-2 gaps; '2-Week Intensive' if 3-4 gaps; '30-Day Rebuild' if 5+ gaps.
+- weekly_sprints: exactly 2 weeks. Each week has 2-3 exercises, not more.
+- exercises.how_to_practice: must be step-by-step and specific to THIS candidate's gap. Reference what they did wrong (e.g. "You defaulted to 'we' in your conflict story — rewrite Q2's answer replacing every 'we' with 'I', then practice it aloud 3 times"). Not generic advice.
+- quick_wins: 3-4 items. Each must be a technique the candidate can apply in the next 48 hours. Concrete and specific.
+- curated_resources: 3-5 items. Must be real, named resources (not "practice interview skills"). Prefer "STAR Method by Amazon Leadership Principles" over "interview prep book"."""
 
     return f"""You are a senior behavioral talent evaluator with 15+ years of HR interviewing experience at top-tier companies.
 Analyze the complete interview transcript below and generate a brutally honest, highly specific, actionable report.
@@ -183,6 +551,7 @@ NEVER be generic — always cite specific stories, specific behaviors, specific 
 
 CANDIDATE: {name}
 TARGET COMPANY: {target_co}
+JOB ROLE TARGET: {profile.get("job_role") or session.get("target_role") or "Not specified"}
 SKILLS ON RESUME: {skills}
 INTERVIEW TYPE: {round_type.upper()} | {difficulty.upper()} difficulty
 OVERALL SCORE: {overall_score:.1f}/10
@@ -212,13 +581,7 @@ Return ONLY valid JSON. No markdown, no text outside the JSON object:
     }}
   ],
 
-  "strong_areas": [
-    {{
-      "area": "<name>",
-      "evidence": "<quote or specific moment from their answer>",
-      "score": <integer 0-100>
-    }}
-  ],
+  {strong_areas_schema}
 
   "weak_areas": [
     {{
