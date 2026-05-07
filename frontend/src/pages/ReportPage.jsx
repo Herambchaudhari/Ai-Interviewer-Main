@@ -99,7 +99,7 @@ function normArea(a) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function ScoreRing({ score, size = 120, max = 100 }) {
+function ScoreRing({ score, size = 120, max = 100, trackColor = 'var(--hr-header-ring-bg)' }) {
   const R   = (size / 2) - 10
   const C   = 2 * Math.PI * R
   const pct = Math.min(100, Math.max(0, score)) / max
@@ -108,7 +108,7 @@ function ScoreRing({ score, size = 120, max = 100 }) {
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
       <svg style={{ transform: 'rotate(-90deg)' }} width={size} height={size}>
-        <circle cx={size/2} cy={size/2} r={R} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={8}/>
+        <circle cx={size/2} cy={size/2} r={R} fill="none" stroke={trackColor} strokeWidth={8}/>
         <circle cx={size/2} cy={size/2} r={R} fill="none"
           stroke={col} strokeWidth={8} strokeLinecap="round"
           strokeDasharray={C} strokeDashoffset={off}
@@ -173,21 +173,26 @@ function HRDocumentHeader({ candidateName, jobRole, difficulty, interviewDatetim
 
   return (
     <div className="rounded-2xl overflow-hidden"
-      style={{ background: 'linear-gradient(135deg, #0f0520 0%, #0d1a2e 50%, #0f0520 100%)', border: '1px solid rgba(236,72,153,0.35)' }}>
+      style={{
+        background: 'var(--hr-header-bg)',
+        border: '1px solid var(--hr-header-border)',
+        color: 'var(--hr-header-text)',
+        boxShadow: 'var(--shadow-md)',
+      }}>
       {/* Confidential strip */}
       <div className="px-6 py-2 flex items-center justify-between"
-        style={{ background: 'rgba(236,72,153,0.1)', borderBottom: '1px solid rgba(236,72,153,0.25)' }}>
+        style={{ background: 'var(--hr-header-strip-bg)', borderBottom: '1px solid var(--hr-header-strip-border)' }}>
         <span className="text-[10px] font-bold tracking-[0.3em] uppercase"
           style={{ color: '#ec4899' }}>Confidential — AI Interviewer Assessment</span>
-        <span className="text-[10px] text-muted tracking-wider">HR / Behavioural Round</span>
+        <span className="text-[10px] tracking-wider" style={{ color: 'var(--hr-header-muted)' }}>HR / Behavioural Round</span>
       </div>
 
       <div className="px-6 pt-5 pb-2">
         {/* Row 1: Name + badges */}
         <div className="flex flex-wrap items-start gap-3 mb-3">
           <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-bold text-white truncate">{candidateName || 'Candidate'}</h1>
-            {jobRole && <p className="text-sm text-muted mt-0.5">{jobRole}</p>}
+            <h1 className="text-2xl font-bold truncate" style={{ color: 'var(--hr-header-text)' }}>{candidateName || 'Candidate'}</h1>
+            {jobRole && <p className="text-sm mt-0.5" style={{ color: 'var(--hr-header-muted)' }}>{jobRole}</p>}
           </div>
           <div className="flex flex-wrap gap-2 flex-shrink-0">
             <Chip label={`${difficulty?.toUpperCase() || 'MEDIUM'} Difficulty`} color="#ec4899" size="xs" />
@@ -196,12 +201,12 @@ function HRDocumentHeader({ candidateName, jobRole, difficulty, interviewDatetim
         </div>
 
         {/* Row 2: metadata */}
-        <div className="flex flex-wrap gap-4 text-[11px] text-muted mb-5 pb-5"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-          <span><span className="text-white/50">Date · </span>{dateStr}</span>
-          <span><span className="text-white/50">Session · </span>{shortId}</span>
-          <span><span className="text-white/50">Questions · </span>{numQuestions || '—'}</span>
-          <span><span className="text-white/50">Duration · </span>{timerMins ? `${timerMins}m` : '—'}</span>
+        <div className="flex flex-wrap gap-4 text-[11px] mb-5 pb-5"
+          style={{ borderBottom: '1px solid var(--hr-header-divider)', color: 'var(--hr-header-text-2)' }}>
+          <span><span style={{ color: 'var(--hr-header-muted)' }}>Date · </span>{dateStr}</span>
+          <span><span style={{ color: 'var(--hr-header-muted)' }}>Session · </span>{shortId}</span>
+          <span><span style={{ color: 'var(--hr-header-muted)' }}>Questions · </span>{numQuestions || '—'}</span>
+          <span><span style={{ color: 'var(--hr-header-muted)' }}>Duration · </span>{timerMins ? `${timerMins}m` : '—'}</span>
         </div>
 
         {/* Hero row: score + grade + recommendation */}
@@ -209,13 +214,13 @@ function HRDocumentHeader({ candidateName, jobRole, difficulty, interviewDatetim
           <ScoreRing score={overallScore} size={110} />
           <div className="flex flex-col gap-2">
             <div>
-              <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Overall Grade</p>
+              <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: 'var(--hr-header-muted)' }}>Overall Grade</p>
               <p className="text-5xl font-black leading-none" style={{ color: gradeColor(grade) }}>{grade || '—'}</p>
             </div>
           </div>
           <div className="flex flex-col gap-2">
             <div>
-              <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Hiring Recommendation</p>
+              <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: 'var(--hr-header-muted)' }}>Hiring Recommendation</p>
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: confColor }} />
                 <p className="text-xl font-bold" style={{ color: confColor }}>{hireRecommendation || '—'}</p>
@@ -223,9 +228,9 @@ function HRDocumentHeader({ candidateName, jobRole, difficulty, interviewDatetim
             </div>
           </div>
           <div className="ml-auto text-right hidden sm:block">
-            <p className="text-[10px] text-muted">Generated by</p>
+            <p className="text-[10px]" style={{ color: 'var(--hr-header-muted)' }}>Generated by</p>
             <p className="text-xs font-semibold" style={{ color: '#ec4899' }}>AI Interviewer</p>
-            <p className="text-[10px] text-muted mt-0.5">{new Date().toLocaleDateString('en-IN', { dateStyle: 'medium' })}</p>
+            <p className="text-[10px] mt-0.5" style={{ color: 'var(--hr-header-muted)' }}>{new Date().toLocaleDateString('en-IN', { dateStyle: 'medium' })}</p>
           </div>
         </div>
       </div>
@@ -261,7 +266,7 @@ function HRExecutiveSummary({ hireRecommendation, hireConfidence, summary, grade
       {summary && (
         <div className="mb-5 pl-4 py-1"
           style={{ borderLeft: '3px solid rgba(236,72,153,0.5)' }}>
-          <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.8)' }}>{summary}</p>
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text)' }}>{summary}</p>
           {comparedToLevel && (
             <p className="text-xs text-muted mt-2 italic">{comparedToLevel}</p>
           )}
@@ -275,7 +280,7 @@ function HRExecutiveSummary({ hireRecommendation, hireConfidence, summary, grade
           <div className="space-y-3">
             {keySignals.map((s, i) => (
               <div key={i} className="rounded-xl p-3.5"
-                style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                 <div className="flex items-start gap-2 mb-1.5">
                   <Award size={13} className="flex-shrink-0 mt-0.5" style={{ color: valenceColor(s.valence) }} />
                   <p className="text-sm font-semibold leading-snug">{s.signal}</p>
@@ -283,7 +288,7 @@ function HRExecutiveSummary({ hireRecommendation, hireConfidence, summary, grade
                 </div>
                 {s.evidence && (
                   <p className="text-xs leading-relaxed ml-5"
-                    style={{ color: 'rgba(255,255,255,0.5)', fontStyle: 'italic' }}>
+                    style={{ color: 'var(--color-muted)', fontStyle: 'italic' }}>
                     "{s.evidence}"
                   </p>
                 )}
@@ -348,10 +353,10 @@ function HRCompetencyScorecard({ competencyScorecard, axisPercentiles = {}, onRe
           const color = ANCHOR_COLORS[entry.anchor_label] || '#94a3b8'
           return (
             <div key={i} className="rounded-xl overflow-hidden"
-              style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+              style={{ border: '1px solid var(--color-border)' }}>
               {/* Header row */}
               <div className="flex items-center gap-3 px-4 py-3"
-                style={{ background: 'rgba(255,255,255,0.03)' }}>
+                style={{ background: 'var(--color-surface-2)' }}>
                 <span className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black flex-shrink-0"
                   style={{ background: `${color}20`, color }}>
                   {entry.rating_1_7 || '—'}
@@ -370,9 +375,9 @@ function HRCompetencyScorecard({ competencyScorecard, axisPercentiles = {}, onRe
               {/* Verbatim quote */}
               {entry.verbatim_quote && entry.verbatim_quote !== 'No response provided.' && (
                 <div className="px-4 py-2.5 ml-10"
-                  style={{ borderLeft: '3px solid rgba(236,72,153,0.35)', background: 'rgba(255,255,255,0.015)' }}>
+                  style={{ borderLeft: '3px solid rgba(236,72,153,0.35)', background: 'var(--color-surface-2)' }}>
                   <p className="text-[11px] leading-relaxed"
-                    style={{ color: 'rgba(255,255,255,0.5)', fontStyle: 'italic' }}>
+                    style={{ color: 'var(--color-muted)', fontStyle: 'italic' }}>
                     "{entry.verbatim_quote}"
                   </p>
                 </div>
@@ -651,7 +656,7 @@ function AssessmentConfidenceCard({ data }) {
         <blockquote style={{
           margin: 0, padding: '8px 12px',
           borderLeft: '3px solid ' + color,
-          background: 'rgba(255,255,255,0.03)',
+          background: 'var(--color-surface-2)',
           borderRadius: '4px',
         }}>
           <p style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, marginBottom: '2px' }}>What would change this</p>
@@ -745,7 +750,7 @@ function EQProfileCard({ eqProfile }) {
           return (
             <div key={key} className="flex items-center gap-3">
               <span className="text-xs text-muted w-36 flex-shrink-0">{label}</span>
-              <div className="flex-1 bg-white/5 rounded-full h-2.5">
+              <div className="flex-1 rounded-full h-2.5" style={{ background: 'var(--color-surface-3)' }}>
                 <div className="h-2.5 rounded-full transition-all duration-700"
                   style={{ width: `${val}%`, background: color }} />
               </div>
@@ -798,8 +803,8 @@ function AudioClipPlayer({ audioUrl, startSec, label }) {
         onClick={toggle}
         className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg transition-all"
         style={{
-          background: playing ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.06)',
-          border: `1px solid ${playing ? 'rgba(124,58,237,0.5)' : 'rgba(255,255,255,0.1)'}`,
+          background: playing ? 'rgba(124,58,237,0.2)' : 'var(--color-surface-2)',
+          border: `1px solid ${playing ? 'rgba(124,58,237,0.5)' : 'var(--color-border)'}`,
           color: playing ? '#a78bfa' : 'var(--color-muted)',
         }}>
         {playing ? <Pause size={11} /> : <Play size={11} />}
@@ -807,7 +812,7 @@ function AudioClipPlayer({ audioUrl, startSec, label }) {
         {label || 'Review the Tape'}
       </button>
       {playing && (
-        <div className="flex-1 max-w-[120px] h-1 rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }}>
+        <div className="flex-1 max-w-[120px] h-1 rounded-full" style={{ background: 'var(--color-surface-3)' }}>
           <div className="h-full rounded-full transition-all duration-300"
             style={{ width: `${progress}%`, background: '#7c3aed' }} />
         </div>
@@ -979,7 +984,7 @@ function ShareModal({ report, sessionId, onClose }) {
           {target_company && (
             <p className="text-xs text-muted">Target: <span className="text-cyan-400">{target_company}</span></p>
           )}
-          <p className="text-xs text-muted pt-1" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+          <p className="text-xs text-muted pt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
             Generated by AI Interviewer Platform
           </p>
         </div>
@@ -1010,8 +1015,8 @@ function ShareModal({ report, sessionId, onClose }) {
                 value={shareUrl}
                 className="flex-1 text-xs px-3 py-2 rounded-lg font-mono truncate"
                 style={{
-                  background: 'rgba(255,255,255,0.06)',
-                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'var(--color-surface-2)',
+                  border: '1px solid var(--color-border)',
                   color: 'var(--color-text)',
                 }}
               />
@@ -1019,8 +1024,8 @@ function ShareModal({ report, sessionId, onClose }) {
                 onClick={copyShareUrl}
                 className="flex items-center gap-1.5 text-xs py-2 px-3 rounded-lg transition-all"
                 style={{
-                  background: urlCopied ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.07)',
-                  border: `1px solid ${urlCopied ? '#4ade80' : 'rgba(255,255,255,0.12)'}`,
+                  background: urlCopied ? 'rgba(74,222,128,0.15)' : 'var(--color-surface-2)',
+                  border: `1px solid ${urlCopied ? '#4ade80' : 'var(--color-border)'}`,
                   color: urlCopied ? '#4ade80' : 'var(--color-muted)',
                 }}>
                 {urlCopied ? <Check size={13} /> : <Copy size={13} />}
@@ -1035,7 +1040,7 @@ function ShareModal({ report, sessionId, onClose }) {
         <div className="flex gap-3">
           <button onClick={copyLink}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all"
-            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+            style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
             {copied ? <Check size={14} style={{ color: '#4ade80' }} /> : <Copy size={14} />}
             {copied ? 'Copied!' : 'Copy Page URL'}
           </button>
@@ -1077,7 +1082,7 @@ function ReportLoading({ stage, progress, label, isFirstGeneration }) {
             <span>{label}</span>
             <span>{progress}%</span>
           </div>
-          <div className="h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.07)' }}>
+          <div className="h-2 rounded-full" style={{ background: 'var(--color-surface-3)' }}>
             <div className="h-full rounded-full transition-all duration-700"
               style={{
                 width: `${progress}%`,
@@ -1088,12 +1093,11 @@ function ReportLoading({ stage, progress, label, isFirstGeneration }) {
         </div>
         <div className="space-y-1">
           {SSE_STAGES.map((s) => (
-            <div key={s.key} className={`flex items-center gap-2 text-xs transition-all ${
-              progress >= s.pct ? 'text-white' : 'text-muted'
-            }`}>
+            <div key={s.key} className="flex items-center gap-2 text-xs transition-all"
+              style={{ color: progress >= s.pct ? 'var(--color-text)' : 'var(--color-muted)' }}>
               {progress >= s.pct
                 ? <CheckCircle size={12} style={{ color: '#4ade80' }} />
-                : <div className="w-3 h-3 rounded-full" style={{ background: 'rgba(255,255,255,0.1)' }} />
+                : <div className="w-3 h-3 rounded-full" style={{ background: 'var(--color-surface-3)' }} />
               }
               {s.label}
             </div>
@@ -1143,7 +1147,7 @@ function QTooltip({ active, payload }) {
   const d = payload[0]?.payload || {}
   return (
     <div className="glass p-3 text-xs max-w-xs" style={{ border: '1px solid rgba(124,58,237,0.4)' }}>
-      <p className="font-semibold mb-1 text-white text-sm">{d.label}</p>
+      <p className="font-semibold mb-1 text-sm" style={{ color: 'var(--color-text)' }}>{d.label}</p>
       <p className="text-muted">{d.question_text}</p>
       {d.skipped || d.score == null
         ? <p className="mt-1 text-yellow-400">Skipped</p>
@@ -1158,7 +1162,7 @@ function FillerTooltip({ active, payload }) {
   const d = payload[0]?.payload || {}
   return (
     <div className="glass p-3 text-xs max-w-xs" style={{ border: '1px solid rgba(251,146,60,0.4)' }}>
-      <p className="font-semibold text-white mb-1">{d.question_id}</p>
+      <p className="font-semibold mb-1" style={{ color: 'var(--color-text)' }}>{d.question_id}</p>
       <p className="text-muted">Fillers: <span className="text-orange-400 font-bold">{d.filler_count}</span></p>
       {d.filler_words?.length > 0 && (
         <p className="text-muted mt-1">Words: {d.filler_words.slice(0, 5).join(', ')}</p>
@@ -1656,7 +1660,7 @@ export default function ReportPage() {
           <div>
             <h1 className="text-3xl font-bold gradient-text mb-1">Interview Report</h1>
             {session_label && (
-              <p className="text-sm font-semibold text-white/90 mb-1">{session_label}</p>
+              <p className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text-2)' }}>{session_label}</p>
             )}
             <p className="text-muted text-sm">
               {ROUND_LABELS[round_type]} · {difficulty} · {num_questions} Qs · {timer_mins}m
@@ -1774,7 +1778,7 @@ export default function ReportPage() {
               { label: 'Grade',     val: grade || '—' },
             ].map(({ label, val }) => (
               <div key={label} className="text-center p-3 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
+                style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                 <p className="font-bold text-lg leading-none">{val}</p>
                 <p className="text-xs text-muted mt-0.5">{label}</p>
               </div>
@@ -1902,7 +1906,7 @@ export default function ReportPage() {
                           <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: d.color }}>{d.label}</p>
                           <p className="text-2xl font-bold tabular-nums" style={{ color: d.color }}>{acc}%</p>
                           <p className="text-[10.5px]" style={{ color: '#6b7280' }}>{d.c} / {d.t} correct</p>
-                          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-3)' }}>
                             <div className="h-full rounded-full transition-all duration-1000"
                               style={{ width: `${acc}%`, background: d.color }} />
                           </div>
@@ -1931,9 +1935,9 @@ export default function ReportPage() {
                             }}>{accuracy}%</span>
                           </div>
                         </div>
-                        <div className="relative h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                        <div className="relative h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-surface-3)' }}>
                           {/* 60% threshold marker */}
-                          <div className="absolute top-0 bottom-0 w-px" style={{ left: '60%', background: 'rgba(255,255,255,0.2)' }} />
+                          <div className="absolute top-0 bottom-0 w-px" style={{ left: '60%', background: 'var(--color-border-strong)' }} />
                           <div className="h-full rounded-full transition-all duration-1000"
                             style={{
                               width: `${accuracy}%`,
@@ -1993,7 +1997,7 @@ export default function ReportPage() {
                       { label: 'Slow (>90s)', val: slowCount,  color: slowCount > 0 ? '#f59e0b' : '#4ade80',  note: slowCount > 0 ? 'Needed more time' : 'None' },
                     ].map(({ label, val, color, note }) => (
                       <div key={label} className="rounded-xl p-3 text-center"
-                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                        style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                         <p className="text-xl font-bold tabular-nums" style={{ color }}>{val}</p>
                         <p className="text-[10px] font-semibold mt-0.5" style={{ color: '#6b7280' }}>{label}</p>
                         {note && <p className="text-[9.5px] mt-0.5" style={{ color: '#4b5563' }}>{note}</p>}
@@ -2240,7 +2244,7 @@ export default function ReportPage() {
                       const priBg    = priority === 'high' ? 'rgba(248,113,113,0.10)' : priority === 'low' ? 'rgba(74,222,128,0.10)' : 'rgba(250,204,21,0.10)'
                       return (
                         <div key={i} className="flex items-start gap-3 p-3 rounded-xl"
-                          style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                          style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5"
                             style={{ background: priBg, color: priColor, border: `1px solid ${priColor}40` }}>
                             {priority.toUpperCase()}
@@ -2299,7 +2303,7 @@ export default function ReportPage() {
                           <summary className="flex items-center gap-3 px-4 py-3 cursor-pointer list-none select-none">
                             {/* Q# badge */}
                             <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
-                              style={{ background: 'rgba(255,255,255,0.07)' }}>
+                              style={{ background: 'var(--color-surface-3)' }}>
                               {i + 1}
                             </div>
                             {/* Correctness icon */}
@@ -2328,7 +2332,7 @@ export default function ReportPage() {
                               )}
                               {q.topic && (
                                 <span className="text-[9.5px] px-1.5 py-0.5 rounded hidden sm:inline"
-                                  style={{ background: 'rgba(255,255,255,0.05)', color: '#6b7280' }}>
+                                  style={{ background: 'var(--color-surface-3)', color: 'var(--color-muted)' }}>
                                   {q.topic}
                                 </span>
                               )}
@@ -2336,7 +2340,7 @@ export default function ReportPage() {
                           </summary>
 
                           {/* Expanded detail */}
-                          <div className="px-4 pb-4 pt-3 space-y-2.5 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                          <div className="px-4 pb-4 pt-3 space-y-2.5 border-t" style={{ borderColor: 'var(--color-border)' }}>
                             {/* Your answer */}
                             <div className="flex items-start gap-2">
                               <span className="text-[10px] font-semibold uppercase tracking-wide flex-shrink-0 w-20 mt-0.5"
@@ -2426,12 +2430,12 @@ export default function ReportPage() {
                   </p>
                   <ResponsiveContainer width="100%" height={300}>
                     <RadarChart data={legacyRadarData} margin={{ top: 10, right: 40, bottom: 10, left: 40 }}>
-                      <PolarGrid stroke="rgba(255,255,255,0.08)" />
+                      <PolarGrid stroke="var(--color-border)" />
                       <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 9 }} />
                       <Radar name="Score" dataKey="A" stroke="#ec4899" fill="#ec4899" fillOpacity={0.18}
                         dot={{ r: 3, fill: '#f472b6' }} />
                       <Tooltip formatter={(v) => [`${v}/100`, 'Score']}
-                        contentStyle={{ background: '#1e1e2e', border: '1px solid rgba(236,72,153,0.4)', borderRadius: 8 }} />
+                        contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }} />
                     </RadarChart>
                   </ResponsiveContainer>
                   {/* Bar fallback rows for scores */}
@@ -2439,7 +2443,7 @@ export default function ReportPage() {
                     {legacyRadarData.map(d => (
                       <div key={d.subject} className="flex items-center gap-3">
                         <span className="text-xs text-muted w-44 flex-shrink-0 truncate">{d.subject}</span>
-                        <div className="flex-1 bg-white/5 rounded-full h-1.5">
+                        <div className="flex-1 rounded-full h-1.5" style={{ background: 'var(--color-surface-3)' }}>
                           <div className="h-1.5 rounded-full transition-all duration-500"
                             style={{ width: `${d.A}%`, background: scoreColor(d.A) }} />
                         </div>
@@ -2476,12 +2480,12 @@ export default function ReportPage() {
                     {assessedAxes.length >= 2 ? (
                       <ResponsiveContainer width="100%" height={260}>
                         <RadarChart data={assessedAxes} margin={{ top: 0, right: 30, bottom: 0, left: 30 }}>
-                          <PolarGrid stroke="rgba(255,255,255,0.08)" />
+                          <PolarGrid stroke="var(--color-border)" />
                           <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
                           <Radar name="Score" dataKey="A" stroke="#7c3aed" fill="#7c3aed" fillOpacity={0.2}
                             dot={{ r: 3, fill: '#a78bfa' }} />
                           <Tooltip formatter={(v) => [`${v}/10`, 'Score']}
-                            contentStyle={{ background: '#1e1e2e', border: '1px solid #7c3aed40', borderRadius: 8 }} />
+                            contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }} />
                         </RadarChart>
                       </ResponsiveContainer>
                     ) : (
@@ -2489,7 +2493,7 @@ export default function ReportPage() {
                         {assessedAxes.map(d => (
                           <div key={d.subject} className="flex items-center gap-3">
                             <span className="text-sm text-muted w-36 flex-shrink-0">{d.subject}</span>
-                            <div className="flex-1 bg-white/5 rounded-full h-2">
+                            <div className="flex-1 rounded-full h-2" style={{ background: 'var(--color-surface-3)' }}>
                               <div className="h-2 rounded-full" style={{
                                 width: `${d.A * 10}%`,
                                 background: d.A >= 7 ? '#4ade80' : d.A >= 5 ? '#facc15' : '#f87171'
@@ -2540,7 +2544,7 @@ export default function ReportPage() {
               <SectionCard icon={<MessageSquare size={16}/>} title={axTitle} color={axColor}>
                 <ResponsiveContainer width="100%" height={260}>
                   <RadarChart data={radarData} margin={{ top: 0, right: 30, bottom: 0, left: 30 }}>
-                    <PolarGrid stroke="rgba(255,255,255,0.08)" />
+                    <PolarGrid stroke="var(--color-border)" />
                     <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
                     <Radar name="Score" dataKey="A" stroke={axColor} fill={axColor} fillOpacity={0.2}
                       dot={{ r: 3, fill: axDot }} />
@@ -2564,7 +2568,7 @@ export default function ReportPage() {
               <SectionCard icon={<TrendingUp size={16}/>} title="Delivery Consistency" color="#a78bfa">
                 {delivery_consistency?.verdict && (
                   <p className="text-sm text-muted mb-3">
-                    <span className="font-semibold text-white">{delivery_consistency.verdict}</span>
+                    <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{delivery_consistency.verdict}</span>
                     {delivery_consistency.drop != null && (
                       <> — {delivery_consistency.drop > 0 ? `dropped ${delivery_consistency.drop} pts` : `improved ${Math.abs(delivery_consistency.drop)} pts`} by end</>
                     )}
@@ -2719,7 +2723,7 @@ export default function ReportPage() {
                 return (
                   <div key={i} className="flex items-center gap-3">
                     <span className="text-sm text-muted w-24 truncate flex-shrink-0">{cat.category}</span>
-                    <div className="flex-1 bg-white/5 rounded-full h-2">
+                    <div className="flex-1 rounded-full h-2" style={{ background: 'var(--color-surface-3)' }}>
                       <div className="h-2 rounded-full transition-all"
                         style={{ width: `${pct}%`, background: scoreColor(pct) }} />
                     </div>
@@ -2917,7 +2921,7 @@ export default function ReportPage() {
                       <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0"
                         style={{ background: `${c}22`, color: c }}>{key}</span>
                       <span className="text-xs text-muted w-16 flex-shrink-0">{label}</span>
-                      <div className="flex-1 bg-white/5 rounded-full h-2">
+                      <div className="flex-1 rounded-full h-2" style={{ background: 'var(--color-surface-3)' }}>
                         <div className="h-2 rounded-full transition-all duration-500"
                           style={{ width: `${pct}%`, background: c }} />
                       </div>
@@ -2940,7 +2944,7 @@ export default function ReportPage() {
                     : q.specificity_level?.startsWith('Medium') ? '#facc15' : '#f87171'
                   return (
                     <div key={i} className="rounded-xl overflow-hidden"
-                      style={{ border: '1px solid rgba(236,72,153,0.18)', background: 'rgba(255,255,255,0.02)' }}>
+                      style={{ border: '1px solid rgba(236,72,153,0.18)', background: 'var(--color-surface-2)' }}>
                       {/* Story header */}
                       <div className="flex items-center gap-3 px-4 py-3"
                         style={{ background: 'rgba(236,72,153,0.06)', borderBottom: '1px solid rgba(236,72,153,0.12)' }}>
@@ -2972,9 +2976,9 @@ export default function ReportPage() {
                             ].map(({ k, v }) => (
                               <span key={k} className="w-6 h-6 rounded-md text-[10px] font-bold flex items-center justify-center"
                                 style={{
-                                  background: v ? 'rgba(74,222,128,0.18)' : 'rgba(255,255,255,0.05)',
-                                  color: v ? '#4ade80' : '#475569',
-                                  border: `1px solid ${v ? 'rgba(74,222,128,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                                  background: v ? 'rgba(74,222,128,0.18)' : 'var(--color-surface-3)',
+                                  color: v ? '#4ade80' : 'var(--color-muted)',
+                                  border: `1px solid ${v ? 'rgba(74,222,128,0.35)' : 'var(--color-border)'}`,
                                 }}>{k}</span>
                             ))}
                           </div>
@@ -2984,7 +2988,7 @@ export default function ReportPage() {
                           <span className="ml-auto text-[11px] font-semibold" style={{ color: c }}>{pct}%</span>
                         </div>
                         {/* Completeness bar */}
-                        <div className="bg-white/5 rounded-full h-1.5 mb-3">
+                        <div className="rounded-full h-1.5 mb-3" style={{ background: 'var(--color-surface-3)' }}>
                           <div className="h-1.5 rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: c }} />
                         </div>
                         {/* Question text */}
@@ -3060,11 +3064,11 @@ export default function ReportPage() {
                     <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
                     <YAxis domain={[minScore, maxScore]} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
                     <Tooltip
-                      contentStyle={{ background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }}
-                      labelStyle={{ color: 'rgba(255,255,255,0.7)' }}
+                      contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 12, color: 'var(--color-text)' }}
+                      labelStyle={{ color: 'var(--color-text-2)' }}
                       formatter={(v) => [`${v}/100`, 'Score']}
                     />
-                    <ReferenceLine y={arc.reduce((s, p) => s + p.score, 0) / arc.length} stroke="rgba(255,255,255,0.15)" strokeDasharray="4 4" />
+                    <ReferenceLine y={arc.reduce((s, p) => s + p.score, 0) / arc.length} stroke="var(--color-border-strong)" strokeDasharray="4 4" />
                     <Line
                       type="monotone" dataKey="score" stroke={tc.color} strokeWidth={2.5}
                       dot={{ fill: tc.color, r: 4, strokeWidth: 0 }}
@@ -3091,7 +3095,7 @@ export default function ReportPage() {
                   : '#475569'
                 const bgColor = cat.covered
                   ? `${perfColor}0d`
-                  : 'rgba(255,255,255,0.02)'
+                  : 'var(--color-surface-2)'
                 return (
                   <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-lg"
                     style={{ background: bgColor, border: `1px solid ${cat.covered ? `${perfColor}28` : 'var(--color-border)'}` }}>
@@ -3262,7 +3266,7 @@ export default function ReportPage() {
                               style={{ background: `${style.color}18`, color: style.color }}>{sev}</span>
                           </div>
                           {evidence && (
-                            <p className="text-[11px] italic leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                            <p className="text-[11px] italic leading-relaxed" style={{ color: 'var(--color-muted)' }}>
                               "{evidence}"
                             </p>
                           )}
@@ -3971,11 +3975,11 @@ export default function ReportPage() {
                   <p className="text-sm font-semibold mb-3 flex items-center gap-2"><BarChart2 size={14}/> Per-Problem Score</p>
                   <ResponsiveContainer width="100%" height={220}>
                     <BarChart data={perProblemBars}>
-                      <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                      <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                       <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                       <YAxis domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                       <Tooltip
-                        contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                        contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                         labelFormatter={(_, p) => p[0]?.payload?.label}
                         formatter={(v, name) => [`${v}${name === 'score' ? '/10' : '%'}`, name === 'score' ? 'Score' : 'Tests Passed']}
                       />
@@ -3993,7 +3997,7 @@ export default function ReportPage() {
                   <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Target size={14}/> Verdict Distribution</p>
                   <ResponsiveContainer width="100%" height={220}>
                     <BarChart data={verdictData} layout="vertical">
-                      <CartesianGrid stroke="rgba(255,255,255,0.05)" horizontal={false}/>
+                      <CartesianGrid stroke="var(--color-border)" horizontal={false}/>
                       <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                       <YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} width={90}/>
                       <Tooltip contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}/>
@@ -4010,13 +4014,13 @@ export default function ReportPage() {
                     <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Zap size={14}/> Efficiency Map (Runtime vs Code Length)</p>
                     <ResponsiveContainer width="100%" height={220}>
                       <ScatterChart>
-                        <CartesianGrid stroke="rgba(255,255,255,0.05)"/>
+                        <CartesianGrid stroke="var(--color-border)"/>
                         <XAxis type="number" dataKey="x" name="Runtime" unit="ms" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                         <YAxis type="number" dataKey="y" name="Lines"        tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                         <ZAxis type="number" dataKey="z" range={[60, 240]} name="Pass %"/>
                         <Tooltip
                           cursor={{ strokeDasharray: '3 3' }}
-                          contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                          contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                           formatter={(v, name) => [`${v}${name === 'Runtime' ? ' ms' : name === 'Pass %' ? '%' : ''}`, name]}
                           labelFormatter={(_, p) => p[0]?.payload?.name}
                         />
@@ -4032,7 +4036,7 @@ export default function ReportPage() {
                     <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Layers size={14}/> Topic Mastery</p>
                     <ResponsiveContainer width="100%" height={220}>
                       <RadarChart data={topicRadar}>
-                        <PolarGrid stroke="rgba(255,255,255,0.1)"/>
+                        <PolarGrid stroke="var(--color-border)"/>
                         <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }}/>
                         <Radar dataKey="A" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.3}/>
                         <Tooltip formatter={v => [`${v}/100`]} contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40' }}/>
@@ -4130,11 +4134,11 @@ export default function ReportPage() {
                         <p className="text-sm font-semibold mb-3 flex items-center gap-2"><Layers size={14}/> Difficulty-Tier Solve Rate</p>
                         <ResponsiveContainer width="100%" height={220}>
                           <BarChart data={diffStats} margin={{ top: 5, right: 10, bottom: 5, left: -15 }}>
-                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                             <XAxis dataKey="tier" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                             <YAxis domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => `${v}%`}/>
                             <Tooltip
-                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                               formatter={(v, _n, p) => [`${v}% (${p.payload.solved}/${p.payload.total})`, 'Solved']}
                             />
                             <Bar dataKey="pass" radius={[6, 6, 0, 0]}>
@@ -4158,12 +4162,12 @@ export default function ReportPage() {
                       </div>
                       <ResponsiveContainer width="100%" height={205}>
                         <LineChart data={progression} margin={{ top: 5, right: 16, bottom: 5, left: -20 }}>
-                          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                          <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                           <XAxis dataKey="step" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                           <YAxis yAxisId="score" domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={v => `${v}`}/>
                           <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={v => `${v}%`}/>
                           <Tooltip
-                            contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                            contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                             labelFormatter={(_, p) => p[0]?.payload?.label}
                             formatter={(v, name) => [name === 'score' ? `${v}/10` : `${v}%`, name === 'score' ? 'Score' : 'Tests passed']}
                           />
@@ -4189,11 +4193,11 @@ export default function ReportPage() {
                         </div>
                         <ResponsiveContainer width="100%" height={205}>
                           <LineChart data={complexityLine} margin={{ top: 5, right: 10, bottom: 5, left: -10 }}>
-                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                             <XAxis dataKey="step" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                             <YAxis domain={[0, 8]} ticks={[1,2,3,4,5,6,7,8]} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={rankLabel} width={56}/>
                             <Tooltip
-                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                               labelFormatter={(_, p) => p[0]?.payload?.label}
                               formatter={(v, name, props) => {
                                 const raw = name === 'tc' ? props.payload.tcLabel : props.payload.scLabel
@@ -4224,11 +4228,11 @@ export default function ReportPage() {
                         </div>
                         <ResponsiveContainer width="100%" height={205}>
                           <LineChart data={runtimeLine} margin={{ top: 5, right: 10, bottom: 5, left: -10 }}>
-                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                             <XAxis dataKey="step" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                             <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={v => `${v}ms`}/>
                             <Tooltip
-                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                               labelFormatter={(_, p) => p[0]?.payload?.label}
                               formatter={v => [`${v} ms`, 'Runtime']}
                             />
@@ -4253,11 +4257,11 @@ export default function ReportPage() {
                         <p className="text-sm font-semibold mb-3 flex items-center gap-2"><BarChart2 size={14}/> Test Coverage Per Problem</p>
                         <ResponsiveContainer width="100%" height={220}>
                           <BarChart data={coverage} margin={{ top: 5, right: 10, bottom: 5, left: -15 }}>
-                            <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false}/>
+                            <CartesianGrid stroke="var(--color-border)" vertical={false}/>
                             <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                             <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                             <Tooltip
-                              contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40', borderRadius: 8 }}
+                              contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, color: 'var(--color-text)' }}
                               labelFormatter={(_, p) => p[0]?.payload?.label}
                             />
                             <Bar dataKey="passed" stackId="a" fill="#22c55e" name="Passed"/>
@@ -4427,7 +4431,7 @@ export default function ReportPage() {
                   <p className="text-sm text-muted mb-3">Averaged across {perQ.length} question(s)</p>
                   <ResponsiveContainer width="100%" height={240}>
                     <RadarChart data={avgRadar}>
-                      <PolarGrid stroke="rgba(255,255,255,0.1)"/>
+                      <PolarGrid stroke="var(--color-border)"/>
                       <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 11 }}/>
                       <Radar dataKey="A" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.25}/>
                       <Tooltip formatter={v => [`${v}/100`]} contentStyle={{ background: '#1e1e2e', border: '1px solid #a78bfa40' }}/>
@@ -4518,7 +4522,7 @@ export default function ReportPage() {
                         data={peer_comparison.radar_comparison}
                         margin={{ top: 5, right: 10, bottom: 5, left: -20 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                         <XAxis dataKey="axis" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
                         <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
                         <Tooltip
@@ -4547,8 +4551,8 @@ export default function ReportPage() {
                           <div key={g}
                             className="flex flex-col items-center px-3 py-2 rounded-xl text-xs"
                             style={{
-                              background: isUser ? 'rgba(6,182,212,0.15)' : 'rgba(255,255,255,0.04)',
-                              border: isUser ? '1px solid rgba(6,182,212,0.5)' : '1px solid rgba(255,255,255,0.08)',
+                              background: isUser ? 'rgba(6,182,212,0.15)' : 'var(--color-surface-2)',
+                              border: isUser ? '1px solid rgba(6,182,212,0.5)' : '1px solid var(--color-border)',
                             }}>
                             <span className="font-bold text-base" style={{ color: isUser ? '#06b6d4' : '#94a3b8' }}>{g}</span>
                             <span style={{ color: isUser ? '#06b6d4' : '#64748b' }}>{pct}%</span>
@@ -4587,7 +4591,7 @@ export default function ReportPage() {
                 { label: 'Pass Probability', val: company_fit?.pass_probability != null ? `${company_fit.pass_probability}%` : '—', color: scoreColor(company_fit?.pass_probability ?? 0) },
               ].map(({ label, val, color }) => (
                 <div key={label} className="text-center p-4 rounded-xl"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
+                  style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                   <p className="text-2xl font-bold" style={{ color }}>{val}</p>
                   <p className="text-xs text-muted mt-1">{label}</p>
                 </div>
@@ -4737,7 +4741,7 @@ export default function ReportPage() {
                     <div className="mt-2 space-y-2 pl-3">
                       {items.map((item, ii) => (
                         <div key={ii} className="p-3 rounded-xl text-sm"
-                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)' }}>
+                          style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                           <p className="font-medium">{item.topic}</p>
                           {item.goal && <p className="text-xs text-muted mt-0.5">{item.goal}</p>}
                           {item.task && <p className="text-xs text-cyan-400 mt-0.5">→ {item.task}</p>}
@@ -4962,8 +4966,8 @@ export default function ReportPage() {
                       {t.reviews.map((r, i) => (
                         <div key={i}
                           className="text-xs px-2.5 py-1 rounded-lg text-center"
-                          style={{ background: 'rgba(255,255,255,0.05)', minWidth: 80 }}>
-                          <p className="font-medium text-white">{r.session_type}</p>
+                          style={{ background: 'var(--color-surface-2)', minWidth: 80 }}>
+                          <p className="font-medium" style={{ color: 'var(--color-text)' }}>{r.session_type}</p>
                           <p className="text-muted">{r.date}</p>
                         </div>
                       ))}
@@ -5038,13 +5042,13 @@ export default function ReportPage() {
                     <button key={item.id}
                       onClick={() => handleToggle(item)}
                       className="w-full flex items-start gap-3 p-3 rounded-xl text-left transition-opacity hover:opacity-80"
-                      style={{ background: 'rgba(255,255,255,0.03)', opacity: item.checked ? 0.5 : 1 }}>
+                      style={{ background: 'var(--color-surface-2)', opacity: item.checked ? 0.5 : 1 }}>
                       <div className="w-4 h-4 rounded mt-0.5 flex-shrink-0 flex items-center justify-center"
-                        style={{ background: item.checked ? '#4ade80' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+                        style={{ background: item.checked ? '#4ade80' : 'var(--color-surface-3)', border: '1px solid var(--color-border)' }}>
                         {item.checked && <Check size={12} style={{ color: '#0f172a' }} />}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-white" style={{ textDecoration: item.checked ? 'line-through' : 'none' }}>{item.title}</p>
+                        <p className="text-sm" style={{ color: 'var(--color-text)', textDecoration: item.checked ? 'line-through' : 'none' }}>{item.title}</p>
                         {item.details && <p className="text-xs text-muted mt-0.5 truncate">{item.details}</p>}
                       </div>
                       <div className="flex-shrink-0 flex flex-col items-end gap-1">
@@ -5074,7 +5078,7 @@ export default function ReportPage() {
                 { label: 'Camera Uptime', value: `${Math.round((proctoring_summary?.camera_uptime_ratio || 0) * 100)}%`, color: '#22d3ee' },
               ].map(card => (
                 <div key={card.label} className="rounded-xl p-4"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--color-border)' }}>
+                  style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
                   <p className="text-xs text-muted uppercase tracking-wider mb-1">{card.label}</p>
                   <p className="text-lg font-bold" style={{ color: card.color }}>{card.value}</p>
                 </div>
