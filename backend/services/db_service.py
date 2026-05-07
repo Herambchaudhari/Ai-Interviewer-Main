@@ -1126,17 +1126,19 @@ def get_analytics(user_id: str) -> dict:
 def get_topics_mastery(user_id: str) -> dict:
     """
     Extract all topics from weak_areas + study_recommendations across reports.
-    Compute per-topic proficiency level.
+    Compute per-topic proficiency, trend, round_types, and score history.
     """
     try:
         sessions_res = (
             _db().table("sessions")
-            .select("id")
+            .select("id, round_type")
             .eq("user_id", user_id)
             .eq("status", "completed")
             .execute()
         )
-        session_ids = [s["id"] for s in (sessions_res.data or [])]
+        session_rows = sessions_res.data or []
+        session_ids = [s["id"] for s in session_rows]
+        session_meta = {s["id"]: s for s in session_rows}
         if not session_ids:
             return {"topics": [], "ai_recommendations": []}
 
@@ -1144,19 +1146,22 @@ def get_topics_mastery(user_id: str) -> dict:
             _db().table("reports")
             .select("session_id, overall_score, weak_areas, study_recommendations, created_at")
             .in_("session_id", session_ids)
+            .order("created_at", desc=False)  # oldest first — needed for trend
             .execute()
         )
         reports = reports_res.data or []
 
-        # Aggregate topic data
         topic_map: dict = {}
         rec_map: dict = {}
 
         for rep in reports:
-            score = rep.get("overall_score") or 0
+            overall = rep.get("overall_score")
+            fallback_score = overall if overall is not None else 0
             raw_weak = rep.get("weak_areas") or []
             raw_recs = rep.get("study_recommendations") or []
+            session_id = rep.get("session_id", "")
             session_date = (rep.get("created_at") or "")[:10]
+            round_type = (session_meta.get(session_id) or {}).get("round_type") or "technical"
 
             if isinstance(raw_weak, str):
                 try:
@@ -1181,13 +1186,27 @@ def get_topics_mastery(user_id: str) -> dict:
                 if key not in topic_map:
                     topic_map[key] = {
                         "topic": topic, "appearances": 0,
-                        "scores": [], "last_seen": session_date,
+                        "scores": [], "score_history": [],
+                        "last_seen": session_date,
+                        "round_types": set(),
+                        "how_to_improve": "",
                     }
                 topic_map[key]["appearances"] += 1
-                t_score = w.get("score") or score
+                # Use per-topic score if present; fall back to overall — avoid `or` to allow 0
+                raw_t = w.get("score")
+                t_score = raw_t if raw_t is not None else fallback_score
                 topic_map[key]["scores"].append(t_score)
+                topic_map[key]["score_history"].append({
+                    "date": session_date,
+                    "score": t_score,
+                    "session_id": session_id,
+                    "round_type": round_type,
+                })
                 if session_date > topic_map[key]["last_seen"]:
                     topic_map[key]["last_seen"] = session_date
+                topic_map[key]["round_types"].add(round_type)
+                if w.get("how_to_improve"):
+                    topic_map[key]["how_to_improve"] = w["how_to_improve"]
 
             for rec in raw_recs:
                 if not isinstance(rec, dict):
@@ -1197,9 +1216,8 @@ def get_topics_mastery(user_id: str) -> dict:
                     continue
                 key = topic.lower()
                 priority = rec.get("priority", "Medium")
-                resources = rec.get("resources", [])
+                resources = rec.get("resources") or []
                 reason = rec.get("reason", "")
-                # Keep highest priority recommendation per topic
                 priority_rank = {"High": 3, "Medium": 2, "Low": 1}
                 if key not in rec_map or priority_rank.get(priority, 0) > priority_rank.get(rec_map[key].get("priority"), 0):
                     rec_map[key] = {"topic": topic, "priority": priority,
@@ -1211,22 +1229,53 @@ def get_topics_mastery(user_id: str) -> dict:
             if avg >= 40: return "developing"
             return "beginner"
 
+        def _trend(history: list) -> str:
+            """Compare recent half vs older half of score history."""
+            if len(history) < 2:
+                return "stable"
+            mid = max(1, len(history) // 2)
+            older = sum(h["score"] for h in history[:mid]) / mid
+            recent = sum(h["score"] for h in history[mid:]) / len(history[mid:])
+            diff = recent - older
+            if diff > 5:
+                return "up"
+            if diff < -5:
+                return "down"
+            return "stable"
+
         topics = []
         for tm in topic_map.values():
             avg = round(sum(tm["scores"]) / len(tm["scores"]), 1) if tm["scores"] else 0
             topics.append({
-                "topic":       tm["topic"],
-                "appearances": tm["appearances"],
-                "avg_score":   avg,
-                "proficiency": _proficiency(avg),
-                "last_seen":   tm["last_seen"],
+                "topic":          tm["topic"],
+                "appearances":    tm["appearances"],
+                "avg_score":      avg,
+                "proficiency":    _proficiency(avg),
+                "last_seen":      tm["last_seen"],
+                "trend":          _trend(tm["score_history"]),
+                "round_types":    sorted(tm["round_types"]),
+                "score_history":  tm["score_history"],
+                "how_to_improve": tm["how_to_improve"],
             })
-        # Sort: weakest first
         topics.sort(key=lambda t: t["avg_score"])
+
+        # Fallback: generate recommendations for weak topics with no explicit rec
+        ai_recs = list(rec_map.values())
+        covered = {r["topic"].lower() for r in ai_recs}
+        priority_rank = {"High": 3, "Medium": 2, "Low": 1}
+        for t in topics:
+            if t["topic"].lower() not in covered and t["proficiency"] in ("beginner", "developing"):
+                pri = "High" if t["proficiency"] == "beginner" else "Medium"
+                reason = (
+                    t["how_to_improve"]
+                    or f"Scored {t['avg_score']:.0f}/100 across {t['appearances']} session(s). Build stronger fundamentals here."
+                )
+                ai_recs.append({"topic": t["topic"], "priority": pri, "resources": [], "reason": reason})
+        ai_recs.sort(key=lambda r: priority_rank.get(r.get("priority", "Medium"), 2), reverse=True)
 
         return {
             "topics": topics,
-            "ai_recommendations": list(rec_map.values()),
+            "ai_recommendations": ai_recs,
         }
     except Exception as e:
         print(f"[get_topics_mastery] error: {e}")
