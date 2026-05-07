@@ -726,26 +726,58 @@ def get_analytics(user_id: str) -> dict:
     """
     Aggregate performance stats for the hub analytics section.
     """
+    from datetime import date as _date, timedelta as _timedelta
+
+    _EMPTY = {
+        "total_interviews": 0,
+        "average_score": 0,
+        "best_round_type": None,
+        "win_rate": 0,
+        "score_trend": [],
+        "by_round_type": {},
+        "by_difficulty": {},
+        "weak_areas_ranked": [],
+        "radar_by_round": {},
+        "grade_distribution": [],
+        "streak": {"current_streak": 0, "longest_streak": 0,
+                   "total_active_days": 0, "activity_map": {}},
+        "mcq_topic_accuracy": [],
+        "time_trend": [],
+    }
+
     try:
         rows = get_hub_reports(user_id, sort_order="asc")  # asc for trend chart
         if not rows:
-            return {
-                "total_interviews": 0,
-                "average_score": 0,
-                "best_round_type": None,
-                "win_rate": 0,
-                "score_trend": [],
-                "by_round_type": {},
-                "by_difficulty": {},
-            }
+            return _EMPTY
 
+        # ── Fetch report_data JSONB for all sessions ──────────────────────────
+        session_ids = [r["session_id"] for r in rows if r.get("session_id")]
+        reports_raw = []
+        if session_ids:
+            reports_raw = (
+                _db().table("reports")
+                .select("session_id, grade, report_data")
+                .in_("session_id", session_ids)
+                .execute()
+            ).data or []
+
+        report_data_map = {}
+        for rr in reports_raw:
+            blob = rr.get("report_data") or {}
+            if isinstance(blob, str):
+                try:
+                    blob = json.loads(blob)
+                except Exception:
+                    blob = {}
+            report_data_map[rr["session_id"]] = {"grade": rr.get("grade"), "blob": blob}
+
+        # ── Existing aggregations ─────────────────────────────────────────────
         total = len(rows)
         scores = [r["overall_score"] for r in rows if r["overall_score"] is not None]
         avg_score = round(sum(scores) / len(scores), 1) if scores else 0
         wins = sum(1 for s in scores if s >= 70)
         win_rate = round(wins / len(scores), 2) if scores else 0
 
-        # By round type
         by_round: dict = {}
         for r in rows:
             rt = r["round_type"] or "technical"
@@ -764,7 +796,6 @@ def get_analytics(user_id: str) -> dict:
         best_round = max(by_round_summary, key=lambda rt: by_round_summary[rt]["avg_score"]) \
             if by_round_summary else None
 
-        # By difficulty
         by_diff: dict = {}
         for r in rows:
             d = r["difficulty"] or "medium"
@@ -781,7 +812,6 @@ def get_analytics(user_id: str) -> dict:
             for d, v in by_diff.items()
         }
 
-        # Score trend (chronological)
         score_trend = [
             {
                 "date": r["session_date"][:10] if r["session_date"] else "",
@@ -791,6 +821,132 @@ def get_analytics(user_id: str) -> dict:
             for r in rows if r["overall_score"] is not None
         ]
 
+        # ── Feature 1: Weak areas frequency ──────────────────────────────────
+        weak_area_counts: dict = {}
+        for r in rows:
+            for area in (r.get("weak_parts") or []):
+                area = area.strip()
+                if area:
+                    weak_area_counts[area] = weak_area_counts.get(area, 0) + 1
+        weak_areas_ranked = sorted(
+            [{"area": k, "count": v} for k, v in weak_area_counts.items()],
+            key=lambda x: x["count"], reverse=True
+        )[:15]
+
+        # ── Feature 2: Per-round radar (dimension averages) ───────────────────
+        _RADAR_DIMS = [
+            "technical_accuracy", "depth_completeness", "communication_clarity",
+            "confidence_delivery", "relevance", "example_quality", "structure",
+        ]
+        radar_by_round: dict = {}
+        for r in rows:
+            rt = r.get("round_type") or "technical"
+            sid = r.get("session_id")
+            rs = (report_data_map.get(sid) or {}).get("blob", {}).get("radar_scores") or {}
+            if not rs:
+                continue
+            if rt not in radar_by_round:
+                radar_by_round[rt] = {d: [] for d in _RADAR_DIMS}
+            for dim in _RADAR_DIMS:
+                val = rs.get(dim)
+                if isinstance(val, (int, float)):
+                    radar_by_round[rt][dim].append(float(val))
+        radar_by_round_avg = {
+            rt: {
+                dim: round(sum(vals) / len(vals), 1) if vals else 0
+                for dim, vals in dims.items()
+            }
+            for rt, dims in radar_by_round.items()
+        }
+
+        # ── Feature 4: Grade distribution ────────────────────────────────────
+        grade_dist: dict = {}
+        for r in rows:
+            g = r.get("grade") or "N/A"
+            grade_dist[g] = grade_dist.get(g, 0) + 1
+        grade_distribution = [{"grade": g, "count": c} for g, c in grade_dist.items()]
+
+        # ── Feature 5: Streak & activity calendar ────────────────────────────
+        session_dates_raw = [
+            r["session_date"][:10] for r in rows if r.get("session_date")
+        ]
+        session_dates = sorted(set(session_dates_raw))
+        activity_map: dict = {}
+        for d in session_dates_raw:
+            activity_map[d] = activity_map.get(d, 0) + 1
+
+        streak = 0
+        longest_streak = 0
+        prev_d = None
+        for ds in session_dates:
+            d = _date.fromisoformat(ds)
+            if prev_d is not None and (d - prev_d).days == 1:
+                streak += 1
+            else:
+                streak = 1
+            longest_streak = max(longest_streak, streak)
+            prev_d = d
+
+        current_streak = 0
+        check = _date.today()
+        date_set = set(session_dates)
+        while str(check) in date_set:
+            current_streak += 1
+            check -= _timedelta(days=1)
+
+        streak_data = {
+            "current_streak": current_streak,
+            "longest_streak": longest_streak,
+            "total_active_days": len(session_dates),
+            "activity_map": activity_map,
+        }
+
+        # ── Feature 6: MCQ topic accuracy ────────────────────────────────────
+        mcq_topic_map: dict = {}
+        for r in rows:
+            if r.get("round_type") != "mcq_practice":
+                continue
+            sid = r.get("session_id")
+            blob = (report_data_map.get(sid) or {}).get("blob", {})
+            for entry in (blob.get("category_breakdown") or []):
+                cat = entry.get("category") or "Unknown"
+                if cat not in mcq_topic_map:
+                    mcq_topic_map[cat] = {"correct": 0, "total": 0}
+                mcq_topic_map[cat]["correct"] += entry.get("correct", 0)
+                mcq_topic_map[cat]["total"]   += entry.get("total", 0)
+        mcq_topic_accuracy = sorted(
+            [
+                {
+                    "topic": cat,
+                    "correct": v["correct"],
+                    "total": v["total"],
+                    "accuracy": round(v["correct"] / v["total"] * 100, 1) if v["total"] else 0,
+                }
+                for cat, v in mcq_topic_map.items()
+            ],
+            key=lambda x: x["accuracy"], reverse=True,
+        )
+
+        # ── Feature 7: Time-per-question trend ───────────────────────────────
+        time_trend = []
+        for r in rows:
+            sid = r.get("session_id")
+            blob = (report_data_map.get(sid) or {}).get("blob", {})
+            pqa = blob.get("per_question_analysis") or []
+            times = [
+                float(q.get("time_secs") or q.get("time_taken_seconds") or 0)
+                for q in pqa
+                if not q.get("skipped")
+                and (q.get("time_secs") or q.get("time_taken_seconds"))
+            ]
+            if not times:
+                continue
+            time_trend.append({
+                "date": (r.get("session_date") or "")[:10],
+                "avg_time_secs": round(sum(times) / len(times), 1),
+                "round_type": r.get("round_type") or "technical",
+            })
+
         return {
             "total_interviews": total,
             "average_score": avg_score,
@@ -799,10 +955,17 @@ def get_analytics(user_id: str) -> dict:
             "score_trend": score_trend,
             "by_round_type": by_round_summary,
             "by_difficulty": by_diff_summary,
+            "weak_areas_ranked": weak_areas_ranked,
+            "radar_by_round": radar_by_round_avg,
+            "grade_distribution": grade_distribution,
+            "streak": streak_data,
+            "mcq_topic_accuracy": mcq_topic_accuracy,
+            "time_trend": time_trend,
         }
     except Exception as e:
         print(f"[get_analytics] error: {e}")
-        return {}
+        import traceback; traceback.print_exc()
+        return _EMPTY
 
 
 def get_topics_mastery(user_id: str) -> dict:

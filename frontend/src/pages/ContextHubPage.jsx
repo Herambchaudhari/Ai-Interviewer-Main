@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ReportsSection       from '../components/hub/ReportsSection'
-import AnalyticsSection     from '../components/hub/AnalyticsSection'
+import AnalyticsSection, { SkeletonAnalytics } from '../components/hub/AnalyticsSection'
 import ResumesSection       from '../components/hub/ResumesSection'
 import TopicsMasterySection from '../components/hub/TopicsMasterySection'
 import NotesSection         from '../components/hub/NotesSection'
@@ -150,7 +150,9 @@ export default function ContextHubPage() {
           </div>
         )}
 
-        {loading ? (
+        {loading && activeTab === 'analytics' ? (
+          <SkeletonAnalytics />
+        ) : loading ? (
           <LoadingSpinner />
         ) : (
           <>

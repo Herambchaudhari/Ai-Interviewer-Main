@@ -144,8 +144,14 @@ async def hub_analytics(user: dict = Depends(get_current_user)):
         data = get_analytics(user["user_id"])
         return _ok(data)
     except RuntimeError:
-        return _ok({"total_interviews": 0, "average_score": 0,
-                    "score_trend": [], "by_round_type": {}, "by_difficulty": {}})
+        return _ok({
+            "total_interviews": 0, "average_score": 0, "best_round_type": None,
+            "win_rate": 0, "score_trend": [], "by_round_type": {}, "by_difficulty": {},
+            "weak_areas_ranked": [], "radar_by_round": {}, "grade_distribution": [],
+            "streak": {"current_streak": 0, "longest_streak": 0,
+                       "total_active_days": 0, "activity_map": {}},
+            "mcq_topic_accuracy": [], "time_trend": [],
+        })
     except Exception as e:
         return _err(str(e), status=500)
 

@@ -1,47 +1,112 @@
 /**
- * AnalyticsSection — performance stats, trend chart, round/difficulty breakdowns.
- * Props: { analytics }
+ * AnalyticsSection — full performance analytics dashboard.
+ * Sections (in render order):
+ *  1. Stat cards (total, avg score + velocity, best round, win rate, streak, longest streak)
+ *  2. Score trend line chart (multi-round)
+ *  3. Avg score by round type + by difficulty (bar charts)
+ *  4. Per-round dimension radar grid
+ *  5. Recurring weak areas (ranked bars) + grade distribution (donut)
+ *  6. Streak / activity calendar heatmap
+ *  7. MCQ topic accuracy bars + time-per-question trend
  */
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, BarChart, Bar, Cell, Legend,
+  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
+  PieChart, Pie,
 } from 'recharts'
-import { TrendingUp, Award, Target, Percent, BarChart2 } from 'lucide-react'
+import {
+  TrendingUp, Award, Target, Percent, BarChart2,
+  Flame, Zap, Clock, BookOpen, ChevronRight,
+} from 'lucide-react'
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const ROUND_COLORS = {
   technical:     '#7c3aed',
   hr:            '#ec4899',
   dsa:           '#06b6d4',
-  mcq_practice: '#f59e0b',
+  mcq_practice:  '#f59e0b',
   system_design: '#94a3b8',
 }
 const ROUND_LABELS = {
-  technical: 'Technical', hr: 'HR', dsa: 'DSA', mcq_practice: 'MCQ Practice', system_design: 'Legacy System Design',
+  technical:     'Technical',
+  hr:            'HR',
+  dsa:           'DSA',
+  mcq_practice:  'MCQ Practice',
+  system_design: 'System Design',
 }
-const DIFF_COLORS = { easy: '#4ade80', medium: '#f59e0b', hard: '#f87171' }
+const DIFF_COLORS  = { easy: '#4ade80', medium: '#f59e0b', hard: '#f87171' }
+const GRADE_COLORS = {
+  'A+': '#10b981', A: '#10b981', 'A-': '#34d399',
+  'B+': '#06b6d4', B: '#06b6d4', 'B-': '#22d3ee',
+  'C+': '#f59e0b', C: '#f59e0b', 'C-': '#fbbf24',
+  D:    '#f97316', F: '#f87171', 'N/A': '#94a3b8',
+}
+const RADAR_DIM_LABELS = {
+  technical_accuracy:    'Tech Accuracy',
+  depth_completeness:    'Depth',
+  communication_clarity: 'Communication',
+  confidence_delivery:   'Confidence',
+  relevance:             'Relevance',
+  example_quality:       'Examples',
+  structure:             'Structure',
+}
+const ALL_DIMS = Object.keys(RADAR_DIM_LABELS)
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
-function StatCard({ label, value, sub, icon: Icon, color }) {
+const TOOLTIP_STYLE = {
+  background:   'var(--color-surface)',
+  border:       '1px solid var(--color-border)',
+  borderRadius: '8px',
+  fontSize:     '12px',
+  color:        'var(--color-text)',
+}
+
+// ── Shared helpers ─────────────────────────────────────────────────────────────
+
+function SectionHeader({ title, badge }) {
   return (
-    <div className="glass p-5 flex items-start gap-4">
+    <div className="flex items-center justify-between mb-5">
+      <h3 className="text-xs font-semibold uppercase tracking-widest"
+        style={{ color: 'var(--color-muted)' }}>
+        {title}
+      </h3>
+      {badge}
+    </div>
+  )
+}
+
+function StatCard({ label, value, sub, icon: Icon, color, velocity }) {
+  return (
+    <div className="glass p-5 flex items-start gap-4 animate-fade-in-up">
       <div className="p-3 rounded-xl flex-shrink-0" style={{ background: `${color}20` }}>
         <Icon size={20} style={{ color }} />
       </div>
-      <div>
-        <p className="text-2xl font-bold" style={{ color }}>{value}</p>
-        <p className="text-sm font-medium text-white/80 mt-0.5">{label}</p>
-        {sub && <p className="text-xs text-muted mt-0.5">{sub}</p>}
+      <div className="flex-1 min-w-0">
+        <p className="text-2xl font-bold truncate" style={{ color }}>{value}</p>
+        <p className="text-sm font-medium mt-0.5" style={{ color: 'var(--color-text)' }}>{label}</p>
+        {sub && <p className="text-xs mt-0.5" style={{ color: 'var(--color-muted)' }}>{sub}</p>}
+        {velocity !== null && velocity !== undefined && (
+          <span
+            className="inline-flex items-center gap-1 mt-1.5 text-xs font-semibold px-2 py-0.5 rounded-full"
+            style={{
+              background: velocity >= 0 ? 'rgba(16,185,129,0.12)' : 'rgba(248,113,113,0.12)',
+              color:      velocity >= 0 ? '#10b981' : '#f87171',
+            }}
+          >
+            {velocity >= 0 ? '↑' : '↓'} {Math.abs(velocity)} pts (last 5)
+          </span>
+        )}
       </div>
     </div>
   )
 }
 
-// ── Custom tooltip ────────────────────────────────────────────────────────────
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return (
     <div className="glass p-3 text-xs">
-      <p className="text-muted mb-1">{label}</p>
+      <p className="mb-1" style={{ color: 'var(--color-muted)' }}>{label}</p>
       {payload.map(p => (
         <p key={p.dataKey} style={{ color: p.color }}>
           {ROUND_LABELS[p.dataKey] || p.dataKey}: <strong>{p.value}</strong>
@@ -51,42 +116,388 @@ function CustomTooltip({ active, payload, label }) {
   )
 }
 
-// ── Empty state ───────────────────────────────────────────────────────────────
+// ── Empty / skeleton states ────────────────────────────────────────────────────
+
 function EmptyState() {
   return (
-    <div className="glass p-12 text-center">
-      <BarChart2 size={40} className="text-muted mx-auto mb-4" />
+    <div className="glass p-16 text-center">
+      <BarChart2 size={44} className="mx-auto mb-4" style={{ color: 'var(--color-muted)' }} />
       <p className="text-lg font-semibold mb-2">No interview data yet</p>
-      <p className="text-muted text-sm">Complete at least one interview to see your analytics here.</p>
+      <p className="text-sm" style={{ color: 'var(--color-muted)' }}>
+        Complete at least one interview to see your analytics here.
+      </p>
     </div>
   )
 }
 
+export function SkeletonAnalytics() {
+  return (
+    <div className="space-y-6 animate-pulse">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="glass h-24 rounded-2xl"
+            style={{ background: 'var(--color-surface-2)' }} />
+        ))}
+      </div>
+      <div className="glass h-56 rounded-2xl" style={{ background: 'var(--color-surface-2)' }} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="glass h-48 rounded-2xl"
+            style={{ background: 'var(--color-surface-2)' }} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Feature 2: Per-round radar ─────────────────────────────────────────────────
+
+function RoundRadarChart({ roundType, dimScores, color }) {
+  const data = ALL_DIMS.map(dim => ({
+    subject:  RADAR_DIM_LABELS[dim],
+    value:    dimScores[dim] ?? 0,
+    fullMark: 100,
+  }))
+  const hasSomeData = data.some(d => d.value > 0)
+  if (!hasSomeData) return (
+    <div className="flex items-center justify-center h-48 text-xs"
+      style={{ color: 'var(--color-muted)' }}>
+      No dimension data
+    </div>
+  )
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <RadarChart cx="50%" cy="50%" outerRadius="72%" data={data}>
+        <PolarGrid stroke="var(--color-border)" />
+        <PolarAngleAxis dataKey="subject"
+          tick={{ fill: 'var(--color-muted)', fontSize: 9 }} />
+        <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+        <Radar
+          name={ROUND_LABELS[roundType] || roundType}
+          dataKey="value"
+          stroke={color}
+          fill={color}
+          fillOpacity={0.18}
+          strokeWidth={2}
+        />
+        <Tooltip contentStyle={TOOLTIP_STYLE} />
+      </RadarChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ── Feature 4: Grade donut ─────────────────────────────────────────────────────
+
+function GradeDonut({ data }) {
+  if (!data.length) return (
+    <p className="text-xs py-8 text-center" style={{ color: 'var(--color-muted)' }}>
+      No grade data yet
+    </p>
+  )
+  const total = data.reduce((s, d) => s + d.count, 0)
+  return (
+    <div className="flex flex-col items-center">
+      <ResponsiveContainer width="100%" height={180}>
+        <PieChart>
+          <Pie data={data} cx="50%" cy="50%"
+            innerRadius={48} outerRadius={78}
+            dataKey="count" nameKey="grade" paddingAngle={3}>
+            {data.map(entry => (
+              <Cell key={entry.grade} fill={GRADE_COLORS[entry.grade] || '#7c3aed'} />
+            ))}
+          </Pie>
+          <Tooltip
+            formatter={(v) => [`${v} session${v !== 1 ? 's' : ''}`, '']}
+            contentStyle={TOOLTIP_STYLE}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="flex flex-wrap justify-center gap-3 mt-1">
+        {data.map(entry => (
+          <div key={entry.grade} className="flex items-center gap-1.5 text-xs">
+            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+              style={{ background: GRADE_COLORS[entry.grade] || '#7c3aed' }} />
+            <span style={{ color: 'var(--color-muted)' }}>
+              {entry.grade}{' '}
+              <strong style={{ color: 'var(--color-text)' }}>
+                {Math.round(entry.count / total * 100)}%
+              </strong>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Feature 1: Weak areas ranked bars ─────────────────────────────────────────
+
+function WeakAreasChart({ data }) {
+  if (!data.length) return (
+    <p className="text-xs py-6" style={{ color: 'var(--color-muted)' }}>
+      No recurring weak areas yet — keep practicing!
+    </p>
+  )
+  const top = data.slice(0, 10)
+  const maxCount = Math.max(...top.map(d => d.count))
+
+  const chartData = top.map(d => ({
+    name:  d.area.length > 20 ? d.area.slice(0, 18) + '…' : d.area,
+    count: d.count,
+  }))
+
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(200, chartData.length * 36)}>
+      <BarChart data={chartData} layout="vertical"
+        margin={{ top: 0, right: 30, bottom: 0, left: 10 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+        <XAxis type="number" domain={[0, maxCount + 1]}
+          allowDecimals={false}
+          tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
+        <YAxis type="category" dataKey="name" width={120}
+          tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
+        <Tooltip
+          formatter={(v) => [`${v} session${v !== 1 ? 's' : ''}`, 'Appearances']}
+          contentStyle={TOOLTIP_STYLE}
+        />
+        <Bar dataKey="count" radius={[0, 6, 6, 0]}>
+          {chartData.map((entry, i) => {
+            // purple → red as frequency increases
+            const ratio = maxCount > 1 ? entry.count / maxCount : 0.5
+            const r = Math.round(248 * ratio + 124 * (1 - ratio))
+            const g = Math.round(113 * ratio + 58  * (1 - ratio))
+            const b = Math.round(113 * ratio + 237 * (1 - ratio))
+            return <Cell key={i} fill={`rgb(${r},${g},${b})`} />
+          })}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ── Feature 5: Streak calendar heatmap ────────────────────────────────────────
+
+function StreakCalendar({ activityMap = {}, totalActiveDays = 0, currentStreak = 0, longestStreak = 0 }) {
+  // Build last 52 weeks (364 days)
+  const today = new Date()
+  const cells = []
+  for (let i = 363; i >= 0; i--) {
+    const d = new Date(today)
+    d.setDate(d.getDate() - i)
+    const key = d.toISOString().slice(0, 10)
+    cells.push({ date: key, count: activityMap[key] || 0 })
+  }
+
+  // Group into columns of 7 days
+  const weeks = []
+  for (let i = 0; i < cells.length; i += 7) {
+    weeks.push(cells.slice(i, i + 7))
+  }
+
+  const cellColor = (count) => {
+    if (count === 0) return 'var(--color-surface-2)'
+    if (count === 1) return 'rgba(124,58,237,0.35)'
+    if (count === 2) return 'rgba(124,58,237,0.62)'
+    return 'rgba(124,58,237,0.90)'
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-4 mb-4 text-xs"
+        style={{ color: 'var(--color-muted)' }}>
+        <span>
+          <strong style={{ color: currentStreak > 0 ? '#f59e0b' : 'var(--color-text)' }}>
+            {currentStreak}
+          </strong>{' '}day streak
+        </span>
+        <span>Best: <strong style={{ color: 'var(--color-text)' }}>{longestStreak}</strong></span>
+        <span>
+          <strong style={{ color: 'var(--color-text)' }}>{totalActiveDays}</strong> active days
+        </span>
+        <div className="flex items-center gap-1.5 ml-auto">
+          <span>Less</span>
+          {[0, 1, 2, 3].map(v => (
+            <div key={v} style={{
+              width: '11px', height: '11px', borderRadius: '3px',
+              background: cellColor(v),
+              border: '1px solid rgba(255,255,255,0.06)',
+            }} />
+          ))}
+          <span>More</span>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto pb-1">
+        <div style={{ display: 'flex', gap: '3px', minWidth: 'max-content' }}>
+          {weeks.map((week, wi) => (
+            <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              {week.map(cell => (
+                <div
+                  key={cell.date}
+                  title={`${cell.date} — ${cell.count} session${cell.count !== 1 ? 's' : ''}`}
+                  style={{
+                    width:        '12px',
+                    height:       '12px',
+                    borderRadius: '3px',
+                    background:   cellColor(cell.count),
+                    border:       '1px solid rgba(255,255,255,0.06)',
+                    cursor:       cell.count > 0 ? 'pointer' : 'default',
+                    transition:   'opacity 0.15s',
+                  }}
+                  onMouseEnter={e => { if (cell.count > 0) e.target.style.opacity = '0.75' }}
+                  onMouseLeave={e => { e.target.style.opacity = '1' }}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Feature 6: MCQ topic accuracy ─────────────────────────────────────────────
+
+function MCQTopicChart({ data }) {
+  if (!data.length) return (
+    <p className="text-xs py-6" style={{ color: 'var(--color-muted)' }}>
+      Complete MCQ Practice sessions to see topic-level accuracy.
+    </p>
+  )
+  const chartData = data.map(d => ({
+    name:     d.topic.length > 18 ? d.topic.slice(0, 16) + '…' : d.topic,
+    accuracy: d.accuracy,
+    correct:  d.correct,
+    total:    d.total,
+  }))
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(160, chartData.length * 36)}>
+      <BarChart data={chartData} layout="vertical"
+        margin={{ top: 0, right: 40, bottom: 0, left: 10 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+        <XAxis type="number" domain={[0, 100]}
+          tick={{ fill: 'var(--color-muted)', fontSize: 11 }}
+          tickFormatter={v => `${v}%`} />
+        <YAxis type="category" dataKey="name" width={110}
+          tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
+        <Tooltip
+          formatter={(v, n, p) => [
+            `${v}% (${p.payload.correct}/${p.payload.total})`, 'Accuracy',
+          ]}
+          contentStyle={TOOLTIP_STYLE}
+        />
+        <Bar dataKey="accuracy" radius={[0, 6, 6, 0]}>
+          {chartData.map((entry, i) => (
+            <Cell
+              key={i}
+              fill={entry.accuracy >= 80 ? '#10b981' : entry.accuracy >= 50 ? '#f59e0b' : '#f87171'}
+            />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ── Feature 7: Time-per-question trend ────────────────────────────────────────
+
+function TimePerQuestionTrend({ data }) {
+  if (!data.length) return null
+
+  const avg = arr => arr.reduce((s, d) => s + d.avg_time_secs, 0) / arr.length
+  const half = Math.ceil(data.length / 2)
+  const firstHalf  = data.slice(0, half)
+  const secondHalf = data.slice(half)
+  const timeDelta = secondHalf.length && firstHalf.length
+    ? Math.round((1 - avg(secondHalf) / avg(firstHalf)) * 100)
+    : null
+
+  const roundTypes = [...new Set(data.map(d => d.round_type))]
+  const trendByDate = {}
+  data.forEach(({ date, avg_time_secs, round_type }) => {
+    if (!trendByDate[date]) trendByDate[date] = { date }
+    trendByDate[date][round_type] = avg_time_secs
+  })
+  const chartData = Object.values(trendByDate)
+
+  return (
+    <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '320ms' }}>
+      <SectionHeader
+        title="Avg Time per Question (secs)"
+        badge={timeDelta !== null ? (
+          <span
+            className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+            style={{
+              background: timeDelta > 0 ? 'rgba(16,185,129,0.12)' : 'rgba(248,113,113,0.12)',
+              color:      timeDelta > 0 ? '#10b981' : '#f87171',
+            }}
+          >
+            {timeDelta > 0 ? `${timeDelta}% faster` : `${Math.abs(timeDelta)}% slower`}
+          </span>
+        ) : null}
+      />
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+          <XAxis dataKey="date" tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
+          <YAxis tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
+          <Tooltip content={<CustomTooltip />} />
+          <Legend formatter={v => ROUND_LABELS[v] || v}
+            wrapperStyle={{ fontSize: '12px', color: 'var(--color-muted)' }} />
+          {roundTypes.map(rt => (
+            <Line key={rt} type="monotone" dataKey={rt}
+              stroke={ROUND_COLORS[rt] || '#7c3aed'} strokeWidth={2}
+              dot={{ r: 4, fill: ROUND_COLORS[rt] || '#7c3aed' }}
+              connectNulls />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
 export default function AnalyticsSection({ analytics }) {
   const {
-    total_interviews = 0,
-    average_score    = 0,
-    best_round_type  = null,
-    win_rate         = 0,
-    score_trend      = [],
-    by_round_type    = {},
-    by_difficulty    = {},
-  } = analytics
+    total_interviews  = 0,
+    average_score     = 0,
+    best_round_type   = null,
+    win_rate          = 0,
+    score_trend       = [],
+    by_round_type     = {},
+    by_difficulty     = {},
+    weak_areas_ranked = [],
+    radar_by_round    = {},
+    grade_distribution = [],
+    streak            = {},
+    mcq_topic_accuracy = [],
+    time_trend        = [],
+  } = analytics || {}
 
   if (!total_interviews) return <EmptyState />
 
-  // Build line chart data — group by date, pivot by round_type
+  // ── Feature 3: Score velocity (pure frontend) ────────────────────────────
+  const computeVelocity = (entries, roundType, n = 5) => {
+    const filtered = entries.filter(e => e.round_type === roundType).slice(-n)
+    if (filtered.length < 2) return null
+    return Math.round(filtered[filtered.length - 1].score - filtered[0].score)
+  }
+  const overallVelocity = computeVelocity(score_trend, best_round_type)
+
+  // Score trend line chart data
   const trendByDate = {}
   score_trend.forEach(({ date, score, round_type }) => {
     if (!trendByDate[date]) trendByDate[date] = { date }
     trendByDate[date][round_type] = score
   })
-  const trendData = Object.values(trendByDate)
+  const trendData  = Object.values(trendByDate)
+  const roundTypes = [...new Set(score_trend.map(d => d.round_type))]
 
   // Round type bar data
   const roundData = Object.entries(by_round_type).map(([rt, v]) => ({
-    name: ROUND_LABELS[rt] || rt,
-    avg:  v.avg_score,
+    name:  ROUND_LABELS[rt] || rt,
+    avg:   v.avg_score,
     count: v.count,
     color: ROUND_COLORS[rt] || '#7c3aed',
   }))
@@ -99,13 +510,18 @@ export default function AnalyticsSection({ analytics }) {
     color: DIFF_COLORS[d] || '#7c3aed',
   }))
 
-  const roundTypes = [...new Set(score_trend.map(d => d.round_type))]
+  const streakData  = streak || {}
+  const hasRadar    = Object.keys(radar_by_round).length > 0
+  const hasMCQ      = mcq_topic_accuracy.length > 0
+  const hasTime     = time_trend.length > 0
+  const hasWeak     = weak_areas_ranked.length > 0
+  const hasGrades   = grade_distribution.length > 0
 
   return (
-    <div className="space-y-6 animate-fade-in-up">
+    <div className="space-y-6">
 
-      {/* ── Stat cards ────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* ── 1. Stat cards ───────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatCard
           label="Total Interviews"
           value={total_interviews}
@@ -119,6 +535,7 @@ export default function AnalyticsSection({ analytics }) {
           sub="out of 100"
           icon={Target}
           color="#06b6d4"
+          velocity={overallVelocity}
         />
         <StatCard
           label="Best Round"
@@ -134,57 +551,61 @@ export default function AnalyticsSection({ analytics }) {
           icon={Percent}
           color="#f59e0b"
         />
+        <StatCard
+          label="Current Streak"
+          value={`${streakData.current_streak ?? 0}d`}
+          sub={streakData.current_streak > 0 ? 'keep it going!' : 'start a streak today'}
+          icon={Flame}
+          color={streakData.current_streak > 0 ? '#f59e0b' : '#94a3b8'}
+        />
+        <StatCard
+          label="Longest Streak"
+          value={`${streakData.longest_streak ?? 0}d`}
+          sub={`${streakData.total_active_days ?? 0} active days total`}
+          icon={Zap}
+          color="#a78bfa"
+        />
       </div>
 
-      {/* ── Score trend ───────────────────────────────────────────────────── */}
+      {/* ── 2. Score trend ──────────────────────────────────────────────── */}
       {trendData.length > 0 && (
-        <div className="glass p-6">
-          <h3 className="text-sm font-semibold text-muted uppercase tracking-widest mb-5">
-            Score Trend Over Time
-          </h3>
+        <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '40ms' }}>
+          <SectionHeader title="Score Trend Over Time" />
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trendData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
               <XAxis dataKey="date" tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
               <YAxis domain={[0, 100]} tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
               <Tooltip content={<CustomTooltip />} />
               <Legend formatter={v => ROUND_LABELS[v] || v}
                 wrapperStyle={{ fontSize: '12px', color: 'var(--color-muted)' }} />
               {roundTypes.map(rt => (
-                <Line
-                  key={rt}
-                  type="monotone"
-                  dataKey={rt}
-                  stroke={ROUND_COLORS[rt] || '#7c3aed'}
-                  strokeWidth={2}
+                <Line key={rt} type="monotone" dataKey={rt}
+                  stroke={ROUND_COLORS[rt] || '#7c3aed'} strokeWidth={2}
                   dot={{ r: 4, fill: ROUND_COLORS[rt] || '#7c3aed' }}
-                  connectNulls
-                />
+                  connectNulls />
               ))}
             </LineChart>
           </ResponsiveContainer>
         </div>
       )}
 
-      {/* ── Round type + Difficulty charts ────────────────────────────────── */}
+      {/* ── 3. Round type + Difficulty bars ─────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
         {roundData.length > 0 && (
-          <div className="glass p-6">
-            <h3 className="text-sm font-semibold text-muted uppercase tracking-widest mb-5">
-              Avg Score by Round Type
-            </h3>
+          <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '80ms' }}>
+            <SectionHeader title="Avg Score by Round Type" />
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={roundData} layout="vertical"
                 margin={{ top: 0, right: 20, bottom: 0, left: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <XAxis type="number" domain={[0, 100]}
                   tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" width={90}
                   tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
                 <Tooltip
                   formatter={(v, n, p) => [`${v} (${p.payload.count} sessions)`, 'Avg Score']}
-                  contentStyle={{ background: '#1e1b4b', border: '1px solid rgba(139,92,246,0.3)', borderRadius: '8px' }}
+                  contentStyle={TOOLTIP_STYLE}
                 />
                 <Bar dataKey="avg" radius={[0, 6, 6, 0]}>
                   {roundData.map(entry => (
@@ -195,20 +616,17 @@ export default function AnalyticsSection({ analytics }) {
             </ResponsiveContainer>
           </div>
         )}
-
         {diffData.length > 0 && (
-          <div className="glass p-6">
-            <h3 className="text-sm font-semibold text-muted uppercase tracking-widest mb-5">
-              Avg Score by Difficulty
-            </h3>
+          <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '120ms' }}>
+            <SectionHeader title="Avg Score by Difficulty" />
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={diffData} margin={{ top: 0, right: 20, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <XAxis dataKey="name" tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
                 <YAxis domain={[0, 100]} tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
                 <Tooltip
                   formatter={(v, n, p) => [`${v} (${p.payload.count} sessions)`, 'Avg Score']}
-                  contentStyle={{ background: '#1e1b4b', border: '1px solid rgba(139,92,246,0.3)', borderRadius: '8px' }}
+                  contentStyle={TOOLTIP_STYLE}
                 />
                 <Bar dataKey="avg" radius={[6, 6, 0, 0]}>
                   {diffData.map(entry => (
@@ -220,6 +638,88 @@ export default function AnalyticsSection({ analytics }) {
           </div>
         )}
       </div>
+
+      {/* ── 4. Per-round dimension radar ────────────────────────────────── */}
+      {hasRadar && (
+        <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '160ms' }}>
+          <SectionHeader title="Performance Dimensions by Round Type" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            {Object.entries(radar_by_round).map(([rt, dims]) => (
+              <div key={rt}>
+                <p className="text-xs font-semibold text-center mb-1"
+                  style={{ color: ROUND_COLORS[rt] || '#7c3aed' }}>
+                  {ROUND_LABELS[rt] || rt}
+                </p>
+                <RoundRadarChart roundType={rt} dimScores={dims}
+                  color={ROUND_COLORS[rt] || '#7c3aed'} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── 5. Weak areas + Grade donut ─────────────────────────────────── */}
+      {(hasWeak || hasGrades) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {hasWeak && (
+            <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
+              <SectionHeader title="Recurring Weak Areas" />
+              <WeakAreasChart data={weak_areas_ranked} />
+            </div>
+          )}
+          {hasGrades && (
+            <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '240ms' }}>
+              <SectionHeader title="Grade Distribution" />
+              <GradeDonut data={grade_distribution} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 6. Activity calendar ────────────────────────────────────────── */}
+      <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '280ms' }}>
+        <SectionHeader
+          title="Activity — Last 52 Weeks"
+          badge={
+            streakData.current_streak > 0 ? (
+              <span className="flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b' }}>
+                <Flame size={11} /> {streakData.current_streak} day streak
+              </span>
+            ) : null
+          }
+        />
+        <StreakCalendar
+          activityMap={streakData.activity_map || {}}
+          totalActiveDays={streakData.total_active_days || 0}
+          currentStreak={streakData.current_streak || 0}
+          longestStreak={streakData.longest_streak || 0}
+        />
+      </div>
+
+      {/* ── 7. MCQ topic accuracy + Time trend ──────────────────────────── */}
+      {(hasMCQ || hasTime) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {hasMCQ && (
+            <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '320ms' }}>
+              <SectionHeader
+                title="MCQ Topic Accuracy"
+                badge={
+                  <span className="flex items-center gap-1 text-xs"
+                    style={{ color: 'var(--color-muted)' }}>
+                    <BookOpen size={11} /> MCQ Practice only
+                  </span>
+                }
+              />
+              <MCQTopicChart data={mcq_topic_accuracy} />
+            </div>
+          )}
+          {hasTime && (
+            <TimePerQuestionTrend data={time_trend} />
+          )}
+        </div>
+      )}
+
     </div>
   )
 }
