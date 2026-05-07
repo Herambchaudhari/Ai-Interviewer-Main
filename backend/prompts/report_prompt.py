@@ -610,7 +610,8 @@ Return ONLY valid JSON. No markdown, no text outside the JSON object:
       "verdict": "<Excellent|Good|Satisfactory|Needs Improvement|Poor>",
       "answer_summary": "<2-3 sentence summary of what they actually said>",
       "key_insight": "<1 sharp, specific actionable insight — what they must learn from this question>",
-      "category": "<category>"
+      "category": "<category>",
+      "model_answer": "<3-5 sentences showing exactly what a 9-10/10 answer looks like for this specific question. Include the key technical terms, correct order of explanation, and concrete example a top candidate would give. For behavioral questions, show a complete STAR response. For technical questions, lead with the definition, then mechanism, then real-world application. NEVER be generic — tailor this to the specific question asked.>"
     }}
   ]
 }}
@@ -621,6 +622,7 @@ GRADING RULES:
 - Minimum: 2 strong_areas, 2 weak_areas, complete per_question_analysis for ALL questions
 - failure_patterns: identify at least 1 if overall score <80, empty array only if near-perfect
 - hire_signal MUST always be fully populated with all 5 sub-scores and rationale strings
+- model_answer: Write a genuine exemplary answer for THIS specific question. It must be substantively different from the candidate's actual answer. Skipped questions still get a model_answer showing what a complete response would have looked like.
 {hr_grading_rules}"""
 
 

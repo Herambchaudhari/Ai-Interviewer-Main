@@ -164,6 +164,88 @@ def _compute_peer_benchmarking(
     }
 
 
+def _enforce_grade_consistency(payload: dict, overall_pct: float) -> dict:
+    """
+    Override the LLM-generated grade and hire_recommendation with deterministic
+    values derived from overall_pct so they never contradict the numeric score.
+    """
+    if overall_pct >= 90:      grade = "A+"
+    elif overall_pct >= 85:    grade = "A"
+    elif overall_pct >= 78:    grade = "B+"
+    elif overall_pct >= 70:    grade = "B"
+    elif overall_pct >= 62:    grade = "B-"
+    elif overall_pct >= 55:    grade = "C+"
+    elif overall_pct >= 48:    grade = "C"
+    else:                      grade = "D"
+
+    if overall_pct >= 85:      hire_rec = "Strong Yes"
+    elif overall_pct >= 70:    hire_rec = "Yes"
+    elif overall_pct >= 55:    hire_rec = "Maybe"
+    else:                      hire_rec = "No"
+
+    payload["grade"]               = grade
+    payload["hire_recommendation"] = hire_rec
+    return payload
+
+
+import re as _re
+
+_BLOOMS_PATTERNS = [
+    (6, "Create",     r"\b(design|build|create|propose|architect|invent|devise|formulate)\b"),
+    (5, "Evaluate",   r"\b(evaluate|assess|justify|critique|argue|compare and contrast|defend|rank)\b"),
+    (4, "Analyze",    r"\b(analyz|differentiat|compar|distinguish|examin|why|how does|break down)\b"),
+    (3, "Apply",      r"\b(implement|use|solve|demonstrat|calculat|show|apply|write|code)\b"),
+    (2, "Understand", r"\b(explain|describ|summariz|paraphras|classif|interpret|illustrat)\b"),
+    (1, "Remember",   r"\b(what is|defin|list|name|identif|recall|state|tell me)\b"),
+]
+
+def _classify_blooms(question_text: str) -> dict:
+    """Classify a question into Bloom's Taxonomy level 1-6 by keyword matching."""
+    q_lower = question_text.lower()
+    for level, label, pattern in _BLOOMS_PATTERNS:
+        if _re.search(pattern, q_lower):
+            return {"level": level, "label": label}
+    return {"level": 3, "label": "Apply"}   # sensible default for most technical Qs
+
+
+def _build_hiring_summary(
+    overall_pct: float,
+    grade: str,
+    hire_recommendation: str,
+    strong_areas: list,
+    weak_areas: list,
+    interview_integrity: dict | None,
+    summary: str,
+    hire_confidence: str,
+) -> dict:
+    """
+    Compact summary card for hiring teams — computed deterministically, no LLM.
+    """
+    if overall_pct >= 85:      verdict = "STRONG HIRE"
+    elif overall_pct >= 70:    verdict = "HIRE"
+    elif overall_pct >= 55:    verdict = "HOLD"
+    else:                      verdict = "REJECT"
+
+    risk = (interview_integrity or {}).get("risk_level", "Low")
+
+    def _area_label(a) -> str:
+        if isinstance(a, dict):
+            return a.get("area", "")
+        return str(a)
+
+    return {
+        "overall_score":       round(overall_pct),
+        "grade":               grade,
+        "hire_recommendation": hire_recommendation,
+        "hire_verdict":        verdict,
+        "hire_confidence":     hire_confidence,
+        "top_strengths":       [_area_label(s) for s in (strong_areas or [])[:3]],
+        "top_gaps":            [_area_label(w) for w in (weak_areas or [])[:3]],
+        "integrity_flag":      risk,
+        "one_liner":           (summary or "")[:180],
+    }
+
+
 def _ok(data: dict, message: str = "Success") -> dict:
     return {"success": True, "data": data, "error": None, "message": message}
 
@@ -196,6 +278,8 @@ def _normalize_report_payload(payload: dict) -> dict:
         "blind_spots", "bs_flag", "skill_decay", "skills_to_work_on",
         "auto_resources", "follow_up_questions", "category_breakdown",
         "checklist", "filler_heatmap",
+        # New universal fields
+        "time_per_question",
         # HR Phase 1
         "star_story_matrix", "behavioral_category_coverage", "behavioral_red_flags",
         "key_signals", "competency_scorecard",
@@ -215,6 +299,8 @@ def _normalize_report_payload(payload: dict) -> dict:
         "hire_signal", "communication_breakdown", "six_axis_radar",
         "delivery_consistency", "proctoring_summary", "swot",
         "thirty_day_plan", "cv_audit", "study_roadmap",
+        # New universal fields
+        "hiring_summary",
         # HR Phase 2
         "eq_profile",
         # HR Phase 3
@@ -711,6 +797,7 @@ def _mock_report(session_id: str, round_type: str = "technical") -> dict:
             "Communication Clarity": 75, "Confidence": 65,
             "Answer Structure": 70, "Pacing": 72,
             "Relevance": 80, "Example Quality": 60,
+            "Technical Accuracy": 70,
         },
         "communication_breakdown": {
             "Communication Clarity": 75, "Confidence": 65,
@@ -1062,6 +1149,15 @@ async def _gen_communication(
     result = json.loads(_clean(content))
     for k, v in _EMPTY.items():
         result.setdefault(k, v)
+
+    # Inject Technical Accuracy as the 7th axis from per-question dimension_scores.
+    # These are deterministic values from the evaluator — not LLM-generated here.
+    scored_qs = [q for q in (question_scores or []) if not q.get("skipped") and isinstance((q.get("dimension_scores") or {}).get("technical_accuracy"), (int, float))]
+    if scored_qs:
+        avg_tech = round(sum(float(q["dimension_scores"]["technical_accuracy"]) for q in scored_qs) / len(scored_qs) * 10)
+        result["six_axis_radar"]["Technical Accuracy"] = avg_tech
+        result["communication_breakdown"]["Technical Accuracy"] = avg_tech
+
     return result
 
 
@@ -1195,6 +1291,9 @@ async def _generate_report_sse(session_id: str, user_id: str):
             "topic":              entry.get("topic", entry.get("category", round_type)),
             "red_flag_detected":  entry.get("red_flag_detected", ""),
             "question_type":      entry.get("question_type", "speech"),
+            "dimension_scores":   entry.get("dimension_scores", {}),
+            "time_secs":          entry.get("time_taken_secs") or entry.get("time_taken_seconds") or 0,
+            "blooms":             _classify_blooms(entry.get("question", "")),
         }
         # MCQ-specific fields — surface raw answer data for per-question report UI
         if entry.get("question_type") == "mcq":
@@ -1237,6 +1336,18 @@ async def _generate_report_sse(session_id: str, user_id: str):
                     if extra.get(k) is not None:
                         qs[k] = extra[k]
 
+    # Build time-per-question array (uses time_secs already on each qs_entry)
+    time_per_question = [
+        {
+            "label":         f"Q{i+1}",
+            "question_text": qs.get("question_text", "")[:80],
+            "time_secs":     qs.get("time_secs", 0),
+            "score":         qs.get("score"),
+            "skipped":       qs.get("skipped", False),
+        }
+        for i, qs in enumerate(question_scores)
+    ]
+
     # Only average questions that were answered and evaluated (score is a real number)
     scored = [q["score"] for q in question_scores
               if q["score"] is not None and not q.get("skipped")]
@@ -1252,10 +1363,20 @@ async def _generate_report_sse(session_id: str, user_id: str):
         except Exception as e:
             print(f"[report/sse] Voice analysis failed: {e}")
 
-    voice_metrics       = voice_result.get("voice_metrics")
+    voice_metrics        = voice_result.get("voice_metrics")
     delivery_consistency = voice_result.get("delivery_consistency")
-    filler_heatmap      = voice_result.get("filler_heatmap")
+    filler_heatmap       = voice_result.get("filler_heatmap") or []
     transcript_annotated = voice_result.get("transcript_annotated")
+
+    # Remap raw question_ids (UUIDs) in filler_heatmap to human-readable Q-numbers
+    _qid_to_label = {
+        entry.get("question_id", ""): f"Q{i+1}"
+        for i, entry in enumerate(transcript)
+        if entry.get("question_id")
+    }
+    for _fh in filler_heatmap:
+        _raw = _fh.get("question_id", "")
+        _fh["question_id"] = _qid_to_label.get(_raw, _raw)
 
     # ── DSA Pre-Stage: code quality analysis (DSA rounds only) ───────────────
     code_quality_metrics = None
@@ -1721,6 +1842,9 @@ async def _generate_report_sse(session_id: str, user_id: str):
         # ── NEW: Preparation Checklist ──
         "checklist": checklist_items,
 
+        # ── NEW: Time-per-question breakdown ──
+        "time_per_question": time_per_question,
+
         # Meta
         "confidence_score": 85,
 
@@ -1729,6 +1853,21 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "failed_sections":  failed_sections,
         "stage_errors":     failed_stages,
     }
+
+    # ── Build hiring team summary (deterministic — uses finalized core fields) ──
+    report_payload["hiring_summary"] = _build_hiring_summary(
+        overall_pct=overall_pct,
+        grade=report_payload.get("grade", ""),
+        hire_recommendation=report_payload.get("hire_recommendation", ""),
+        strong_areas=report_payload.get("strong_areas", []),
+        weak_areas=report_payload.get("weak_areas", []),
+        interview_integrity=interview_integrity,
+        summary=report_payload.get("summary", ""),
+        hire_confidence=report_payload.get("hire_confidence", "Medium"),
+    )
+
+    # ── Enforce grade + hire_recommendation consistency with numeric score ────
+    report_payload = _enforce_grade_consistency(report_payload, overall_pct)
 
     # ── Normalize types before persist and emit ───────────────────────────────
     report_payload = _normalize_report_payload(report_payload)

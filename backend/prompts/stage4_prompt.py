@@ -124,7 +124,14 @@ Return ONLY valid JSON. No markdown, no text outside the JSON:
         "goal":     "<specific measurable outcome for this week>",
         "resource": "<specific named resource>",
         "hours":    <2-10>,
-        "task":     "<concrete daily task e.g. 'Solve 2 DP problems daily on LeetCode'>"
+        "task":     "<one-line weekly summary task>",
+        "daily_tasks": [
+          {{ "day": "Mon", "task": "<specific 30-60 min task — e.g. 'Read CLRS Ch.4 on divide-and-conquer, take notes on master theorem'>" }},
+          {{ "day": "Tue", "task": "<specific task building on Monday>" }},
+          {{ "day": "Wed", "task": "<practice or application task>" }},
+          {{ "day": "Thu", "task": "<deeper practice or a mini-project>" }},
+          {{ "day": "Fri", "task": "<review, consolidate, and write a 5-sentence summary of what you learned this week>" }}
+        ]
       }}
     ],
     "week_2": [ <same structure, next priority> ],
@@ -135,7 +142,14 @@ Return ONLY valid JSON. No markdown, no text outside the JSON:
         "goal":     "Apply all learnings under timed conditions",
         "resource": "Use this platform — run 2 full mock interviews",
         "hours":    4,
-        "task":     "Complete 2 full timed mock interviews on weakest topics"
+        "task":     "Complete 2 full timed mock interviews on weakest topics",
+        "daily_tasks": [
+          {{ "day": "Mon", "task": "Revise all weak areas from weeks 1-3 using your notes" }},
+          {{ "day": "Tue", "task": "Run a full timed mock interview on this platform (Attempt 1)" }},
+          {{ "day": "Wed", "task": "Review feedback from Attempt 1, identify 2-3 persistent gaps" }},
+          {{ "day": "Thu", "task": "Run a second full timed mock interview focusing on gap areas" }},
+          {{ "day": "Fri", "task": "Write a self-assessment: what improved, what still needs work, next steps" }}
+        ]
       }}
     ]
   }},
@@ -171,6 +185,7 @@ RULES:
 - swot: Must be grounded in their actual performance — no generic motivational statements
 - skills_to_work_on: 3-5 items, ordered High→Low priority
 - thirty_day_plan: Each week MUST have 2-3 items. Week 1 = most critical gaps, Week 4 = mock practice
+- daily_tasks: EVERY week item MUST include exactly 5 daily_tasks (Mon–Fri). Each task must be completable in 30-60 minutes. Be specific — not 'study topic X' but 'read Chapter Y, solve Z problems on LeetCode, write a summary of...'
 - auto_resources: 3-5 items covering the top weak areas
 - follow_up_questions: 3-5 questions based on their specific weak answers
 - next_interview_blueprint: ONE recommended next session config — the best step for their specific trajectory"""

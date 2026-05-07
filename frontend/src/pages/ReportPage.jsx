@@ -1475,6 +1475,9 @@ export default function ReportPage() {
     pipeline_followup_questions = [],
     hr_improvement_plan = {},
     executive_brief = {},
+    // New universal fields
+    hiring_summary = {},
+    time_per_question = [],
     // Debug mode flag — set by backend when GROQ_API_KEY is missing
     _debug_mock = false,
   } = report
@@ -1690,17 +1693,7 @@ export default function ReportPage() {
           <ShareModal report={report} sessionId={sessionId} onClose={() => setShareOpen(false)} />
         )}
 
-        {/* ── What Went Wrong callout ─────────────────────────────────────── */}
-        {what_went_wrong && (
-          <div className="rounded-2xl p-5 flex gap-4 animate-fade-in-up"
-            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)' }}>
-            <AlertTriangle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-red-400 text-sm mb-1">What Went Wrong</p>
-              <p className="text-sm leading-relaxed">{what_went_wrong}</p>
-            </div>
-          </div>
-        )}
+        {/* What Went Wrong moved below score card — see wins-first reorder */}
 
         {/* ── HR Phase 1: Executive Summary Panel ─────────────────────────── */}
         {round_type === 'hr' && (
@@ -1785,6 +1778,128 @@ export default function ReportPage() {
             ))}
           </div>
         </div>
+
+        {/* ── Hiring Team Summary Card ─────────────────────────────────────
+            Compact recruiter-facing verdict — shows at top so hiring teams
+            can triage immediately without scrolling the full report.        */}
+        {hiring_summary?.hire_verdict && round_type !== 'mcq_practice' && round_type !== 'dsa' && (
+          <div className="rounded-2xl p-5 animate-fade-in-up"
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <Briefcase size={15} style={{ color: '#7c3aed' }} />
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#7c3aed' }}>
+                Hiring Team Summary
+              </p>
+            </div>
+            <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
+              <div className="flex items-center gap-3">
+                <span className="text-3xl font-black" style={{ color: gradeColor(hiring_summary.grade) }}>
+                  {hiring_summary.grade}
+                </span>
+                <div>
+                  <p className="text-sm font-bold" style={{ color: gradeColor(hiring_summary.grade) }}>
+                    {hiring_summary.hire_verdict}
+                  </p>
+                  {hiring_summary.hire_confidence && (
+                    <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                      Confidence: {hiring_summary.hire_confidence}
+                    </p>
+                  )}
+                </div>
+              </div>
+              {hiring_summary.integrity_flag === 'High' && (
+                <span className="text-xs px-2 py-1 rounded-full font-semibold"
+                  style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}>
+                  ⚠ Integrity Flag
+                </span>
+              )}
+            </div>
+            {hiring_summary.one_liner && (
+              <p className="text-sm italic mb-4 leading-relaxed" style={{ color: 'var(--color-muted)' }}>
+                "{hiring_summary.one_liner}"
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              {hiring_summary.top_strengths?.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-semibold mb-1.5" style={{ color: '#4ade80' }}>Top Strengths</p>
+                  {hiring_summary.top_strengths.map((s, i) => (
+                    <p key={i} className="text-xs mb-0.5 flex items-center gap-1" style={{ color: 'var(--color-muted)' }}>
+                      <span style={{ color: '#4ade80' }}>✓</span> {s}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {hiring_summary.top_gaps?.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-semibold mb-1.5" style={{ color: '#f87171' }}>Top Gaps</p>
+                  {hiring_summary.top_gaps.map((g, i) => (
+                    <p key={i} className="text-xs mb-0.5 flex items-center gap-1" style={{ color: 'var(--color-muted)' }}>
+                      <span style={{ color: '#f87171' }}>✗</span> {g}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Interview Integrity Alert (High Risk only) ───────────────────
+            Surfaced at top so the integrity flag is the first thing a
+            recruiter sees — not buried at page 11.                         */}
+        {interview_integrity?.risk_level === 'High' && (
+          <div className="rounded-xl p-4 flex items-start gap-3 animate-fade-in-up"
+            style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)' }}>
+            <ShieldAlert size={18} className="text-red-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-red-300 text-sm">Interview Integrity — High Risk</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-muted)' }}>
+                {(interview_integrity.flagged_events?.length ?? 0)} flagged events detected during this session.
+                Full proctoring breakdown is at the bottom of this report.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Strong Areas (wins-first — shown early before gaps) ──────────
+            Weak Areas remains in the original grid position below.         */}
+        {round_type !== 'mcq_practice' && strong_areas?.length > 0 && (
+          <SectionCard icon={<CheckCircle size={16}/>} title="Strong Areas" color="#4ade80">
+            {strong_areas.map((a, i) => {
+              const { area, evidence, score } = normArea(a)
+              const isHREnriched = round_type === 'hr' && (a.evidence_quote || a.why_it_landed)
+              return (
+                <div key={i} className={`flex items-start gap-2 ${isHREnriched ? 'mb-4' : 'mb-3'}`}>
+                  <CheckCircle size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium">{area || a}</p>
+                      {a.exact_moment && <Chip label={a.exact_moment} color="#4ade80" size="xs" />}
+                      {score && <Chip label={`${score}/100`} color="#4ade80" size="xs" />}
+                    </div>
+                    {isHREnriched ? (
+                      <>
+                        {a.evidence_quote && (
+                          <p className="text-xs italic mt-1.5 leading-relaxed px-2 py-1.5 rounded"
+                            style={{ color: 'var(--color-muted)', background: 'rgba(74,222,128,0.06)', borderLeft: '2px solid rgba(74,222,128,0.35)' }}>
+                            "{a.evidence_quote}"
+                          </p>
+                        )}
+                        {a.why_it_landed && (
+                          <p className="text-[11px] mt-1" style={{ color: 'rgba(74,222,128,0.75)' }}>
+                            <span className="font-semibold">Why it landed: </span>{a.why_it_landed}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      evidence && <p className="text-xs text-muted mt-0.5">"{evidence}"</p>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </SectionCard>
+        )}
 
         {/* ══════════════════════════════════════════════════════════════════
             MCQ PRACTICE — In-depth analytics (mcq_practice only)
@@ -2391,6 +2506,18 @@ export default function ReportPage() {
         })()}
         {/* ══ End MCQ sections ════════════════════════════════════════════════ */}
 
+        {/* ── What Went Wrong callout (wins-first reorder — gaps after radars) ── */}
+        {what_went_wrong && (
+          <div className="rounded-2xl p-5 flex gap-4 animate-fade-in-up"
+            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)' }}>
+            <AlertTriangle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-400 text-sm mb-1">What Went Wrong</p>
+              <p className="text-sm leading-relaxed">{what_went_wrong}</p>
+            </div>
+          </div>
+        )}
+
         {/* ── Failure Patterns ─────────────────────────────────────────────── */}
         {failure_patterns?.length > 0 && (
           <SectionCard icon={<AlertTriangle size={16}/>} title="What Went Wrong — Root Causes" color="#f87171">
@@ -2539,7 +2666,7 @@ export default function ReportPage() {
               const isHR     = round_type === 'hr'
               const axColor  = isHR ? '#ec4899' : '#22d3ee'
               const axDot    = isHR ? '#f472b6' : '#67e8f9'
-              const axTitle  = isHR ? 'Behavioral Competency Profile' : 'Communication (6-Axis)'
+              const axTitle  = isHR ? 'Behavioral Competency Profile' : 'Answer Quality (7-Axis)'
               return (
               <SectionCard icon={<MessageSquare size={16}/>} title={axTitle} color={axColor}>
                 <ResponsiveContainer width="100%" height={260}>
@@ -2709,6 +2836,36 @@ export default function ReportPage() {
         )}
         </SectionErrorBoundary>
 
+        {/* ── Time Per Question ────────────────────────────────────────────── */}
+        {round_type !== 'mcq_practice' && round_type !== 'dsa' && time_per_question?.length > 0 && (
+          <SectionCard icon={<Timer size={16}/>} title="Time Per Question" color="#f59e0b">
+            <p className="text-xs mb-3" style={{ color: 'var(--color-muted)' }}>
+              Seconds spent on each answer. Under-time may signal skipping; over-time may signal uncertainty.
+              Colour = answer score. Grey = skipped.
+            </p>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={time_per_question} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+                <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tickFormatter={v => `${v}s`} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
+                <Tooltip
+                  cursor={{ fill: 'rgba(245,158,11,0.08)' }}
+                  contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 12, color: 'var(--color-text)' }}
+                  formatter={(v, _, p) => [`${v}s`, p.payload?.question_text ? p.payload.question_text.slice(0, 60) : 'Time']}
+                />
+                <Bar dataKey="time_secs" radius={[4, 4, 0, 0]}>
+                  {time_per_question.map((entry, i) => (
+                    <Cell key={i} fill={
+                      entry.skipped ? '#475569'
+                      : entry.score == null ? '#64748b'
+                      : scoreColor(entry.score * 10)
+                    } />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </SectionCard>
+        )}
+
         {/* ── Verbal Category Breakdown (technical only) ───────────────────── */}
         {/* DSA covers this in the Topic Mastery radar inside its dedicated dashboard. */}
         {round_type !== 'mcq_practice' && round_type !== 'hr' && round_type !== 'dsa' && category_breakdown?.length > 0 && (
@@ -2741,45 +2898,9 @@ export default function ReportPage() {
           </SectionCard>
         )}
 
-        {/* ── Strong & Weak Areas ─────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-          <SectionCard icon={<CheckCircle size={16}/>} title="Strong Areas" color="#4ade80">
-            {strong_areas.length === 0 ? <p className="text-muted text-sm">—</p>
-              : strong_areas.map((a, i) => {
-                const { area, evidence, score } = normArea(a)
-                const isHREnriched = round_type === 'hr' && (a.evidence_quote || a.why_it_landed)
-                return (
-                  <div key={i} className={`flex items-start gap-2 ${isHREnriched ? 'mb-4' : 'mb-3'}`}>
-                    <CheckCircle size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-medium">{area || a}</p>
-                        {a.exact_moment && <Chip label={a.exact_moment} color="#4ade80" size="xs" />}
-                        {score && <Chip label={`${score}/100`} color="#4ade80" size="xs" />}
-                      </div>
-                      {isHREnriched ? (
-                        <>
-                          {a.evidence_quote && (
-                            <p className="text-xs italic mt-1.5 leading-relaxed px-2 py-1.5 rounded"
-                              style={{ color: 'var(--color-muted)', background: 'rgba(74,222,128,0.06)', borderLeft: '2px solid rgba(74,222,128,0.35)' }}>
-                              "{a.evidence_quote}"
-                            </p>
-                          )}
-                          {a.why_it_landed && (
-                            <p className="text-[11px] mt-1" style={{ color: 'rgba(74,222,128,0.75)' }}>
-                              <span className="font-semibold">Why it landed: </span>{a.why_it_landed}
-                            </p>
-                          )}
-                        </>
-                      ) : (
-                        evidence && <p className="text-xs text-muted mt-0.5">"{evidence}"</p>
-                      )}
-                    </div>
-                  </div>
-                )
-              })
-            }
-          </SectionCard>
+        {/* ── Weak Areas ──────────────────────────────────────────────────── */}
+        {/* Strong Areas was moved to before the radars for wins-first ordering */}
+        <div className="grid grid-cols-1 gap-5">
           <SectionCard icon={<XCircle size={16}/>} title="Areas to Improve" color="#f87171">
             {weak_areas.length === 0 ? <p className="text-muted text-sm">—</p>
               : weak_areas.map((a, i) => {
@@ -4749,6 +4870,24 @@ export default function ReportPage() {
                             {item.resource && <span className="text-xs text-purple-400">{item.resource}</span>}
                             {item.hours && <span className="text-xs text-muted">{item.hours}h</span>}
                           </div>
+                          {item.daily_tasks?.length > 0 && (
+                            <details className="mt-2">
+                              <summary className="text-[11px] font-semibold cursor-pointer select-none list-none flex items-center gap-1"
+                                style={{ color: '#22d3ee' }}>
+                                <ChevronRight size={11} />
+                                Daily breakdown (Mon–Fri)
+                              </summary>
+                              <div className="mt-1.5 space-y-1 pl-2 border-l-2"
+                                style={{ borderColor: 'rgba(34,211,238,0.25)' }}>
+                                {item.daily_tasks.map((d, di) => (
+                                  <div key={di} className="flex gap-2 text-[11px]">
+                                    <span className="font-semibold flex-shrink-0 w-7" style={{ color: '#22d3ee' }}>{d.day}</span>
+                                    <span style={{ color: 'var(--color-muted)' }}>{d.task}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -4820,6 +4959,19 @@ export default function ReportPage() {
                     )}
                     <p className="text-sm flex-1 line-clamp-1">{q.question_text || q.question || ''}</p>
                     <Chip label={q.category || q.topic || 'General'} size="xs" color="#22d3ee" />
+                    {q.blooms?.label && (() => {
+                      const bloomColors = {
+                        Remember: '#94a3b8', Understand: '#60a5fa', Apply: '#4ade80',
+                        Analyze: '#facc15', Evaluate: '#fb923c', Create: '#f472b6',
+                      }
+                      const c = bloomColors[q.blooms.label] || '#94a3b8'
+                      return (
+                        <span className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0"
+                          style={{ background: `${c}18`, color: c, border: `1px solid ${c}33` }}>
+                          L{q.blooms.level}·{q.blooms.label}
+                        </span>
+                      )
+                    })()}
                     {q.verdict && q.verdict !== 'skipped' && (
                       <Chip label={q.verdict} size="xs" color={scoreColor10(q.score)} />
                     )}
@@ -4898,6 +5050,20 @@ export default function ReportPage() {
                           </div>
                         )}
                       </div>
+                    )}
+                    {/* Model Answer — what a 9/10 answer looks like */}
+                    {q.model_answer && (
+                      <details>
+                        <summary className="text-xs font-semibold cursor-pointer select-none list-none flex items-center gap-1.5 mt-1"
+                          style={{ color: '#4ade80' }}>
+                          <ChevronRight size={12} className="group-open:rotate-90" />
+                          Model Answer — what a 9/10 answer looks like
+                        </summary>
+                        <div className="mt-2 text-sm leading-relaxed p-3 rounded-lg"
+                          style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.15)', color: 'var(--color-muted)' }}>
+                          {q.model_answer}
+                        </div>
+                      </details>
                     )}
                     {/* "Review the Tape" — audio playback if URL stored (verbal rounds) */}
                     {round_type !== 'dsa' && (
