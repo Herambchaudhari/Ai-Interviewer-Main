@@ -186,7 +186,7 @@ export default function ContextHubPage() {
               />
             )}
             {activeTab === 'progress' && (
-              <ProgressSection userId={user?.id} />
+              <ProgressSection key={`progress-${user?.id}`} userId={user?.id} />
             )}
             {activeTab === 'portfolio' && (
               <PortfolioSection />

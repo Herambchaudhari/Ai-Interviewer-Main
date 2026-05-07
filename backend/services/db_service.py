@@ -1833,12 +1833,16 @@ def get_past_reports_for_analysis(user_id: str, exclude_session_id: str, limit: 
     Returns list of {session_id, overall_score, weak_areas, grade, created_at}.
     """
     try:
-        sessions_res = (
+        query = (
             _db().table("sessions")
             .select("id, round_type, created_at")
             .eq("user_id", user_id)
             .eq("status", "completed")
-            .neq("id", exclude_session_id)
+        )
+        if exclude_session_id:
+            query = query.neq("id", exclude_session_id)
+        sessions_res = (
+            query
             .order("created_at", desc=True)
             .limit(limit)
             .execute()

@@ -38,14 +38,14 @@ async def get_progress(
       round_type — optional filter: technical | hr | dsa | mcq_practice
     """
     # Security: users can only fetch their own progress
-    if current_user["id"] != user_id:
+    if current_user["user_id"] != user_id:
         return _err("Forbidden", 403)
 
     limit = min(max(limit, 1), 50)
 
     # Fetch past reports (exclude_session_id="" so all are included)
     past_reports = get_past_reports_for_analysis(
-        user_id=user_id,
+        user_id=current_user["user_id"],
         exclude_session_id="",
         limit=limit,
     )
@@ -56,11 +56,15 @@ async def get_progress(
 
     if not past_reports:
         return _ok({
-            "skill_velocity":    [],
-            "progress_timeline": [],
-            "persistent_gaps":   [],
-            "strongest_skills":  [],
-            "session_count":     0,
+            "skill_velocity":      [],
+            "progress_timeline":   [],
+            "round_timeline":      {},
+            "before_after_radar":  None,
+            "readiness_projection":None,
+            "achievements":        [],
+            "persistent_gaps":     [],
+            "strongest_skills":    [],
+            "session_count":       0,
         }, message="No completed sessions found.")
 
     progress = compute_all_progress(past_reports)
