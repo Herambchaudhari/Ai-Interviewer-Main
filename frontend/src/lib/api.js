@@ -481,6 +481,12 @@ export async function activateResume(profileId) {
   return data
 }
 
+/** PATCH /api/v1/context-hub/resumes/:profileId/rename */
+export async function renameResume(profileId, label) {
+  const { data } = await api.patch(`/context-hub/resumes/${profileId}/rename`, { label })
+  return data
+}
+
 // ── Portfolio ──────────────────────────────────────────────────────────────
 
 /** GET /api/v1/portfolio/files */

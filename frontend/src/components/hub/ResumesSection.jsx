@@ -1,11 +1,10 @@
 /**
- * ResumesSection — manage resume versions, set active, view parsed data.
- * Props: { resumes, onActivated, onUploaded }
+ * ResumesSection — manage resume versions, set active, rename, view parsed data.
+ * Props: { resumes, onActivated, onUploaded, onRenamed }
  */
 import { useState, useRef } from 'react'
-import { CheckCircle, ChevronDown, ChevronUp, Upload, Star, FileText, Plus } from 'lucide-react'
-import { uploadResume } from '../../lib/api'
-import { activateResume } from '../../lib/api'
+import { CheckCircle, ChevronDown, ChevronUp, Upload, Star, FileText, Plus, Pencil, Check, X } from 'lucide-react'
+import { uploadResume, activateResume, renameResume } from '../../lib/api'
 import toast from 'react-hot-toast'
 
 function formatDate(iso) {
@@ -29,9 +28,13 @@ function SkillsChips({ skills }) {
   )
 }
 
-function ResumeCard({ resume, onActivate }) {
+function ResumeCard({ resume, onActivate, onRenamed }) {
   const [expanded, setExpanded] = useState(false)
   const [activating, setActivating] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editValue, setEditValue] = useState(resume.label)
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef(null)
 
   const handleActivate = async () => {
     setActivating(true)
@@ -44,6 +47,48 @@ function ResumeCard({ resume, onActivate }) {
     } finally {
       setActivating(false)
     }
+  }
+
+  const startEditing = () => {
+    setEditValue(resume.label)
+    setEditing(true)
+    // focus after paint
+    setTimeout(() => inputRef.current?.select(), 0)
+  }
+
+  const cancelEditing = () => {
+    setEditing(false)
+    setEditValue(resume.label)
+  }
+
+  const commitRename = async () => {
+    const trimmed = editValue.trim()
+    if (!trimmed) {
+      toast.error('Name cannot be empty.')
+      inputRef.current?.focus()
+      return
+    }
+    if (trimmed === resume.label) {
+      setEditing(false)
+      return
+    }
+    setSaving(true)
+    try {
+      await renameResume(resume.profile_id, trimmed)
+      onRenamed(resume.profile_id, trimmed)
+      setEditing(false)
+      toast.success('Resume renamed.')
+    } catch {
+      toast.error('Failed to rename resume.')
+      inputRef.current?.focus()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+    if (e.key === 'Escape') cancelEditing()
   }
 
   const { parsed_summary: ps } = resume
@@ -59,14 +104,60 @@ function ResumeCard({ resume, onActivate }) {
             style={{ background: resume.is_active ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.05)' }}>
             <FileText size={18} style={{ color: resume.is_active ? '#7c3aed' : 'var(--color-muted)' }} />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
+            {/* ── Label row: static or edit mode ─────────────────────────── */}
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-semibold text-sm truncate">{resume.label}</h3>
-              {resume.is_active && (
-                <span className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={{ background: 'rgba(124,58,237,0.2)', color: '#7c3aed' }}>
-                  <CheckCircle size={10} /> Active
-                </span>
+              {editing ? (
+                <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                  <input
+                    ref={inputRef}
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    maxLength={60}
+                    disabled={saving}
+                    autoFocus
+                    className="flex-1 min-w-0 text-sm font-semibold bg-transparent border-b outline-none py-0.5 pr-1"
+                    style={{ borderColor: 'rgba(124,58,237,0.6)', color: 'var(--color-text)' }}
+                  />
+                  <button
+                    onClick={commitRename}
+                    disabled={saving}
+                    aria-label="Confirm rename"
+                    className="p-1 rounded hover:bg-white/10 text-green-400 disabled:opacity-50"
+                  >
+                    {saving ? (
+                      <span className="block w-3.5 h-3.5 rounded-full border-2 border-green-400 border-t-transparent animate-spin" />
+                    ) : (
+                      <Check size={14} />
+                    )}
+                  </button>
+                  <button
+                    onClick={cancelEditing}
+                    disabled={saving}
+                    aria-label="Cancel rename"
+                    className="p-1 rounded hover:bg-white/10 text-muted disabled:opacity-50"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <h3 className="font-semibold text-sm truncate">{resume.label}</h3>
+                  {resume.is_active && (
+                    <span className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
+                      style={{ background: 'rgba(124,58,237,0.2)', color: '#7c3aed' }}>
+                      <CheckCircle size={10} /> Active
+                    </span>
+                  )}
+                  <button
+                    onClick={startEditing}
+                    aria-label="Rename resume"
+                    className="p-1 rounded hover:bg-white/10 text-muted opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                </>
               )}
             </div>
             <p className="text-xs text-muted mt-0.5">
@@ -83,7 +174,7 @@ function ResumeCard({ resume, onActivate }) {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          {!resume.is_active && (
+          {!editing && !resume.is_active && (
             <button
               onClick={handleActivate}
               disabled={activating}
@@ -91,6 +182,16 @@ function ResumeCard({ resume, onActivate }) {
               style={{ background: 'rgba(124,58,237,0.15)', color: '#7c3aed', border: '1px solid rgba(124,58,237,0.3)' }}
             >
               <Star size={12} /> {activating ? 'Activating…' : 'Set Active'}
+            </button>
+          )}
+          {!editing && (
+            <button
+              onClick={startEditing}
+              aria-label="Rename resume"
+              className="p-2 rounded-lg transition-all hover:bg-white/10 text-muted"
+              title="Rename"
+            >
+              <Pencil size={15} />
             </button>
           )}
           <button
@@ -146,7 +247,7 @@ function ResumeCard({ resume, onActivate }) {
   )
 }
 
-export default function ResumesSection({ resumes, onActivated, onUploaded }) {
+export default function ResumesSection({ resumes, onActivated, onUploaded, onRenamed }) {
   const fileInputRef = useRef(null)
   const [uploading, setUploading] = useState(false)
 
@@ -203,7 +304,12 @@ export default function ResumesSection({ resumes, onActivated, onUploaded }) {
       ) : (
         <div className="space-y-4">
           {resumes.map(r => (
-            <ResumeCard key={r.profile_id} resume={r} onActivate={onActivated} />
+            <ResumeCard
+              key={r.profile_id}
+              resume={r}
+              onActivate={onActivated}
+              onRenamed={onRenamed}
+            />
           ))}
         </div>
       )}

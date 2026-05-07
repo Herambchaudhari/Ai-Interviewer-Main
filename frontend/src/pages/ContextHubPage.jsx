@@ -102,6 +102,21 @@ export default function ContextHubPage() {
     fetchTab('resumes')
   }
 
+  const handleResumeRenamed = (profileId, newLabel) => {
+    setTabData(prev => {
+      const prevResumes = prev.resumes?.resumes || []
+      return {
+        ...prev,
+        resumes: {
+          ...prev.resumes,
+          resumes: prevResumes.map(r =>
+            r.profile_id === profileId ? { ...r, label: newLabel } : r
+          ),
+        },
+      }
+    })
+  }
+
   const handleApplicationsChanged = () => fetchTab('applications')
 
   const activeColor = TABS.find(t => t.id === activeTab)?.color || '#7c3aed'
@@ -167,6 +182,7 @@ export default function ContextHubPage() {
                 resumes={tabData.resumes?.resumes || []}
                 onActivated={handleResumeActivated}
                 onUploaded={() => fetchTab('resumes')}
+                onRenamed={handleResumeRenamed}
               />
             )}
             {activeTab === 'topics' && (

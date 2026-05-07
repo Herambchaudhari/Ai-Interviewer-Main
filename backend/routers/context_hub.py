@@ -12,6 +12,7 @@ PATCH /api/v1/context-hub/applications/{app_id}     — update application
 DELETE /api/v1/context-hub/applications/{app_id}    — delete application
 GET  /api/v1/context-hub/resumes                     — list resume versions
 PATCH /api/v1/context-hub/resumes/{profile_id}/activate — set active resume
+PATCH /api/v1/context-hub/resumes/{profile_id}/rename   — rename resume label
 """
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
@@ -33,6 +34,7 @@ from services.db_service import (
     delete_application,
     get_resume_versions,
     activate_resume,
+    rename_resume,
     get_user_checklists,
     update_checklist_item,
 )
@@ -325,6 +327,32 @@ async def activate_resume_endpoint(
         if not ok:
             return _err("Profile not found or access denied.", status=404)
         return _ok({"profile_id": profile_id, "is_active": True})
+    except RuntimeError:
+        return _err("Database unavailable", status=503)
+    except Exception as e:
+        return _err(str(e), status=500)
+
+
+class ResumeRenameRequest(BaseModel):
+    label: str
+
+
+@router.patch("/resumes/{profile_id}/rename")
+async def rename_resume_endpoint(
+    profile_id: str,
+    body: ResumeRenameRequest,
+    user: dict = Depends(get_current_user),
+):
+    new_label = body.label.strip()
+    if not new_label:
+        return _err("Label cannot be empty.", status=400)
+    if len(new_label) > 60:
+        return _err("Label must be 60 characters or fewer.", status=400)
+    try:
+        ok = rename_resume(profile_id, user["user_id"], new_label)
+        if not ok:
+            return _err("Profile not found or access denied.", status=404)
+        return _ok({"profile_id": profile_id, "label": new_label})
     except RuntimeError:
         return _err("Database unavailable", status=503)
     except Exception as e:

@@ -1417,6 +1417,22 @@ def activate_resume(profile_id: str, user_id: str) -> bool:
         print(f"[activate_resume] error: {e}")
         return False
 
+
+def rename_resume(profile_id: str, user_id: str, new_label: str) -> bool:
+    """Update the label of a resume. Returns True on success."""
+    try:
+        res = (
+            _db().table("profiles")
+            .update({"label": new_label})
+            .eq("id", profile_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as e:
+        print(f"[rename_resume] error: {e}")
+        return False
+
 # ── Portfolio & Credentials ───────────────────────────────────────────────────
 
 def get_portfolio_files(user_id: str) -> list:
