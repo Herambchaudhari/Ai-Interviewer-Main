@@ -193,10 +193,10 @@ function ResumeCard({ resume, onActivate, onRenamed, onReparsed }) {
               {resume.file_name && ` · ${resume.file_name}`}
             </p>
             <div className="flex gap-4 mt-2 text-xs text-muted">
-              <span><strong className="text-white/70">{ps?.skills_count || 0}</strong> skills</span>
-              <span><strong className="text-white/70">{exp.length}</strong> experience</span>
-              <span><strong className="text-white/70">{edu.length}</strong> education</span>
-              <span><strong className="text-white/70">{ps?.projects_count || 0}</strong> projects</span>
+              <span><strong style={{ color: 'var(--color-text)' }}>{ps?.skills_count || 0}</strong> skills</span>
+              <span><strong style={{ color: 'var(--color-text)' }}>{exp.length}</strong> experience</span>
+              <span><strong style={{ color: 'var(--color-text)' }}>{edu.length}</strong> education</span>
+              <span><strong style={{ color: 'var(--color-text)' }}>{ps?.projects_count || 0}</strong> projects</span>
             </div>
           </div>
         </div>
@@ -257,7 +257,7 @@ function ResumeCard({ resume, onActivate, onRenamed, onReparsed }) {
           {ps?.summary && (
             <div>
               <p className="text-xs text-muted uppercase tracking-widest mb-1">Summary</p>
-              <p className="text-sm text-white/80 leading-relaxed">{ps.summary}</p>
+              <p className="text-sm leading-relaxed">{ps.summary}</p>
             </div>
           )}
 
@@ -272,7 +272,7 @@ function ResumeCard({ resume, onActivate, onRenamed, onReparsed }) {
             <div>
               <p className="text-xs text-muted uppercase tracking-widest mb-1">Education</p>
               {edu.slice(0, 3).map((e, i) => (
-                <p key={i} className="text-sm text-white/80">
+                <p key={i} className="text-sm">
                   {e.degree}{e.institution ? ` — ${e.institution}` : ''}{e.year ? ` (${e.year})` : ''}
                 </p>
               ))}
@@ -283,7 +283,7 @@ function ResumeCard({ resume, onActivate, onRenamed, onReparsed }) {
             <div>
               <p className="text-xs text-muted uppercase tracking-widest mb-1">Experience</p>
               {exp.slice(0, 3).map((ex, i) => (
-                <p key={i} className="text-sm text-white/80">
+                <p key={i} className="text-sm">
                   {ex.role}{ex.company ? ` @ ${ex.company}` : ''}{ex.duration ? ` · ${ex.duration}` : ''}
                 </p>
               ))}
