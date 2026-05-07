@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuthContext } from '../context/AuthContext'
 import { getProfile, getUserReports, getMarketNews, getUserChecklists, getActiveSessions } from '../lib/api'
@@ -6,21 +6,30 @@ import RoundCards from '../components/RoundCards'
 import SessionConfig from '../components/SessionConfig'
 import { COMPANY_SECTORS } from '../constants/companies'
 import {
-  CalendarDays, TrendingUp, ChevronRight,
+  TrendingUp, ChevronRight,
   BarChart2, RefreshCcw, Trophy, Clock,
   GraduationCap, Settings, Building2, Star, Layers,
-  Globe, ExternalLink, Activity, Loader2, CheckSquare, CheckCircle,
+  Globe, ExternalLink, Activity, Loader2, CheckSquare,
 } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { getReportRoute } from '../lib/routes'
+import MotivationalQuote from '../components/MotivationalQuote'
 
-const ROUND_LABELS = {
-  technical:     'Technical',
-  hr:            'HR / Behavioural',
-  dsa:           'DSA / Coding',
-  mcq_practice:  'MCQ Practice',
-  system_design: 'Legacy System Design',
-}
+// ── Dashboard sub-components ──────────────────────────────────────────────────
+import WelcomeGreeting  from '../components/dashboard/WelcomeGreeting'
+import MiniStatsRow     from '../components/dashboard/MiniStatsRow'
+import LastSessionPill  from '../components/dashboard/LastSessionPill'
+import PracticeStreak   from '../components/dashboard/PracticeStreak'
+import MilestoneBanner  from '../components/dashboard/MilestoneBanner'
+import NudgeCard        from '../components/dashboard/NudgeCard'
+
+import {
+  ROUND_LABELS,
+  computeStreak,
+  getSeenMilestones,
+  markMilestoneSeen,
+  getActiveMilestone,
+} from '../lib/dashboardUtils'
 
 const DIFF_BADGE = {
   easy:   'badge-green',
@@ -44,16 +53,53 @@ export default function DashboardPage() {
   const [studentMeta, setStudentMeta] = useState(null)
   const [reports, setReports]         = useState([])
   const [loadingProfile, setLoadingProfile] = useState(true)
-  const [selectedRound, setSelectedRound]   = useState(null) 
-  
+  const [selectedRound, setSelectedRound]   = useState(null)
+
   const [marketNews, setMarketNews]         = useState(null)
   const [loadingNews, setLoadingNews]       = useState(true)
-  const [reloadsLeft, setReloadsLeft]       = useState(5)   // max 5 per day
+  const [reloadsLeft, setReloadsLeft]       = useState(5)
   const DAILY_LIMIT                         = 5
 
   const [latestChecklist, setLatestChecklist] = useState(null)
   const [activeSessions, setActiveSessions]   = useState([])
 
+  // Milestone banner: track local dismissed state for immediate UI feedback
+  const [dismissedMilestone, setDismissedMilestone] = useState(null)
+
+  // ── Derived values ──────────────────────────────────────────────────────────
+  const firstName = useMemo(() =>
+    studentMeta?.name?.split(' ')[0]
+    || profile?.name?.split(' ')[0]
+    || user?.user_metadata?.full_name?.split(' ')[0]
+    || user?.email?.split('@')[0]
+    || 'there',
+  [studentMeta, profile, user])
+
+  const streak = useMemo(() => computeStreak(reports), [reports])
+
+  const activeMilestone = useMemo(() => {
+    const seen = getSeenMilestones()
+    const milestone = getActiveMilestone(reports.length, seen)
+    // Hide immediately if user just dismissed it this session
+    return milestone === dismissedMilestone ? null : milestone
+  }, [reports.length, dismissedMilestone])
+
+  const today = new Date().toLocaleDateString('en-IN', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  })
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
+  const handleMilestoneDismiss = () => {
+    markMilestoneSeen(activeMilestone)
+    setDismissedMilestone(activeMilestone)
+  }
+
+  const handleStartSession = () => {
+    document.getElementById('start-interview-section')
+      ?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  // ── Data fetching ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user?.id) return
     getUserChecklists(1)
@@ -72,7 +118,6 @@ export default function DashboardPage() {
         .then(res => {
           if (res && res.data) {
             setMarketNews(res.data)
-            // Backend sends back how many reloads remain today
             if (res.data.reloads_remaining !== undefined) {
               setReloadsLeft(res.data.reloads_remaining)
             }
@@ -85,9 +130,7 @@ export default function DashboardPage() {
     }
   }
 
-  // ── Load profile + student_meta ───────────────────────────────────────────
   useEffect(() => {
-    // Load student_meta from localStorage
     try {
       const raw = localStorage.getItem('student_meta')
       if (raw) setStudentMeta(JSON.parse(raw))
@@ -97,7 +140,6 @@ export default function DashboardPage() {
     if (!pid) { setLoadingProfile(false); return }
     setProfileId(pid)
 
-    // Try to load from localStorage first (fast), then sync from API
     const cached = localStorage.getItem('parsed_profile')
     if (cached) {
       try { setProfile(JSON.parse(cached)) } catch {}
@@ -111,11 +153,10 @@ export default function DashboardPage() {
           localStorage.setItem('parsed_profile', JSON.stringify(parsed))
         }
       })
-      .catch(() => {/* use cached */})
+      .catch(() => {})
       .finally(() => setLoadingProfile(false))
   }, [])
 
-  // ── Load past reports ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!user?.id) return
     getUserReports(user.id)
@@ -124,15 +165,10 @@ export default function DashboardPage() {
 
     fetchNews()
 
-    // Check for unfinished sessions to offer resume
     getActiveSessions()
       .then(res => setActiveSessions(res?.sessions || []))
       .catch(() => {})
   }, [user])
-
-  const today = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-  })
 
   // ─────────────────────────────────────────────────────────────────────────
   if (loadingProfile) return <LoadingSpinner fullScreen />
@@ -141,7 +177,7 @@ export default function DashboardPage() {
     <div className="min-h-screen pt-24 pb-16 px-4">
       <div className="max-w-5xl mx-auto">
 
-        {/* ── Resume banner ─────────────────────────────────────────────── */}
+        {/* ── Resume-in-progress banner ──────────────────────────────────── */}
         {activeSessions.length > 0 && (
           <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 flex items-center justify-between gap-4 animate-fade-in-up">
             <div className="flex items-center gap-3">
@@ -172,25 +208,43 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ── Greeting ───────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between mb-6 animate-fade-in-up">
-          <div>
-            <h1 className="text-4xl font-bold mb-1">
-              Welcome back,{' '}
-              <span className="gradient-text">
-                {studentMeta?.name?.split(' ')[0] || profile?.name?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0]}
-              </span>
-            </h1>
-            <div className="flex items-center gap-2 text-muted text-sm mt-1">
-              <CalendarDays size={14} />{today}
-            </div>
+        {/* ── Greeting cluster ───────────────────────────────────────────── */}
+        <div className="mb-6 animate-fade-in-up">
+          <div className="flex items-start justify-between gap-4">
+            <WelcomeGreeting name={firstName} today={today} />
+            {!profile && (
+              <button
+                onClick={() => navigate('/')}
+                className="btn-secondary text-sm py-2 px-4 flex-shrink-0"
+              >
+                <RefreshCcw size={14} /> Upload Resume
+              </button>
+            )}
           </div>
-          {!profile && (
-            <button onClick={() => navigate('/')} className="btn-secondary text-sm py-2 px-4 flex-shrink-0">
-              <RefreshCcw size={14} /> Upload Resume
-            </button>
-          )}
+
+          {/* Stats row */}
+          <MiniStatsRow reports={reports} />
+
+          {/* Last session + streak on the same line */}
+          <div className="flex flex-wrap items-center gap-3">
+            <LastSessionPill reports={reports} />
+            <PracticeStreak streak={streak} />
+          </div>
         </div>
+
+        {/* ── Milestone celebration ──────────────────────────────────────── */}
+        {activeMilestone && (
+          <MilestoneBanner
+            milestone={activeMilestone}
+            onDismiss={handleMilestoneDismiss}
+          />
+        )}
+
+        {/* ── Motivational quote ─────────────────────────────────────────── */}
+        <MotivationalQuote />
+
+        {/* ── Contextual nudge ───────────────────────────────────────────── */}
+        <NudgeCard reports={reports} onStartSession={handleStartSession} />
 
         {/* ── Student Profile Card ────────────────────────────────────────── */}
         {(studentMeta || profile) && (
@@ -257,7 +311,7 @@ export default function DashboardPage() {
         )}
 
         {/* ── Start New Interview ─────────────────────────────────────────── */}
-        <div className="mb-10 animate-fade-in-up delay-200">
+        <div id="start-interview-section" className="mb-10 animate-fade-in-up delay-200">
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
             <TrendingUp size={20} className="text-purple-400" />
             Start New Interview
@@ -281,7 +335,7 @@ export default function DashboardPage() {
               <SessionConfig
                 roundType={selectedRound}
                 onBack={() => setSelectedRound(null)}
-                onStart={() => {}} // navigation handled inside SessionConfig
+                onStart={() => {}}
               />
             </div>
           )}
@@ -298,7 +352,6 @@ export default function DashboardPage() {
             <div className="flex items-center gap-3">
               {loadingNews && <span className="text-xs text-muted flex items-center gap-1.5"><Loader2 size={12} className="animate-spin text-blue-400" /> Analysing Market...</span>}
               <div className="flex items-center gap-2">
-                {/* Daily reload counter */}
                 <span
                   title={`${reloadsLeft} of ${DAILY_LIMIT} free refreshes remaining today`}
                   className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
@@ -324,7 +377,6 @@ export default function DashboardPage() {
 
           {!loadingNews && marketNews && (
             <div className="glass p-6">
-              {/* Insight Header */}
               <div className="mb-6 p-5 rounded-xl" style={{ background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
                 <div className="flex items-center gap-2 mb-3">
                   <Activity size={16} className="text-blue-400" />
@@ -342,7 +394,6 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              {/* Articles */}
               {marketNews.articles?.length > 0 && (
                 <div className="space-y-2">
                   <h3 className="text-xs uppercase tracking-widest text-muted font-bold mb-3 pl-1">Verified Sources</h3>
@@ -381,11 +432,9 @@ export default function DashboardPage() {
                 </h2>
                 <span className="text-xs text-muted">{done}/{total} done</span>
               </div>
-              {/* Progress bar */}
               <div className="h-1.5 rounded-full mb-3" style={{ background: 'rgba(255,255,255,0.08)' }}>
                 <div className="h-1.5 rounded-full transition-all" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #4ade80, #22d3ee)' }} />
               </div>
-              {/* Top 3 pending */}
               <div className="space-y-1.5">
                 {pending.map(item => (
                   <div key={item.id} className="flex items-center gap-2 text-sm">
