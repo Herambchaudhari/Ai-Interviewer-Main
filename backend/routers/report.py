@@ -226,7 +226,12 @@ def _build_hiring_summary(
     elif overall_pct >= 55:    verdict = "HOLD"
     else:                      verdict = "REJECT"
 
-    risk = (interview_integrity or {}).get("risk_level", "Low")
+    _ii_status = (interview_integrity or {}).get("status", "Clear")
+    risk = (
+        "High"   if _ii_status == "High Risk"          else
+        "Medium" if _ii_status == "Review Recommended" else
+        "Low"
+    )
 
     def _area_label(a) -> str:
         if isinstance(a, dict):
@@ -1706,8 +1711,8 @@ async def _generate_report_sse(session_id: str, user_id: str):
         "session_label":        session_label,
         "target_company":       target_company,
         "candidate_name":       profile_parsed.get("name") or "Candidate",
-        "timer_mins":           session.get("timer_mins", session.get("timer_minutes", 30)),
-        "num_questions":        session.get("num_questions", len(question_scores)),
+        "timer_mins":           session.get("timer_mins") or session.get("timer_minutes") or 30,
+        "num_questions":        session.get("num_questions") or len(question_scores),
 
         # Core scores
         "overall_score":        overall_pct,

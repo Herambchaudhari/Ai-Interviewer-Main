@@ -2,30 +2,40 @@
  * ReportPage — Full post-interview Ultra-Report with SSE streaming.
  * Route: /report/:sessionId
  *
- * Sections (in render order):
- *  1. SSE Loading State  (while generating)
- *  2. What Went Wrong callout
- *  3. Repeated Offenders (deferred — only when data exists across sessions)
- *  4. Score Header + Improvement Delta
- *  5. Failure Patterns (promoted — root causes of low-scoring answers)
- *  6. Two-Radar Grid: Technical Knowledge Breakdown + Hire Signal Radar
- *  7. 6-Axis Communication Radar + Delivery Consistency
- *  8. MCQ Category Breakdown (mcq_practice only)
- *  9. Filler & Hesitation Heatmap
- * 10. Per-Question Scores
- * 11. Verbal Category Breakdown (non-mcq rounds, deterministic)
- * 12. Strong & Weak Areas
- * 13. Code Quality (DSA only)
- * 14. Company Fit (if target_company set)
- * 15. Skill Decay (deferred — only when cross-session data exists)
- * 16. CV Audit
- * 17. Skills to Work On
- * 18. 30-Day Sprint Plan
- * 19. Follow-Up Questions
- * 20. Per-Question Deep Dive
- * 21. Preparation Checklist
- * 22. Interview Integrity (proctoring — at bottom)
- * 23. Next Interview Blueprint CTA
+ * Sections (in render order — technical round):
+ *  1.  SSE Loading State  (while generating)
+ *  2.  HR Document Header (hr only)
+ *  3.  HR Executive Summary (hr only)
+ *  4.  Repeated Offenders alert (cross-session, deferred)
+ *  5.  Hero Score Card + Improvement Delta
+ *  6.  Hiring Team Summary Card
+ *  7.  Interview Integrity Status (compact — all risk levels)
+ *  8.  Strong Areas (wins-first)
+ *  9.  MCQ Analytics Block (mcq_practice only)
+ * 10.  Two-Radar Grid: Technical Knowledge + Hire Signal
+ * 11.  6-Axis Communication Radar + Delivery Consistency
+ * 12.  MCQ Category Breakdown (mcq_practice only)
+ * 13.  Filler & Hesitation Heatmap
+ * 14.  Per-Question Scores
+ * 15.  Time Per Question (hidden when no timing data)
+ * 16.  Verbal Category Breakdown (technical only)
+ * 17.  Weak / Areas to Improve
+ * 18.  What Went Wrong callout (gaps section — after wins)
+ * 19.  Failure Patterns (root causes)
+ * 20.  HR-specific sections (hr only: Phase 1-3)
+ * 21.  DSA Performance Dashboard (dsa only)
+ * 22.  Code Quality Analysis (dsa only)
+ * 23.  Peer Comparison
+ * 24.  Company Fit
+ * 25.  Skill Decay
+ * 26.  CV Audit
+ * 27.  Skills to Work On
+ * 28.  30-Day Sprint Plan
+ * 29.  Follow-Up Questions
+ * 30.  Per-Question Deep Dive (with verbatim transcript + model answer)
+ * 31.  Preparation Checklist
+ * 32.  Interview Integrity (full proctoring breakdown — detail view)
+ * 33.  Next Interview Blueprint CTA
  */
 import './print.css'
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -89,6 +99,14 @@ function hireColor(h) {
   if (h.includes('Strong')) return '#4ade80'
   if (h === 'Yes') return '#a3e635'
   if (h === 'Maybe') return '#facc15'
+  return '#f87171'
+}
+
+function verdictColor(v) {
+  if (!v) return '#94a3b8'
+  if (v === 'STRONG HIRE') return '#4ade80'
+  if (v === 'HIRE')        return '#a3e635'
+  if (v === 'HOLD')        return '#facc15'
   return '#f87171'
 }
 
@@ -1797,7 +1815,7 @@ export default function ReportPage() {
                   {hiring_summary.grade}
                 </span>
                 <div>
-                  <p className="text-sm font-bold" style={{ color: gradeColor(hiring_summary.grade) }}>
+                  <p className="text-sm font-bold" style={{ color: verdictColor(hiring_summary.hire_verdict) }}>
                     {hiring_summary.hire_verdict}
                   </p>
                   {hiring_summary.hire_confidence && (
@@ -1844,21 +1862,43 @@ export default function ReportPage() {
           </div>
         )}
 
-        {/* ── Interview Integrity Alert (High Risk only) ───────────────────
-            Surfaced at top so the integrity flag is the first thing a
-            recruiter sees — not buried at page 11.                         */}
-        {interview_integrity?.risk_level === 'High' && (
-          <div className="rounded-xl p-4 flex items-start gap-3 animate-fade-in-up"
-            style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)' }}>
-            <ShieldAlert size={18} className="text-red-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-semibold text-red-300 text-sm">Interview Integrity — High Risk</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--color-muted)' }}>
-                {(interview_integrity.flagged_events?.length ?? 0)} flagged events detected during this session.
-                Full proctoring breakdown is at the bottom of this report.
-              </p>
+        {/* ── Interview Integrity Status — shown near top for all risk levels ──
+            High Risk / Review Recommended → expanded warning banner.
+            Minor Concerns / Clear → compact chip only.                      */}
+        {round_type !== 'mcq_practice' && interview_integrity && (
+          (interview_integrity.status === 'High Risk' || interview_integrity.status === 'Review Recommended') ? (
+            <div className="rounded-xl p-4 flex items-start gap-3 animate-fade-in-up"
+              style={{
+                background: interview_integrity.status === 'High Risk'
+                  ? 'rgba(248,113,113,0.08)' : 'rgba(245,158,11,0.08)',
+                border: `1px solid ${interview_integrity.status === 'High Risk'
+                  ? 'rgba(248,113,113,0.3)' : 'rgba(245,158,11,0.3)'}`,
+              }}>
+              <ShieldAlert size={18} className="mt-0.5 flex-shrink-0"
+                style={{ color: interview_integrity.status === 'High Risk' ? '#f87171' : '#f59e0b' }} />
+              <div>
+                <p className="font-semibold text-sm"
+                  style={{ color: interview_integrity.status === 'High Risk' ? '#f87171' : '#f59e0b' }}>
+                  Interview Integrity — {interview_integrity.status}
+                </p>
+                <p className="text-xs mt-1" style={{ color: 'var(--color-muted)' }}>
+                  {interview_integrity.total_incidents ?? (interview_integrity.flagged_events?.length ?? 0)} flagged event(s) detected.
+                  Full proctoring breakdown is at the bottom of this report.
+                </p>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-center gap-2 text-xs"
+              style={{ color: interview_integrity.status === 'Clear' ? '#4ade80' : '#f59e0b' }}>
+              <Shield size={13} />
+              <span>Integrity: {interview_integrity.status}</span>
+              {(interview_integrity.total_incidents ?? 0) > 0 && (
+                <span style={{ color: 'var(--color-muted)' }}>
+                  ({interview_integrity.total_incidents} minor event{interview_integrity.total_incidents > 1 ? 's' : ''})
+                </span>
+              )}
+            </div>
+          )
         )}
 
         {/* ── Strong Areas (wins-first — shown early before gaps) ──────────
@@ -2506,42 +2546,6 @@ export default function ReportPage() {
         })()}
         {/* ══ End MCQ sections ════════════════════════════════════════════════ */}
 
-        {/* ── What Went Wrong callout (wins-first reorder — gaps after radars) ── */}
-        {what_went_wrong && (
-          <div className="rounded-2xl p-5 flex gap-4 animate-fade-in-up"
-            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)' }}>
-            <AlertTriangle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-red-400 text-sm mb-1">What Went Wrong</p>
-              <p className="text-sm leading-relaxed">{what_went_wrong}</p>
-            </div>
-          </div>
-        )}
-
-        {/* ── Failure Patterns ─────────────────────────────────────────────── */}
-        {failure_patterns?.length > 0 && (
-          <SectionCard icon={<AlertTriangle size={16}/>} title="What Went Wrong — Root Causes" color="#f87171">
-            <p className="text-xs text-muted mb-3">These are the core patterns behind your low-scoring answers.</p>
-            <div className="space-y-3">
-              {failure_patterns.map((p, i) => {
-                const text   = typeof p === 'string' ? p : p.pattern || ''
-                const desc   = typeof p === 'object' ? (p.description || p.fix || '') : ''
-                const affect = typeof p === 'object' ? (p.questions_affected || []) : []
-                return (
-                  <div key={i} className="p-4 rounded-xl"
-                    style={{ background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)' }}>
-                    <p className="font-semibold text-sm text-red-300 mb-1">{text}</p>
-                    {affect.length > 0 && (
-                      <p className="text-xs text-muted mb-1">Affected: {affect.join(', ')}</p>
-                    )}
-                    {desc && <p className="text-sm text-muted">{desc}</p>}
-                  </div>
-                )
-              })}
-            </div>
-          </SectionCard>
-        )}
-
         {/* ── Two-Radar Grid: Technical Knowledge + Hire Signal ────────────── */}
         {/* Hidden for MCQ — these radars assess verbal communication / hiring readiness.
             Hidden for DSA — DSA Performance Dashboard renders its own topic-mastery radar and hire signal. */}
@@ -2837,7 +2841,10 @@ export default function ReportPage() {
         </SectionErrorBoundary>
 
         {/* ── Time Per Question ────────────────────────────────────────────── */}
-        {round_type !== 'mcq_practice' && round_type !== 'dsa' && time_per_question?.length > 0 && (
+        {round_type !== 'mcq_practice' && round_type !== 'dsa'
+          && time_per_question?.length > 0
+          && time_per_question.some(e => (e.time_secs ?? 0) > 0)
+          && (
           <SectionCard icon={<Timer size={16}/>} title="Time Per Question" color="#f59e0b">
             <p className="text-xs mb-3" style={{ color: 'var(--color-muted)' }}>
               Seconds spent on each answer. Under-time may signal skipping; over-time may signal uncertainty.
@@ -2921,6 +2928,41 @@ export default function ReportPage() {
           </SectionCard>
         </div>
 
+        {/* ── What Went Wrong callout (wins-first — gaps after weak areas) ── */}
+        {what_went_wrong && (
+          <div className="rounded-2xl p-5 flex gap-4 animate-fade-in-up"
+            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)' }}>
+            <AlertTriangle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-400 text-sm mb-1">What Went Wrong</p>
+              <p className="text-sm leading-relaxed">{what_went_wrong}</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Failure Patterns ─────────────────────────────────────────────── */}
+        {failure_patterns?.length > 0 && (
+          <SectionCard icon={<AlertTriangle size={16}/>} title="What Went Wrong — Root Causes" color="#f87171">
+            <p className="text-xs text-muted mb-3">These are the core patterns behind your low-scoring answers.</p>
+            <div className="space-y-3">
+              {failure_patterns.map((p, i) => {
+                const text   = typeof p === 'string' ? p : p.pattern || ''
+                const desc   = typeof p === 'object' ? (p.description || p.fix || '') : ''
+                const affect = typeof p === 'object' ? (p.questions_affected || []) : []
+                return (
+                  <div key={i} className="p-4 rounded-xl"
+                    style={{ background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)' }}>
+                    <p className="font-semibold text-sm text-red-300 mb-1">{text}</p>
+                    {affect.length > 0 && (
+                      <p className="text-xs text-muted mb-1">Affected: {affect.join(', ')}</p>
+                    )}
+                    {desc && <p className="text-sm text-muted">{desc}</p>}
+                  </div>
+                )
+              })}
+            </div>
+          </SectionCard>
+        )}
 
         {/* ── HR Phase 1: Competency Scorecard ────────────────────────────── */}
         {round_type === 'hr' && (
@@ -4871,10 +4913,10 @@ export default function ReportPage() {
                             {item.hours && <span className="text-xs text-muted">{item.hours}h</span>}
                           </div>
                           {item.daily_tasks?.length > 0 && (
-                            <details className="mt-2">
+                            <details className="mt-2 group/daily">
                               <summary className="text-[11px] font-semibold cursor-pointer select-none list-none flex items-center gap-1"
                                 style={{ color: '#22d3ee' }}>
-                                <ChevronRight size={11} />
+                                <ChevronRight size={11} className="transition-transform group-open/daily:rotate-90" />
                                 Daily breakdown (Mon–Fri)
                               </summary>
                               <div className="mt-1.5 space-y-1 pl-2 border-l-2"
@@ -4996,6 +5038,25 @@ export default function ReportPage() {
                         <p className="text-sm leading-relaxed text-muted">{q.answer_summary}</p>
                       </div>
                     )}
+                    {q.answer_text && !q.skipped && q.answer_text !== '[SKIPPED]' && (
+                      <details className="group/transcript">
+                        <summary className="text-xs font-semibold cursor-pointer select-none list-none flex items-center gap-1.5 mt-1"
+                          style={{ color: '#94a3b8' }}>
+                          <ChevronRight size={12} className="transition-transform group-open/transcript:rotate-90" />
+                          Your Full Answer (verbatim transcript)
+                        </summary>
+                        <div className="mt-2 text-xs leading-relaxed p-3 rounded-lg"
+                          style={{
+                            background: 'var(--color-surface-2)',
+                            border: '1px solid var(--color-border)',
+                            color: 'var(--color-muted)',
+                            whiteSpace: 'pre-wrap',
+                            fontStyle: 'italic',
+                          }}>
+                          {q.answer_text}
+                        </div>
+                      </details>
+                    )}
                     {q.key_insight && (
                       <div>
                         <p className="text-xs text-muted uppercase tracking-wider mb-1">Key Insight</p>
@@ -5053,15 +5114,20 @@ export default function ReportPage() {
                     )}
                     {/* Model Answer — what a 9/10 answer looks like */}
                     {q.model_answer && (
-                      <details>
+                      <details className="group/modelans">
                         <summary className="text-xs font-semibold cursor-pointer select-none list-none flex items-center gap-1.5 mt-1"
                           style={{ color: '#4ade80' }}>
-                          <ChevronRight size={12} className="group-open:rotate-90" />
+                          <ChevronRight size={12} className="transition-transform group-open/modelans:rotate-90" />
                           Model Answer — what a 9/10 answer looks like
                         </summary>
-                        <div className="mt-2 text-sm leading-relaxed p-3 rounded-lg"
-                          style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.15)', color: 'var(--color-muted)' }}>
-                          {q.model_answer}
+                        <div className="mt-2 p-3 rounded-lg space-y-2"
+                          style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.15)' }}>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#4ade80' }}>
+                            Key Elements a Top Answer Covers
+                          </p>
+                          <p className="text-sm leading-relaxed" style={{ color: 'var(--color-muted)' }}>
+                            {q.model_answer}
+                          </p>
                         </div>
                       </details>
                     )}
