@@ -133,19 +133,22 @@ function EmptyState() {
 export function SkeletonAnalytics() {
   return (
     <div className="space-y-6 animate-pulse">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {[...Array(6)].map((_, i) => (
           <div key={i} className="glass h-24 rounded-2xl"
             style={{ background: 'var(--color-surface-2)' }} />
         ))}
       </div>
+      <div className="glass h-36 rounded-2xl" style={{ background: 'var(--color-surface-2)' }} />
       <div className="glass h-56 rounded-2xl" style={{ background: 'var(--color-surface-2)' }} />
+      <div className="glass h-48 rounded-2xl" style={{ background: 'var(--color-surface-2)' }} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {[...Array(4)].map((_, i) => (
           <div key={i} className="glass h-48 rounded-2xl"
             style={{ background: 'var(--color-surface-2)' }} />
         ))}
       </div>
+      <div className="glass h-40 rounded-2xl" style={{ background: 'var(--color-surface-2)' }} />
     </div>
   )
 }
@@ -456,23 +459,338 @@ function TimePerQuestionTrend({ data }) {
   )
 }
 
+// ── New Feature A: Personal Best vs. Latest ───────────────────────────────────
+
+function BestVsLatestChart({ data }) {
+  const entries = Object.entries(data || {})
+  if (!entries.length) return (
+    <p className="text-xs py-6 text-center" style={{ color: 'var(--color-muted)' }}>
+      Complete at least 2 sessions per round type to see comparisons.
+    </p>
+  )
+  const chartData = entries.map(([rt, v]) => ({
+    name:   ROUND_LABELS[rt] || rt,
+    best:   v.best,
+    latest: v.latest,
+    delta:  v.delta,
+    rt,
+  }))
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+        <XAxis dataKey="name" tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
+        <YAxis domain={[0, 100]} tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
+        <Tooltip
+          contentStyle={TOOLTIP_STYLE}
+          formatter={(v, name, props) => {
+            const delta = props?.payload?.delta
+            if (name === 'Latest' && delta !== undefined) {
+              const sign = delta >= 0 ? '+' : ''
+              return [`${v} (${sign}${delta} vs best)`, name]
+            }
+            return [v, name]
+          }}
+        />
+        <Legend wrapperStyle={{ fontSize: '12px', color: 'var(--color-muted)' }} />
+        <Bar dataKey="best" name="All-Time Best" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="latest" name="Latest" radius={[4, 4, 0, 0]}>
+          {chartData.map((entry, i) => (
+            <Cell key={i} fill={entry.delta < 0 ? '#f87171' : '#3b82f6'} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ── New Feature B: Readiness Gauge ────────────────────────────────────────────
+
+function ReadinessGauge({ data }) {
+  const { score = 0, label = 'Needs Practice', breakdown = {} } = data || {}
+  const color = score >= 85 ? '#10b981' : score >= 65 ? '#7c3aed' : score >= 40 ? '#f59e0b' : '#f87171'
+  const circumference = 2 * Math.PI * 50
+  const dashLen = (score / 100) * circumference
+
+  const components = [
+    { key: 'avg_score',   label: 'Avg Score',   max: 30 },
+    { key: 'trend',       label: 'Trend',       max: 25 },
+    { key: 'consistency', label: 'Consistency', max: 20 },
+    { key: 'breadth',     label: 'Breadth',     max: 15 },
+    { key: 'streak',      label: 'Streak',      max: 10 },
+  ]
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center gap-8">
+      {/* Ring */}
+      <div style={{ position: 'relative', width: 140, height: 140, flexShrink: 0 }}>
+        <svg viewBox="0 0 120 120" width={140} height={140} style={{ transform: 'rotate(-90deg)' }}>
+          <circle cx="60" cy="60" r="50" fill="none"
+            stroke="var(--color-border)" strokeWidth="9" />
+          <circle cx="60" cy="60" r="50" fill="none"
+            stroke={color} strokeWidth="9"
+            strokeDasharray={`${dashLen} ${circumference - dashLen}`}
+            strokeLinecap="round"
+            style={{ transition: 'stroke-dasharray 1s ease' }} />
+        </svg>
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <span style={{ fontSize: '30px', fontWeight: 'bold', color, lineHeight: 1 }}>{score}</span>
+          <span style={{ fontSize: '10px', color: 'var(--color-muted)' }}>/100</span>
+        </div>
+      </div>
+      {/* Breakdown */}
+      <div style={{ flex: 1, width: '100%' }}>
+        <p style={{ color, fontWeight: '700', fontSize: '15px', marginBottom: '14px' }}>{label}</p>
+        {components.map(({ key, label: l, max }) => {
+          const val = breakdown[key] || 0
+          const pct = Math.round((val / max) * 100)
+          return (
+            <div key={key} style={{ marginBottom: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
+                <span style={{ color: 'var(--color-muted)' }}>{l}</span>
+                <span style={{ color: 'var(--color-text)', fontWeight: '600' }}>
+                  {Math.round(val)}<span style={{ color: 'var(--color-muted)', fontWeight: 400 }}>/{max}</span>
+                </span>
+              </div>
+              <div style={{ height: '5px', borderRadius: '3px', background: 'var(--color-border)' }}>
+                <div style={{
+                  height: '100%', borderRadius: '3px', background: color,
+                  width: `${pct}%`, transition: 'width 0.8s ease',
+                }} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── New Feature C: Frequency vs. Score panel ──────────────────────────────────
+
+function FrequencyVsScorePanel({ data }) {
+  const entries = Object.entries(data || {}).sort((a, b) => b[1].gap - a[1].gap)
+  if (!entries.length) return (
+    <p className="text-xs py-6" style={{ color: 'var(--color-muted)' }}>
+      Complete interviews to see your frequency breakdown.
+    </p>
+  )
+  const maxCount = Math.max(...entries.map(([, v]) => v.count), 1)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      {entries.map(([rt, v]) => {
+        const color  = ROUND_COLORS[rt] || '#7c3aed'
+        const isNeglected = v.gap > 20
+        const isBest  = v.gap === 0
+        const scoreColor = v.avg_score >= 70 ? '#10b981' : v.avg_score >= 50 ? '#f59e0b' : '#f87171'
+        return (
+          <div key={rt} className="p-3 rounded-xl animate-fade-in-up"
+            style={{ background: 'var(--color-surface-2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ color, fontWeight: '600', fontSize: '13px' }}>
+                {ROUND_LABELS[rt] || rt}
+              </span>
+              {isNeglected && (
+                <span style={{ fontSize: '11px', fontWeight: '600', color: '#f59e0b',
+                  background: 'rgba(245,158,11,0.12)', padding: '2px 8px', borderRadius: '999px' }}>
+                  Neglected ⚠
+                </span>
+              )}
+              {isBest && (
+                <span style={{ fontSize: '11px', fontWeight: '600', color: '#10b981',
+                  background: 'rgba(16,185,129,0.12)', padding: '2px 8px', borderRadius: '999px' }}>
+                  Strongest ✓
+                </span>
+              )}
+            </div>
+            <div style={{ marginBottom: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px',
+                color: 'var(--color-muted)', marginBottom: '3px' }}>
+                <span>Sessions practiced</span><span>{v.count}</span>
+              </div>
+              <div style={{ height: '5px', borderRadius: '3px', background: 'var(--color-border)' }}>
+                <div style={{ height: '100%', width: `${(v.count / maxCount) * 100}%`,
+                  borderRadius: '3px', background: color, opacity: 0.65 }} />
+              </div>
+            </div>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px',
+                color: 'var(--color-muted)', marginBottom: '3px' }}>
+                <span>Avg score</span><span style={{ color: scoreColor, fontWeight: '600' }}>{v.avg_score}</span>
+              </div>
+              <div style={{ height: '5px', borderRadius: '3px', background: 'var(--color-border)' }}>
+                <div style={{ height: '100%', width: `${v.avg_score}%`,
+                  borderRadius: '3px', background: scoreColor }} />
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── New Feature D: Hours Milestone card ───────────────────────────────────────
+
+function HoursMilestoneCard({ data }) {
+  const {
+    total_hours = 0, total_minutes = 0,
+    milestone, next_milestone, progress_pct = 0,
+    achieved_milestones = [],
+  } = data || {}
+
+  const minsToNext = next_milestone
+    ? Math.max(0, Math.round((parseFloat(next_milestone) - total_hours) * 60))
+    : null
+
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: '44px', fontWeight: 'bold', color: '#f59e0b', lineHeight: 1 }}>
+        {total_hours.toFixed(1)}
+        <span style={{ fontSize: '18px', color: 'var(--color-muted)', fontWeight: 400 }}>h</span>
+      </div>
+      <p style={{ color: 'var(--color-muted)', fontSize: '13px', marginTop: '4px' }}>
+        practiced ({Math.round(total_minutes)} min total)
+      </p>
+
+      {next_milestone ? (
+        <div style={{ marginTop: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px',
+            color: 'var(--color-muted)', marginBottom: '4px' }}>
+            <span>{milestone || '0h'}</span>
+            <span>{next_milestone}</span>
+          </div>
+          <div style={{ height: '7px', borderRadius: '4px', background: 'var(--color-border)' }}>
+            <div style={{ height: '100%', borderRadius: '4px', background: '#f59e0b',
+              width: `${progress_pct}%`, transition: 'width 0.8s ease' }} />
+          </div>
+          {minsToNext !== null && (
+            <p style={{ marginTop: '6px', fontSize: '11px', color: 'var(--color-muted)' }}>
+              {minsToNext} min to {next_milestone} milestone
+            </p>
+          )}
+        </div>
+      ) : (
+        <p style={{ marginTop: '12px', fontSize: '12px', color: '#10b981', fontWeight: '600' }}>
+          All milestones achieved! 🏆
+        </p>
+      )}
+
+      {achieved_milestones.length > 0 && (
+        <div style={{ marginTop: '14px', display: 'flex', flexWrap: 'wrap',
+          gap: '6px', justifyContent: 'center' }}>
+          {achieved_milestones.map(m => (
+            <span key={m} style={{ fontSize: '11px', fontWeight: '600', color: '#10b981',
+              background: 'rgba(16,185,129,0.12)', padding: '2px 10px', borderRadius: '999px' }}>
+              {m} ✓
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── New Feature E: Per-question category breakdown ────────────────────────────
+
+function CategoryBreakdownChart({ data }) {
+  if (!data.length) return (
+    <p className="text-xs py-6" style={{ color: 'var(--color-muted)' }}>
+      Answer more questions to see category breakdown.
+    </p>
+  )
+  const top = data.slice(0, 12)
+  const chartData = top.map(d => ({
+    name:  d.category.length > 18 ? d.category.slice(0, 16) + '…' : d.category,
+    score: d.avg_score,
+    count: d.count,
+    full:  d.category,
+  }))
+  const worst3 = data.slice(0, 3)
+  const best3  = data.slice(-3).reverse()
+
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={Math.max(200, chartData.length * 36)}>
+        <BarChart data={chartData} layout="vertical"
+          margin={{ top: 0, right: 40, bottom: 0, left: 10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+          <XAxis type="number" domain={[0, 100]}
+            tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
+          <YAxis type="category" dataKey="name" width={110}
+            tick={{ fill: 'var(--color-muted)', fontSize: 11 }} />
+          <Tooltip
+            formatter={(v, n, p) => [`${v} avg (${p.payload.count} questions)`, 'Score']}
+            contentStyle={TOOLTIP_STYLE}
+          />
+          <Bar dataKey="score" radius={[0, 6, 6, 0]}>
+            {chartData.map((entry, i) => (
+              <Cell
+                key={i}
+                fill={entry.score >= 75 ? '#4ade80' : entry.score >= 50 ? '#fbbf24' : '#f87171'}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+
+      {(worst3.length > 0 || best3.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
+          <div style={{ background: 'rgba(248,113,113,0.08)', borderRadius: '10px', padding: '12px' }}>
+            <p style={{ fontSize: '11px', fontWeight: '700', color: '#f87171', marginBottom: '6px' }}>
+              Needs Work
+            </p>
+            {worst3.map(d => (
+              <div key={d.category} style={{ display: 'flex', justifyContent: 'space-between',
+                fontSize: '11px', color: 'var(--color-muted)', marginBottom: '3px' }}>
+                <span>{d.category}</span>
+                <span style={{ color: '#f87171', fontWeight: '600' }}>{d.avg_score}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ background: 'rgba(74,222,128,0.08)', borderRadius: '10px', padding: '12px' }}>
+            <p style={{ fontSize: '11px', fontWeight: '700', color: '#4ade80', marginBottom: '6px' }}>
+              Strongest
+            </p>
+            {best3.map(d => (
+              <div key={d.category} style={{ display: 'flex', justifyContent: 'space-between',
+                fontSize: '11px', color: 'var(--color-muted)', marginBottom: '3px' }}>
+                <span>{d.category}</span>
+                <span style={{ color: '#4ade80', fontWeight: '600' }}>{d.avg_score}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export default function AnalyticsSection({ analytics }) {
   const {
-    total_interviews  = 0,
-    average_score     = 0,
-    best_round_type   = null,
-    win_rate          = 0,
-    score_trend       = [],
-    by_round_type     = {},
-    by_difficulty     = {},
-    weak_areas_ranked = [],
-    radar_by_round    = {},
-    grade_distribution = [],
-    streak            = {},
-    mcq_topic_accuracy = [],
-    time_trend        = [],
+    total_interviews    = 0,
+    average_score       = 0,
+    best_round_type     = null,
+    win_rate            = 0,
+    score_trend         = [],
+    by_round_type       = {},
+    by_difficulty       = {},
+    weak_areas_ranked   = [],
+    radar_by_round      = {},
+    grade_distribution  = [],
+    streak              = {},
+    mcq_topic_accuracy  = [],
+    time_trend          = [],
+    best_vs_latest      = {},
+    readiness           = {},
+    round_freq_vs_score = {},
+    hours_practiced     = {},
+    category_breakdown  = [],
   } = analytics || {}
 
   if (!total_interviews) return <EmptyState />
@@ -510,12 +828,16 @@ export default function AnalyticsSection({ analytics }) {
     color: DIFF_COLORS[d] || '#7c3aed',
   }))
 
-  const streakData  = streak || {}
-  const hasRadar    = Object.keys(radar_by_round).length > 0
-  const hasMCQ      = mcq_topic_accuracy.length > 0
-  const hasTime     = time_trend.length > 0
-  const hasWeak     = weak_areas_ranked.length > 0
-  const hasGrades   = grade_distribution.length > 0
+  const streakData       = streak || {}
+  const hasRadar         = Object.keys(radar_by_round).length > 0
+  const hasMCQ           = mcq_topic_accuracy.length > 0
+  const hasTime          = time_trend.length > 0
+  const hasWeak          = weak_areas_ranked.length > 0
+  const hasGrades        = grade_distribution.length > 0
+  const hasBestVsLatest  = Object.keys(best_vs_latest).length > 0
+  const hasFreqScore     = Object.keys(round_freq_vs_score).length > 0
+  const hasHours         = (hours_practiced?.total_minutes || 0) > 0
+  const hasCategoryBreak = category_breakdown.length > 0
 
   return (
     <div className="space-y-6">
@@ -567,6 +889,23 @@ export default function AnalyticsSection({ analytics }) {
         />
       </div>
 
+      {/* ── NEW: Readiness Gauge ─────────────────────────────────────────── */}
+      <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '20ms' }}>
+        <SectionHeader
+          title="Interview Readiness Score"
+          badge={
+            <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold"
+              style={{
+                background: readiness.score >= 65 ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.12)',
+                color:      readiness.score >= 65 ? '#10b981' : '#f59e0b',
+              }}>
+              {readiness.label}
+            </span>
+          }
+        />
+        <ReadinessGauge data={readiness} />
+      </div>
+
       {/* ── 2. Score trend ──────────────────────────────────────────────── */}
       {trendData.length > 0 && (
         <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '40ms' }}>
@@ -587,6 +926,21 @@ export default function AnalyticsSection({ analytics }) {
               ))}
             </LineChart>
           </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* ── NEW: Personal Best vs. Latest ───────────────────────────────── */}
+      {hasBestVsLatest && (
+        <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '60ms' }}>
+          <SectionHeader
+            title="Personal Best vs. Latest Score"
+            badge={
+              <span className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                Gold = best ever · Blue = latest · Red = regression
+              </span>
+            }
+          />
+          <BestVsLatestChart data={best_vs_latest} />
         </div>
       )}
 
@@ -639,9 +993,34 @@ export default function AnalyticsSection({ analytics }) {
         )}
       </div>
 
+      {/* ── NEW: Frequency vs. Score + Hours Milestone ──────────────────── */}
+      {(hasFreqScore || hasHours) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {hasFreqScore && (
+            <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '140ms' }}>
+              <SectionHeader
+                title="Practice Frequency vs. Score"
+                badge={
+                  <span className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                    sorted by performance gap
+                  </span>
+                }
+              />
+              <FrequencyVsScorePanel data={round_freq_vs_score} />
+            </div>
+          )}
+          {hasHours && (
+            <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '160ms' }}>
+              <SectionHeader title="Estimated Hours Practiced" />
+              <HoursMilestoneCard data={hours_practiced} />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── 4. Per-round dimension radar ────────────────────────────────── */}
       {hasRadar && (
-        <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '160ms' }}>
+        <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '180ms' }}>
           <SectionHeader title="Performance Dimensions by Round Type" />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {Object.entries(radar_by_round).map(([rt, dims]) => (
@@ -673,6 +1052,21 @@ export default function AnalyticsSection({ analytics }) {
               <GradeDonut data={grade_distribution} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── NEW: Per-question category breakdown ────────────────────────── */}
+      {hasCategoryBreak && (
+        <div className="glass p-6 animate-fade-in-up" style={{ animationDelay: '260ms' }}>
+          <SectionHeader
+            title="Score by Question Category"
+            badge={
+              <span className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                worst first · all round types
+              </span>
+            }
+          />
+          <CategoryBreakdownChart data={category_breakdown} />
         </div>
       )}
 

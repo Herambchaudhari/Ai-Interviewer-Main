@@ -151,6 +151,17 @@ async def hub_analytics(user: dict = Depends(get_current_user)):
             "streak": {"current_streak": 0, "longest_streak": 0,
                        "total_active_days": 0, "activity_map": {}},
             "mcq_topic_accuracy": [], "time_trend": [],
+            "best_vs_latest": {},
+            "readiness": {"score": 0, "label": "Needs Practice", "breakdown": {
+                "avg_score": 0, "trend": 0, "consistency": 0, "breadth": 0, "streak": 0,
+            }},
+            "round_freq_vs_score": {},
+            "hours_practiced": {
+                "total_minutes": 0, "total_hours": 0,
+                "milestone": None, "next_milestone": "1h",
+                "progress_pct": 0, "achieved_milestones": [],
+            },
+            "category_breakdown": [],
         })
     except Exception as e:
         return _err(str(e), status=500)

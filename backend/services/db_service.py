@@ -743,6 +743,17 @@ def get_analytics(user_id: str) -> dict:
                    "total_active_days": 0, "activity_map": {}},
         "mcq_topic_accuracy": [],
         "time_trend": [],
+        "best_vs_latest": {},
+        "readiness": {"score": 0, "label": "Needs Practice", "breakdown": {
+            "avg_score": 0, "trend": 0, "consistency": 0, "breadth": 0, "streak": 0,
+        }},
+        "round_freq_vs_score": {},
+        "hours_practiced": {
+            "total_minutes": 0, "total_hours": 0,
+            "milestone": None, "next_milestone": "1h",
+            "progress_pct": 0, "achieved_milestones": [],
+        },
+        "category_breakdown": [],
     }
 
     try:
@@ -947,6 +958,143 @@ def get_analytics(user_id: str) -> dict:
                 "round_type": r.get("round_type") or "technical",
             })
 
+        # ── New Feature 1: Personal Best vs. Latest per round type ──────────────
+        best_vs_latest: dict = {}
+        latest_by_round: dict = {}   # last seen (rows sorted asc)
+        best_by_round: dict = {}
+        for r in rows:
+            rt = r.get("round_type") or "technical"
+            sc = r.get("overall_score")
+            if sc is None:
+                continue
+            latest_by_round[rt] = round(sc, 1)
+            best_by_round[rt] = round(max(best_by_round.get(rt, sc), sc), 1)
+        for rt in best_by_round:
+            best_vs_latest[rt] = {
+                "best": best_by_round[rt],
+                "latest": latest_by_round.get(rt, best_by_round[rt]),
+                "delta": round(latest_by_round.get(rt, best_by_round[rt]) - best_by_round[rt], 1),
+            }
+
+        # ── New Feature 3: Readiness Score (0-100 composite) ─────────────────
+        import statistics as _stats
+        _score_stddev = _stats.stdev(scores) if len(scores) > 1 else 0
+        _trend_vals = [t["score"] for t in score_trend if t["score"] is not None]
+        _trend_slope = 0.0
+        if len(_trend_vals) >= 2:
+            _n = min(5, len(_trend_vals))
+            _recent = _trend_vals[-_n:]
+            _trend_slope = (_recent[-1] - _recent[0]) / max(_n - 1, 1)
+        _trend_slope_clamped = max(-10, min(10, _trend_slope))
+
+        _avg_component        = round((avg_score / 100) * 30, 2)
+        _trend_component      = round(((_trend_slope_clamped + 10) / 20) * 25, 2)
+        _consistency_component = round(max(0, 1 - (_score_stddev / 35)) * 20, 2)
+        _breadth_component    = round((min(len(by_round_summary), 4) / 4) * 15, 2)
+        _streak_component     = round(min(streak_data["current_streak"] / 7, 1) * 10, 2)
+
+        _readiness_raw = (_avg_component + _trend_component +
+                          _consistency_component + _breadth_component + _streak_component)
+        _readiness_score = round(min(100, max(0, _readiness_raw)))
+
+        if _readiness_score >= 85:
+            _readiness_label = "Exceptional"
+        elif _readiness_score >= 65:
+            _readiness_label = "Interview Ready"
+        elif _readiness_score >= 40:
+            _readiness_label = "Getting There"
+        else:
+            _readiness_label = "Needs Practice"
+
+        readiness = {
+            "score": _readiness_score,
+            "label": _readiness_label,
+            "breakdown": {
+                "avg_score":    _avg_component,
+                "trend":        _trend_component,
+                "consistency":  _consistency_component,
+                "breadth":      _breadth_component,
+                "streak":       _streak_component,
+            },
+        }
+
+        # ── New Feature 4: Frequency vs. Score (neglected area detector) ──────
+        _max_avg = max((v["avg_score"] for v in by_round_summary.values()), default=0)
+        round_freq_vs_score = {
+            rt: {
+                "count":     v["count"],
+                "avg_score": v["avg_score"],
+                "gap":       round(_max_avg - v["avg_score"], 1),
+            }
+            for rt, v in by_round_summary.items()
+        }
+
+        # ── New Feature 6: Estimated hours practiced ──────────────────────────
+        _MILESTONES = [1, 5, 10, 25, 50, 100]
+        _total_secs = 0
+        for r in rows:
+            sid = r.get("session_id")
+            blob = (report_data_map.get(sid) or {}).get("blob", {})
+            pqa = blob.get("per_question_analysis") or []
+            for q in pqa:
+                t = q.get("time_secs") or q.get("time_taken_seconds") or 0
+                try:
+                    _total_secs += float(t)
+                except (TypeError, ValueError):
+                    pass
+        _total_minutes = round(_total_secs / 60, 1)
+        _total_hours   = round(_total_secs / 3600, 2)
+
+        _achieved = [m for m in _MILESTONES if _total_hours >= m]
+        _next_ms  = next((m for m in _MILESTONES if _total_hours < m), None)
+        _progress_pct = 0
+        if _next_ms:
+            _prev_ms = _achieved[-1] if _achieved else 0
+            _span = _next_ms - _prev_ms
+            _progress_pct = round((_total_hours - _prev_ms) / _span * 100) if _span else 0
+
+        hours_practiced = {
+            "total_minutes":   _total_minutes,
+            "total_hours":     _total_hours,
+            "milestone":       f"{_achieved[-1]}h" if _achieved else None,
+            "next_milestone":  f"{_next_ms}h"      if _next_ms  else None,
+            "progress_pct":    _progress_pct,
+            "achieved_milestones": [f"{m}h" for m in _achieved],
+        }
+
+        # ── New Feature 8: Per-question category breakdown (all round types) ──
+        _cat_scores: dict = {}
+        for r in rows:
+            sid = r.get("session_id")
+            blob = (report_data_map.get(sid) or {}).get("blob", {})
+            pqa = blob.get("per_question_analysis") or []
+            for q in pqa:
+                if q.get("skipped"):
+                    continue
+                cat = (q.get("category") or q.get("topic") or "General").strip()
+                sc_q = (q.get("score") or q.get("technical_accuracy") or
+                        q.get("overall_score") or 0)
+                try:
+                    sc_q = float(sc_q)
+                except (TypeError, ValueError):
+                    continue
+                if sc_q > 10:
+                    sc_q = sc_q / 10.0   # normalise 0-100 → 0-10
+                if cat not in _cat_scores:
+                    _cat_scores[cat] = []
+                _cat_scores[cat].append(sc_q)
+        category_breakdown = sorted(
+            [
+                {
+                    "category":  cat,
+                    "avg_score": round(sum(v) / len(v) * 10, 1),  # back to 0-100
+                    "count":     len(v),
+                }
+                for cat, v in _cat_scores.items() if v
+            ],
+            key=lambda x: x["avg_score"],   # ascending: worst first
+        )
+
         return {
             "total_interviews": total,
             "average_score": avg_score,
@@ -961,6 +1109,12 @@ def get_analytics(user_id: str) -> dict:
             "streak": streak_data,
             "mcq_topic_accuracy": mcq_topic_accuracy,
             "time_trend": time_trend,
+            # new
+            "best_vs_latest":       best_vs_latest,
+            "readiness":            readiness,
+            "round_freq_vs_score":  round_freq_vs_score,
+            "hours_practiced":      hours_practiced,
+            "category_breakdown":   category_breakdown,
         }
     except Exception as e:
         print(f"[get_analytics] error: {e}")
