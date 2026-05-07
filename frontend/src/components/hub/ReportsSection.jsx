@@ -663,18 +663,20 @@ function SummaryBanner({ summary }) {
 // ── CSV Export ────────────────────────────────────────────────────────────────
 
 function exportCSV(rows) {
-  const headers = ['Date', 'Round', 'Difficulty', 'Score', 'Pass Probability', 'What Went Wrong', 'Weak Parts', 'Interviewer']
+  const headers = ['Date', 'Round', 'Difficulty', 'Score', 'Pass Probability', 'What Went Wrong', 'Weak Parts', 'Company', 'Role', 'Session Length']
   const lines = [
     headers.join(','),
     ...rows.map(r => [
-      formatDate(r.session_date),
+      formatDate(r.date),
       ROUND_LABELS[r.round_type] || r.round_type || '',
       r.difficulty || '',
       r.overall_score != null ? Number(r.overall_score).toFixed(1) : '',
       r.company_fit?.pass_probability ?? '',
       (r.what_went_wrong || '').replace(/,/g, ';'),
       (r.weak_parts || []).join('; '),
-      r.interviewer_name || 'Groq / LLaMA-3.3',
+      r.target_company || '—',
+      r.target_role || '—',
+      r.timer_minutes ? `${r.timer_minutes} min` : '—',
     ].map(v => `"${v}"`).join(',')),
   ]
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
@@ -890,11 +892,11 @@ export default function ReportsSection() {
       ) : (
         <div className="glass overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[900px]">
+            <table className="w-full text-sm min-w-[1100px]">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
                   <th className="w-8" />
-                  {['Date', 'Round', 'Difficulty', 'Score', 'Radar', 'Company Fit', 'What Went Wrong', 'Interviewer', ''].map(h => (
+                  {['Date', 'Round', 'Difficulty', 'Score', 'Radar', 'Company Fit', 'What Went Wrong', 'Company', 'Role', 'Session Length', ''].map(h => (
                     <th key={h}
                       className="text-left text-xs text-muted uppercase tracking-wider px-4 py-3 font-semibold whitespace-nowrap">
                       {h}
@@ -926,7 +928,7 @@ export default function ReportsSection() {
                         <td className="px-4 py-3.5 text-muted whitespace-nowrap">
                           <div className="flex items-center gap-1.5 text-xs">
                             <Clock size={11} />
-                            {formatDate(row.session_date)}
+                            {formatDate(row.date)}
                           </div>
                         </td>
 
@@ -1000,9 +1002,23 @@ export default function ReportsSection() {
                           ) : <span className="text-xs">—</span>}
                         </td>
 
-                        {/* Interviewer */}
-                        <td className="px-4 py-3.5 text-muted text-xs whitespace-nowrap">
-                          {row.interviewer_name || 'Groq / LLaMA-3.3'}
+                        {/* Company */}
+                        <td className="px-4 py-3.5 text-xs whitespace-nowrap max-w-[130px]">
+                          <span className="truncate block" title={row.target_company || ''}>
+                            {row.target_company || <span className="text-muted">—</span>}
+                          </span>
+                        </td>
+
+                        {/* Role */}
+                        <td className="px-4 py-3.5 text-xs whitespace-nowrap max-w-[150px]">
+                          <span className="truncate block" title={row.target_role || ''}>
+                            {row.target_role || <span className="text-muted">—</span>}
+                          </span>
+                        </td>
+
+                        {/* Session Length */}
+                        <td className="px-4 py-3.5 text-xs text-muted whitespace-nowrap text-center">
+                          {row.timer_minutes ? `${row.timer_minutes} min` : '—'}
                         </td>
 
                         {/* Action — stop propagation so row click doesn't fire */}

@@ -1557,7 +1557,7 @@ def get_hub_reports_paginated(
     try:
         q = (
             _db().table("sessions")
-            .select("id, round_type, difficulty, num_questions, created_at, ended_at, target_company, context_bundle")
+            .select("id, round_type, difficulty, num_questions, created_at, ended_at, target_company, target_role, timer_minutes, context_bundle")
             .eq("user_id", user_id)
             .eq("status", "completed")
         )
@@ -1629,6 +1629,8 @@ def get_hub_reports_paginated(
                 "difficulty":        s.get("difficulty"),
                 "num_questions":     s.get("num_questions"),
                 "target_company":    s.get("target_company") or "",
+                "target_role":       s.get("target_role") or "",
+                "timer_minutes":     s.get("timer_minutes"),
                 "overall_score":     score,
                 "grade":             r.get("grade"),
                 "hire_recommendation": r.get("hire_recommendation"),
