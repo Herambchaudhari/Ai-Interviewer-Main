@@ -1,10 +1,10 @@
 /**
- * ResumesSection — manage resume versions, set active, rename, view parsed data.
- * Props: { resumes, onActivated, onUploaded, onRenamed }
+ * ResumesSection — manage resume versions, set active, rename, re-parse, view parsed data.
+ * Props: { resumes, onActivated, onUploaded, onRenamed, onReparsed }
  */
 import { useState, useRef } from 'react'
-import { CheckCircle, ChevronDown, ChevronUp, Upload, Star, FileText, Plus, Pencil, Check, X } from 'lucide-react'
-import { uploadResume, activateResume, renameResume } from '../../lib/api'
+import { CheckCircle, ChevronDown, ChevronUp, Upload, Star, FileText, Plus, Pencil, Check, X, RefreshCw } from 'lucide-react'
+import { uploadResume, activateResume, renameResume, reparseResume } from '../../lib/api'
 import toast from 'react-hot-toast'
 
 function formatDate(iso) {
@@ -12,6 +12,14 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString('en-IN', {
     day: 'numeric', month: 'short', year: 'numeric',
   })
+}
+
+// Filter out LLM template objects where all meaningful fields are empty strings / null
+function filterEducation(list = []) {
+  return list.filter(e => e.degree || e.institution || e.year)
+}
+function filterExperience(list = []) {
+  return list.filter(ex => ex.role || ex.company || ex.duration)
 }
 
 function SkillsChips({ skills }) {
@@ -28,12 +36,13 @@ function SkillsChips({ skills }) {
   )
 }
 
-function ResumeCard({ resume, onActivate, onRenamed }) {
+function ResumeCard({ resume, onActivate, onRenamed, onReparsed }) {
   const [expanded, setExpanded] = useState(false)
   const [activating, setActivating] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState(resume.label)
   const [saving, setSaving] = useState(false)
+  const [reparsing, setReparsing] = useState(false)
   const inputRef = useRef(null)
 
   const handleActivate = async () => {
@@ -91,7 +100,26 @@ function ResumeCard({ resume, onActivate, onRenamed }) {
     if (e.key === 'Escape') cancelEditing()
   }
 
+  const handleReparse = async () => {
+    setReparsing(true)
+    try {
+      const res = await reparseResume(resume.profile_id)
+      if (res?.data?.parsed_summary) {
+        onReparsed(resume.profile_id, res.data.parsed_summary)
+        toast.success('Resume re-parsed successfully.')
+      } else {
+        toast.error('Re-parse returned no data.')
+      }
+    } catch {
+      toast.error('Re-parse failed. Please try again.')
+    } finally {
+      setReparsing(false)
+    }
+  }
+
   const { parsed_summary: ps } = resume
+  const edu = filterEducation(ps?.education)
+  const exp = filterExperience(ps?.experience)
 
   return (
     <div className="glass p-5 transition-all duration-200"
@@ -166,8 +194,8 @@ function ResumeCard({ resume, onActivate, onRenamed }) {
             </p>
             <div className="flex gap-4 mt-2 text-xs text-muted">
               <span><strong className="text-white/70">{ps?.skills_count || 0}</strong> skills</span>
-              <span><strong className="text-white/70">{ps?.experience_count || 0}</strong> experience</span>
-              <span><strong className="text-white/70">{ps?.education_count || 0}</strong> education</span>
+              <span><strong className="text-white/70">{exp.length}</strong> experience</span>
+              <span><strong className="text-white/70">{edu.length}</strong> education</span>
               <span><strong className="text-white/70">{ps?.projects_count || 0}</strong> projects</span>
             </div>
           </div>
@@ -182,6 +210,19 @@ function ResumeCard({ resume, onActivate, onRenamed }) {
               style={{ background: 'rgba(124,58,237,0.15)', color: '#7c3aed', border: '1px solid rgba(124,58,237,0.3)' }}
             >
               <Star size={12} /> {activating ? 'Activating…' : 'Set Active'}
+            </button>
+          )}
+          {!editing && (edu.length === 0 && exp.length === 0) && (
+            <button
+              onClick={handleReparse}
+              disabled={reparsing}
+              aria-label="Re-parse resume"
+              title="Re-parse to extract missing data"
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-all duration-200"
+              style={{ background: 'rgba(6,182,212,0.12)', color: '#06b6d4', border: '1px solid rgba(6,182,212,0.25)' }}
+            >
+              <RefreshCw size={12} className={reparsing ? 'animate-spin' : ''} />
+              {reparsing ? 'Re-parsing…' : 'Re-parse'}
             </button>
           )}
           {!editing && (
@@ -220,10 +261,10 @@ function ResumeCard({ resume, onActivate, onRenamed }) {
             </div>
           )}
 
-          {ps?.education?.length > 0 && (
+          {edu.length > 0 && (
             <div>
               <p className="text-xs text-muted uppercase tracking-widest mb-1">Education</p>
-              {ps.education.slice(0, 3).map((e, i) => (
+              {edu.slice(0, 3).map((e, i) => (
                 <p key={i} className="text-sm text-white/80">
                   {e.degree}{e.institution ? ` — ${e.institution}` : ''}{e.year ? ` (${e.year})` : ''}
                 </p>
@@ -231,10 +272,10 @@ function ResumeCard({ resume, onActivate, onRenamed }) {
             </div>
           )}
 
-          {ps?.experience?.length > 0 && (
+          {exp.length > 0 && (
             <div>
               <p className="text-xs text-muted uppercase tracking-widest mb-1">Experience</p>
-              {ps.experience.slice(0, 3).map((ex, i) => (
+              {exp.slice(0, 3).map((ex, i) => (
                 <p key={i} className="text-sm text-white/80">
                   {ex.role}{ex.company ? ` @ ${ex.company}` : ''}{ex.duration ? ` · ${ex.duration}` : ''}
                 </p>
@@ -247,7 +288,7 @@ function ResumeCard({ resume, onActivate, onRenamed }) {
   )
 }
 
-export default function ResumesSection({ resumes, onActivated, onUploaded, onRenamed }) {
+export default function ResumesSection({ resumes, onActivated, onUploaded, onRenamed, onReparsed }) {
   const fileInputRef = useRef(null)
   const [uploading, setUploading] = useState(false)
 
@@ -309,6 +350,7 @@ export default function ResumesSection({ resumes, onActivated, onUploaded, onRen
               resume={r}
               onActivate={onActivated}
               onRenamed={onRenamed}
+              onReparsed={onReparsed}
             />
           ))}
         </div>

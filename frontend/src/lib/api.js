@@ -487,6 +487,12 @@ export async function renameResume(profileId, label) {
   return data
 }
 
+/** POST /api/v1/context-hub/resumes/:profileId/reparse */
+export async function reparseResume(profileId) {
+  const { data } = await api.post(`/context-hub/resumes/${profileId}/reparse`)
+  return data
+}
+
 // ── Portfolio ──────────────────────────────────────────────────────────────
 
 /** GET /api/v1/portfolio/files */

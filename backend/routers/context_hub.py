@@ -14,12 +14,13 @@ GET  /api/v1/context-hub/resumes                     — list resume versions
 PATCH /api/v1/context-hub/resumes/{profile_id}/activate — set active resume
 PATCH /api/v1/context-hub/resumes/{profile_id}/rename   — rename resume label
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 
 from auth import get_current_user
+from services.parser import parse_resume_with_groq
 from services.db_service import (
     get_hub_reports,
     get_hub_reports_paginated,
@@ -35,6 +36,8 @@ from services.db_service import (
     get_resume_versions,
     activate_resume,
     rename_resume,
+    get_resume_raw_text,
+    update_resume_parsed_data,
     get_user_checklists,
     update_checklist_item,
 )
@@ -357,6 +360,48 @@ async def rename_resume_endpoint(
         return _err("Database unavailable", status=503)
     except Exception as e:
         return _err(str(e), status=500)
+
+
+@router.post("/resumes/{profile_id}/reparse")
+async def reparse_resume_endpoint(
+    profile_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Re-run the resume parser on the stored raw_text and update parsed_data.
+    Returns the new parsed_summary so the frontend can update in-place.
+    """
+    raw_text = get_resume_raw_text(profile_id, user["user_id"])
+    if raw_text is None:
+        return _err("Profile not found or access denied.", status=404)
+    if not raw_text.strip():
+        return _err("No raw text stored for this resume — please re-upload.", status=422)
+    try:
+        parsed = parse_resume_with_groq(raw_text)
+    except RuntimeError as e:
+        return _err(f"Re-parse failed: {str(e)}", status=502)
+    except Exception as e:
+        return _err(str(e), status=500)
+
+    ok = update_resume_parsed_data(profile_id, user["user_id"], parsed)
+    if not ok:
+        return _err("Failed to save updated parsed data.", status=500)
+
+    # Return the same parsed_summary shape as get_resume_versions so the
+    # frontend can update the card in-place without a full list refetch.
+    return _ok({
+        "profile_id": profile_id,
+        "parsed_summary": {
+            "name":             parsed.get("name", ""),
+            "skills":           parsed.get("skills", []),
+            "skills_count":     len(parsed.get("skills", [])),
+            "experience_count": len(parsed.get("experience", [])),
+            "education_count":  len(parsed.get("education", [])),
+            "projects_count":   len(parsed.get("projects", [])),
+            "education":        parsed.get("education", []),
+            "experience":       parsed.get("experience", []),
+        },
+    })
 
 
 # ── Preparation Checklists ─────────────────────────────────────────────────────

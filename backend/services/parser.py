@@ -27,13 +27,15 @@ _SYSTEM_PROMPT = (
     '  "summary": "professional summary in 2-3 sentences",\n'
     '  "skills": ["skill1", "skill2"],\n'
     '  "technical_skills": { "languages": [], "frameworks": [], "tools": [], "databases": [] },\n'
-    '  "experience": [ { "company": "", "role": "", "duration": "", "points": [] } ],\n'
-    '  "education": [ { "degree": "", "institution": "", "year": "", "cgpa": "" } ],\n'
-    '  "projects": [ { "name": "", "description": "", "tech_stack": [], "points": [] } ],\n'
+    '  "experience": [ { "company": "Acme Corp", "role": "Software Engineer", "duration": "2021-2023", "points": ["built X"] } ],\n'
+    '  "education": [ { "degree": "B.Tech Computer Science", "institution": "IIT Delhi", "year": "2021", "cgpa": "8.5" } ],\n'
+    '  "projects": [ { "name": "MyProject", "description": "What it does", "tech_stack": ["React"], "points": [] } ],\n'
     '  "certifications": [],\n'
     '  "total_experience_years": 0\n'
     '}\n'
-    "If a field is missing, use null or empty array. Never fabricate information."
+    "IMPORTANT: Only include items in experience, education, and projects arrays if you actually found that data in the resume. "
+    "If a section is missing or empty, return an empty array [] — do NOT include placeholder objects with empty strings. "
+    "Never fabricate information."
 )
 
 _STRICT_SYSTEM_PROMPT = (
@@ -119,7 +121,7 @@ def parse_resume_with_groq(raw_text: str) -> dict:
         return response.choices[0].message.content
 
     # ── First attempt ──────────────────────────────────────────────────────
-    user_msg = f"Parse the following resume:\n\n{raw_text[:6000]}"
+    user_msg = f"Parse the following resume:\n\n{raw_text[:8000]}"
     raw_response = _call(_SYSTEM_PROMPT, user_msg)
     parsed = _safe_parse_json(raw_response)
 
@@ -127,7 +129,7 @@ def parse_resume_with_groq(raw_text: str) -> dict:
         return _normalise(parsed)
 
     # ── Retry with stricter prompt ─────────────────────────────────────────
-    strict_user = _STRICT_USER_TEMPLATE.format(raw_text=raw_text[:5000])
+    strict_user = _STRICT_USER_TEMPLATE.format(raw_text=raw_text[:6500])
     raw_response = _call(_STRICT_SYSTEM_PROMPT, strict_user)
     parsed = _safe_parse_json(raw_response)
 
@@ -143,7 +145,7 @@ def parse_resume_with_groq(raw_text: str) -> dict:
 def _normalise(data: dict) -> dict:
     """
     Ensure every expected key is present with a sensible default.
-    This prevents KeyErrors downstream.
+    Prunes template-placeholder objects (all-empty-string items) from list fields.
     """
     defaults = {
         "name": None,
@@ -161,9 +163,25 @@ def _normalise(data: dict) -> dict:
     for key, default in defaults.items():
         if key not in data or data[key] is None:
             data[key] = default
+
     # Ensure technical_skills sub-keys exist
     ts = data.get("technical_skills", {}) or {}
     for sub in ("languages", "frameworks", "tools", "databases"):
         ts.setdefault(sub, [])
     data["technical_skills"] = ts
+
+    # Prune placeholder objects the LLM copies from the prompt template
+    data["education"] = [
+        e for e in (data.get("education") or [])
+        if isinstance(e, dict) and (e.get("degree") or e.get("institution") or e.get("year"))
+    ]
+    data["experience"] = [
+        ex for ex in (data.get("experience") or [])
+        if isinstance(ex, dict) and (ex.get("role") or ex.get("company") or ex.get("duration"))
+    ]
+    data["projects"] = [
+        p for p in (data.get("projects") or [])
+        if isinstance(p, dict) and p.get("name")
+    ]
+
     return data

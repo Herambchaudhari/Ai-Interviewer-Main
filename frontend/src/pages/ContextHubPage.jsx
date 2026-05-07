@@ -117,6 +117,21 @@ export default function ContextHubPage() {
     })
   }
 
+  const handleResumeReparsed = (profileId, newParsedSummary) => {
+    setTabData(prev => {
+      const prevResumes = prev.resumes?.resumes || []
+      return {
+        ...prev,
+        resumes: {
+          ...prev.resumes,
+          resumes: prevResumes.map(r =>
+            r.profile_id === profileId ? { ...r, parsed_summary: newParsedSummary } : r
+          ),
+        },
+      }
+    })
+  }
+
   const handleApplicationsChanged = () => fetchTab('applications')
 
   const activeColor = TABS.find(t => t.id === activeTab)?.color || '#7c3aed'
@@ -183,6 +198,7 @@ export default function ContextHubPage() {
                 onActivated={handleResumeActivated}
                 onUploaded={() => fetchTab('resumes')}
                 onRenamed={handleResumeRenamed}
+                onReparsed={handleResumeReparsed}
               />
             )}
             {activeTab === 'topics' && (

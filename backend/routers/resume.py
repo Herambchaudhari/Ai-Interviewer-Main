@@ -92,6 +92,7 @@ async def upload_resume(
                 user_id=user["user_id"],
                 raw_text=raw_text,
                 parsed_data=parsed,
+                file_name=filename,
             )
         except RuntimeError:
             # Supabase not configured — still return parsed data with a temp ID

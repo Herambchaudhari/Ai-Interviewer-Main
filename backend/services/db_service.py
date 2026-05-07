@@ -146,7 +146,7 @@ def _db() -> Client:
 
 
 # ── Profiles ──────────────────────────────────────────────────────────────────
-def save_profile(user_id: str, raw_text: str, parsed_data: dict) -> str:
+def save_profile(user_id: str, raw_text: str, parsed_data: dict, file_name: str = "") -> str:
     """
     Insert a new row into the 'profiles' table.
     Returns the generated profile_id (UUID string).
@@ -156,7 +156,8 @@ def save_profile(user_id: str, raw_text: str, parsed_data: dict) -> str:
         "id": profile_id,
         "user_id": user_id,
         "raw_text": raw_text,
-        "parsed_data": parsed_data,          # supabase-py serialises dict → jsonb
+        "parsed_data": parsed_data,
+        "file_name": file_name,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }).execute()
     return profile_id
@@ -1432,6 +1433,42 @@ def rename_resume(profile_id: str, user_id: str, new_label: str) -> bool:
     except Exception as e:
         print(f"[rename_resume] error: {e}")
         return False
+
+
+def get_resume_raw_text(profile_id: str, user_id: str) -> str | None:
+    """Fetch stored raw_text for a resume owned by user. Returns None if not found."""
+    try:
+        res = (
+            _db().table("profiles")
+            .select("raw_text")
+            .eq("id", profile_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            return res.data[0].get("raw_text")
+        return None
+    except Exception as e:
+        print(f"[get_resume_raw_text] error: {e}")
+        return None
+
+
+def update_resume_parsed_data(profile_id: str, user_id: str, parsed_data: dict) -> bool:
+    """Overwrite parsed_data for a resume. Returns True on success."""
+    try:
+        res = (
+            _db().table("profiles")
+            .update({"parsed_data": parsed_data})
+            .eq("id", profile_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as e:
+        print(f"[update_resume_parsed_data] error: {e}")
+        return False
+
 
 # ── Portfolio & Credentials ───────────────────────────────────────────────────
 
